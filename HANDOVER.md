@@ -433,7 +433,11 @@ Two things here were got wrong and are easy to get wrong again:
 1. **The quills were once drawn last, over everything**, which buried his ear and
    eye and made him a fan of sticks. Keep the dome between the spike roots and
    the face.
-2. **Spikes must clear the dome by a good margin.** The pale layer originally ran
+2. **All four legs are drawn before the body.** Drawing the near pair over it
+   painted them across his belly — "legs through his body". Only the part below
+   the belly should ever show; depth between the pairs comes from colour and a
+   2px difference in foot height, not from draw order.
+3. **Spikes must clear the dome by a good margin.** The pale layer originally ran
    from `drx*.52` out to `+9.5`, which lands *inside* the dome radius — so it
    read as texture on a smooth loaf, not as spines. Base radius plus length has
    to exceed `drx` by roughly a third of `drx` before the silhouette looks spiky
@@ -453,6 +457,33 @@ pushes a wider grass field with his nose, so you can see him rummaging.
 
 Curling is one parameter, `hog.curl`: it closes the spike arc from a back-only
 sweep to a full ring, rounds the dome, retracts the legs and fades the face out.
+
+### Leaves, and the one place depth is faked
+
+§1 says there is no perspective falloff, and that still holds **for the field**.
+Falling leaves are not in the field — they are between the lens and it, like the
+bokeh and the canopy, and they are the one thing that scales with distance.
+
+- **`fallLeaves` recede, they do not descend.** Each carries a `z` from 0 at the
+  lens to 1 in the far field; `flScale(z)` runs 1.7 down to 0.14. The shrinking
+  is what reads as falling — the camera is at grass level, so a leaf on its way
+  down is mostly going *away*. Screen-y travel is deliberately small: about 330px
+  of a 900px frame over ten seconds. They used to run top-to-bottom like rain,
+  which is wrong for this camera.
+- They are drawn **twice**, crossfading on `z` around 0.44: the near end on the
+  blurred foreground plate (`drawFallLeaves(fgx, 1)`) so it is genuinely out of
+  focus, the far end sharp in the main pass. That, not the size alone, is where
+  the sense of distance comes from.
+- **`kicked` leaves track height separately from world position.** `h` lifts them
+  up the frame *and* scales them up slightly (up is nearer the lens); gravity
+  returns them to the exact `wy` they came from, with one small bounce. Their
+  shadow stays on the litter. Before this they inherited a screen-space `vy` and
+  sailed off down the frame, which looked like they were falling out of the sky
+  rather than being kicked off the floor.
+
+Check both with `scratchpad/leaves.js`-style probes if you touch them: the scale
+range should span at least 4x, y travel should stay under about half the frame,
+and a kicked leaf should return to `h == 0` within two seconds.
 
 ### Things the game does not do
 
