@@ -445,11 +445,47 @@ as a giant grey eyeball and a set of ears that were not being drawn at all. Turn
 him up before judging anything.
 
 It holds a WORKING COPY of `drawHog()`. Iterate there, then port the finished
-function into `index.html`. Nothing in the game reads this file, and the two are
-**currently out of sync — the lab has the good hedgehog, the game has the old
-one.** Porting it is the next job.
+function into `index.html`. Nothing in the game reads this file. The two are
+**currently in sync** — keep them that way, and port in whole blocks rather than
+by hand.
 
-### The head rig (lab only so far)
+Two things about looking at it in a browser, both of which wasted a cycle:
+
+- **Cache-bust the URL.** Reloading `hog-lab.html` served the previous render and
+  I graded a stale page as if it were the change.
+- **Chrome throttles an unfocused tab.** `requestAnimationFrame` does not run
+  while an automated tool call has focus, so `await`ing a frame hangs outright
+  and screenshots repeat. Patch a counter onto `window.requestAnimationFrame`
+  and read it between calls to know whether anything actually advanced.
+
+### What he is made of, and the reference
+
+**`assets/logo/hedgepig-logo-badge.jpg` is the character.** Read it before
+touching his drawing. Two rounds of "rebuilt from a photo" went past it and both
+produced something that wasn't him. From the badge:
+
+- **Two masses, not three.** A **dark spiny mantle** over the back, and **ONE
+  cream mass that is face, chest and belly together**. There is no head.
+- **Give him a separate pale head and he reads as a seal in a wig.** That was
+  the actual fault: a cream sphere with a hard edge against the body, with the
+  quills sitting on top like a crest.
+- **The mantle must reach the ground at the rump.** The quill arc used to span
+  `-3.02 → -0.10` — the top only — so the bottom two-thirds of him was a bald
+  blob. It now runs `-4.25 → -0.12`; that lower sweep is the whole difference
+  between a mantle and a wig.
+- **The mantle is a path, not an ellipse:** an arc round the back and top,
+  closed by a *diagonal* front edge from the brow down behind the front leg. As
+  an ellipse its front edge bulged forward across the middle of him and read as
+  a beetle's shell.
+- **Dark brown, mostly.** ~90 fine dark needles with only ~18 pale tips. Fat
+  cream triangles read as petals; he looked like a chrysanthemum.
+- Needles **rake** toward the rump. Dead-radial is a sunburst.
+- The **muzzle is pale**, only the nose is dark. A grey muzzle is a foreign
+  object on a cream face. `SNOUT_R` past about 1.25 and he is an anteater.
+- The **cheek blush** is a surprising amount of the charm. Place it off the
+  **eye**, not off the head, or it lands on the snout as a smear.
+
+### The head rig
 
 His features sit on a head sphere rather than painted flat on a profile. `az`
 runs round the vertical axis: 0 along the snout, +90° straight at the camera.
@@ -458,32 +494,82 @@ head — the snout swings round and foreshortens, the far eye comes past it,
 whiskers fan, the mouth narrows. The body never moves. `updateLook()` drives it:
 he glances about, noses down to sniff, occasionally looks right at you.
 
-Three rules learned the hard way here:
+The cheek ellipse is filled with **the same gradient as the chest**, so there is
+no seam. It is also what cuts the round of his head out of the mantle.
+
+Rules learned the hard way here, all of them from things that shipped looking
+wrong:
 
 - **`faceVis` must start at z = 0.** It ramped from −0.10, which drew far-side
   features straight through his skull.
-- **Ears need a radius greater than 1.** On the head sphere they are always
-  inside its own outline, so they vanish entirely behind the face. And keep them
-  dark and plain — a bright inner reads as a second eye.
+- **An ear at azimuth near 90° projects onto the middle of his face**, beside
+  the eye — because `cos(90°) ≈ 0` puts it at the head's centre in profile. It
+  belongs at ~2.3 rad, the top-back.
+- **Ears are drawn AFTER the cheek fill.** Under it they were painted over;
+  pushed outside at `rr > 1` to escape that, they landed on the dark mantle and
+  were dark-on-dark. Either way there were simply no ears, twice.
+- **An ear must be an angled oval half-buried in the mantle.** Round and out on
+  the cream it reads as a second eye next to the real one.
 - **Quill arcs must stop at or below angle 0.** Past that they point
   down-and-forward and rake across his face.
+- **Never alpha-fade cream over dark brown.** Fading the face out on `1-c` as he
+  curled left a translucent grey **ghost of a face** lying over the spines for
+  the whole middle of the curl. He stays opaque and is *retracted* instead —
+  scaling the head group about the body origin pulls it back and up into the
+  ball, which is what he actually does.
+- **Ears flick, they do not bob.** A constant `sin(t*6.5)*.7` on the ear's y was
+  a 3px ear sliding up and down for ever. It is the first thing you notice. A
+  flick is fast, occasional, and a **rotation**.
+- **A nose does not slide about on a muzzle that never moves** — that reads as a
+  twitching speck. The sniff is a **train of discrete pulses**
+  (`max(0,sin)²`, not a continuous buzz) fed into the head rig's pitch and yaw,
+  so snout, nose and whiskers all work as one piece. The nose itself only
+  **flares** on top of that: a wet nose working is a change of shape, not of
+  position.
+
+### The head spring
+
+`updateLook()` runs three springs, semi-implicit Euler, stable at the `dt=0.05`
+ceiling `tick()` clamps to. The point of a spring over a lerp is that **a lerp
+cannot overshoot**, and the settle is most of what separates "interpolated" from
+"alive". Gaze overshoots ~7% and settles in 0.8s.
+
+The caller sets two inputs and `updateLook` consumes both: `hog.turn` (radians
+the body rotated this frame) and `hog.acc` (px/s²). Both are set *after*
+`updateLook` runs, so they arrive one frame late, which is invisible.
+
+**The turn lag must be driven by turn RATE, not by adding the turn onto the
+yaw.** Added as a position, the spring reaches equilibrium carrying the entire
+restoring velocity, so when the turn stops the head whips **17–22° past** where
+it should settle — a wobble, not a lag. Measured, not guessed. As a rate-driven
+target it holds 22° behind through a full-speed turn and returns overshooting by
+about a degree.
+
+`hlag` is the same idea in translation: a mass on a spring inside an
+accelerating body, so his head sits back as he sets off and carries on forward
+as he pulls up. It is read twice — once as a shift, once as a nod.
 
 ### Still to do on the animation
 
-Nine of the ten planned improvements are outstanding. In rough order of payoff:
+In rough order of payoff:
 
 1. Turn instead of mirror-flip — `ctx.scale(dir*K, K)` snaps instantly; ease a
-   `face` value −1→+1 and squash through zero so he pivots.
+   `face` value −1→+1 and squash through zero so he pivots. **Still the biggest
+   one left.** Note `bodyAz = asin(cos(hd))` is the rig azimuth matching his
+   heading, if that helps: 0 in profile, ±π/2 straight at or away from the lens.
 2. Jointed legs with planted feet — currently straight stubs whose feet slide.
-3. Head on its own spring, lagging the body through turns. Probably the single
-   biggest one for making him read as alive.
-4. Anticipation and follow-through on setting off and arriving.
+3. *(done — the head spring, above)*
+4. Anticipation and follow-through on setting off and arriving. Partly there:
+   `hlag` gives the head a trail, but the body itself does not anticipate.
 5. Two gaits blended by speed, not one stride shape played faster.
 6. A ripple through the spines, nose to rump, per footfall.
-7. Ears that react — flick on footfall, prick when called, pin back when hurt.
+7. *(done — the ear flick, above. `hog.flick = 1` also fires from
+   `dropCrumb()`, so he pricks his ears when you call him. A footfall trigger
+   and a pin-back on a hit are still worth adding.)*
 8. *(done — superseded by the head rig above)*
 9. Idle variety — a scratch, a shake, sitting up, a yawn.
-10. A curl with weight — flinch, squash, bounce, wary unroll.
+10. A curl with weight — flinch, squash, bounce, wary unroll. The retraction is
+    in; the weight is not.
 
 ### Drawing and animating him
 

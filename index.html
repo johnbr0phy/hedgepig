@@ -1325,7 +1325,8 @@ const hog = {
   curl:0, shiver:0, breathT:0, blink:0, blinkT:2.4,
   dip:0, gait:0, arrive:0, puffT:0, trackT:0, foot:0,
   under:0, underT:0, underX:0, warned:0, sniff:0,
-  yaw:0, pitch:0, yawT:0, pitchT:0, lookT:0        // the head rig, below
+  yaw:0, pitch:0, yawT:0, pitchT:0, lookT:0,       // the head rig, below
+  yawV:0, pitchV:0, hlag:0, hlagV:0, lag:0, lagV:0, turn:0, acc:0, spdPrev:0, flick:0, earT:1.2
 };
 const hogK    = () => clamp(H/844, .85, 1.4) * 2.1;
 const hogSpd  = () => HOG_SPD0 * (1 + (GAME.leg - 1) * .06);
@@ -1349,22 +1350,26 @@ const hogY    = () => hog.wy - scrollY;
 // and hoods forward over a SMALL pale face tucked underneath it. The face is
 // cream, the short muzzle is dark, and the ears sit low at the sides of the
 // head near eye level — not up on top.
-const HEAD = { x:16, y:10, rx:9.8, ry:8.4 };
+const HEAD = { x:15.5, y:8, rx:9.6, ry:8.6 };
 
+/* Taken off assets/logo/hedgepig-logo-badge.jpg, which is the character.
+   Two masses only: a DARK spiny mantle over the back, and ONE cream mass
+   that is face, chest and belly together. The cream is not a head — give
+   him a pale sphere for a head and he reads as a seal in a wig. */
 const C = {
-  quillTip:  "#e9dcc0",   // cream tips — most of what you see
-  quillDark: "#4b3a29",   // the dark band below them
-  quillMid:  "#9d8a68",
-  domeHi:    "#c2ae8a",
-  domeLo:    "#6a5942",
-  face:      "#f0e8d8",   // pale cream, the strongest contrast on him
-  faceLo:    "#d3c5ab",
-  muzzle:    "#9b8b7c",   // grey-brown; the CONTRAST should come from the nose
-  nose:      "#241b19",
-  ear:       "#4e3d34",
-  earIn:     "#8d6f64",
-  belly:     "#8c7a63",
-  limb:      "#5a4a3c",
+  creamHi: "#f8f2e4",     // lit top of the cream mass
+  cream:   "#ecdfc8",
+  creamLo: "#d2bc9b",     // where the belly turns under
+  mantleHi:"#6f5238",     // the spiny mantle: dark warm brown
+  mantleLo:"#38281b",
+  quillDk: "#46331f",     // the needles. Mostly dark — the mass reads brown
+  quillLt: "#dccdae",     // and only a minority are tipped pale
+  muzzle:  "#e7d4b5",     // pale, barely warmer than the face
+  nose:    "#241b19",     // the only dark thing on his face
+  blush:   "rgba(224,146,134,.30)",
+  ear:     "#4a3628",
+  limb:    "#bda07c",     // short pale legs, as the underside is pale
+  paw:     "#8b6e50",
 };
 
 function facePt(az, el, yaw, pitch, rr){
@@ -1380,13 +1385,34 @@ function facePt(az, el, yaw, pitch, rr){
 // that reaches into negative z draws it straight through his skull.
 const faceVis = z => clamp(z/.26, 0, 1);
 
-const AZ_EYE = 1.10, EL_EYE = .44;      // above and behind the muzzle, on the cream
+const AZ_EYE = 1.30, EL_EYE = .52;      // well above and behind the muzzle, on the cream
 const RR_EYE = .80;
-const AZ_EAR = 2.35, EL_EAR = .52;      // back of the head; drawn behind the face
-const RR_EAR = 1.30;                    // OUTSIDE the head, or the face hides them entirely
-const SNOUT_R = 1.48;                   // long enough to read as a snout, not a disc
+const AZ_EAR = 2.32, EL_EAR = .72;      // top-BACK of the head. Near 90° it projects
+                                        // onto the middle of his face beside the eye.
+const RR_EAR = 1.00;                    // ON the head: the ears are drawn AFTER the cheek fill
+const SNOUT_R = 1.12;                   // SHORT. Past about 1.25 he reads as an anteater.
 
-// He looks about and sniffs of his own accord.
+/* ── the head on its own spring ─────────────────────────────────────────
+   The head is not welded to the body. It has mass, so it lags a turn, and
+   it overshoots on the way back. That last part is the whole point: an
+   exponential lerp cannot overshoot, and the difference between "smoothly
+   interpolated" and "alive" is almost entirely the settle.
+
+   Two springs and one trailing mass:
+     yaw   — where he is looking, round the vertical axis
+     pitch — nose up or down
+     hlag  — how far the head sits behind or ahead of where the body has
+             got to, in hog-local px along his snout
+
+   The caller sets two inputs before calling, and updateLook consumes both:
+     h.turn — radians the BODY rotated this frame
+     h.acc  — change in his speed, px/s²
+   ────────────────────────────────────────────────────────────────────── */
+const HEAD_K = 78, HEAD_D = 11;    // ~1.4Hz, damping ratio .62 — a visible settle
+const PITCH_K = 54, PITCH_D = 10;
+const LAG_S = .088, LG_K = 90, LG_D = 12;   // turn lag: 22° behind at full turn rate
+const HL_K = 120, HL_D = 13, HL_F = .14;
+
 function updateLook(h, dt){
   h.lookT -= dt;
   if (h.lookT <= 0){
@@ -1398,8 +1424,41 @@ function updateLook(h, dt){
     h.pitchT = h.dip > .5 ? lerp(-.44, -.10, Math.random()) // nose in the grass
                           : lerp(-.22,  .40, Math.random());
   }
-  h.yaw   = lerp(h.yaw,   h.yawT,   1 - Math.exp(-4.5*dt));
-  h.pitch = lerp(h.pitch, h.pitchT, 1 - Math.exp(-3.8*dt));
+
+  /* The body swings under the head and the head holds its bearing, so a body
+     turn shows up as the OPPOSITE turn in his head's body-relative yaw. The
+     dir term is because his rig azimuth is measured camera-ward, not
+     screen-ward: turning toward the lens is a falling heading when he faces
+     right and a rising one when he faces left.
+
+     The lag is its own spring, and it is driven by the turn RATE rather than
+     by adding the turn straight onto the yaw. Added as a position the spring
+     ends a sustained turn carrying the whole restoring velocity, and the head
+     whipped 17-22° PAST where it should have stopped — a wobble, not a settle.
+     Driven as a rate target it holds 22° behind through the turn and comes
+     back overshooting by about a degree. */
+  const rate = (h.turn || 0) / Math.max(dt, 1/240);
+  h.turn = 0;
+  const lagT = clamp(h.dir * rate * LAG_S, -.62, .62);
+  h.lagV += (LG_K*(lagT - h.lag) - LG_D*h.lagV) * dt;
+  h.lag  += h.lagV * dt;
+
+  // the ears flick: occasional and fast. Anything else can poke h.flick to 1
+  // (being called, taking a hit) and it will read as the ear reacting.
+  h.earT -= dt;
+  if (h.earT <= 0){ h.earT = lerp(1.4, 4.5, Math.random()); h.flick = 1; }
+  h.flick = Math.max(0, h.flick - dt*6.5);
+
+  h.yawV   += (HEAD_K *(h.yawT   - h.yaw)   - HEAD_D *h.yawV)   * dt;
+  h.yaw    += h.yawV * dt;
+  h.pitchV += (PITCH_K*(h.pitchT - h.pitch) - PITCH_D*h.pitchV) * dt;
+  h.pitch  += h.pitchV * dt;
+
+  // A mass on a spring inside an accelerating body: it falls behind as he
+  // sets off and carries on forward as he pulls up.
+  h.hlagV += (-(h.acc || 0)*HL_F - HL_K*h.hlag - HL_D*h.hlagV) * dt;
+  h.hlag   = clamp(h.hlag + h.hlagV*dt, -4, 4);
+  h.acc = 0;
 }
 
 function sparkle(x, y, col){
@@ -1443,6 +1502,7 @@ const CRUMB_MAX = 30;
 function dropCrumb(px, py){
   crumbs.length = 0;
   crumbs.push({ x:px, wy:py + scrollY, t:0, eaten:0 });
+  hog.flick = 1;                      // he pricks his ears when you call him
 }
 
 function updateCrumbs(dt){
@@ -1878,7 +1938,9 @@ function updateGame(dt){
       moving = 1;
       const want = Math.atan2(dx, dy);                // full circle, not just downhill
       const turn = HOG_TURN * (1 - snowCover*.35) * dt;
-      hog.hd += clamp(wrapAng(want - hog.hd), -turn, turn);
+      const swing = clamp(wrapAng(want - hog.hd), -turn, turn);
+      hog.hd  += swing;
+      hog.turn += swing;                              // what his head has to resist
     }
   }
 
@@ -1887,6 +1949,10 @@ function updateGame(dt){
   hog.arrive = Math.max(0, hog.arrive - dt*1.6);
 
   const spd  = hogSpd() * hog.gait * (1 - hog.curl*.94) * (afloat ? .78 : 1) * (1 - snowCover*.16);
+  // ── the other input to the head spring. Set here, consumed by updateLook on
+  //    the next frame — spd is not known until after gait has eased.
+  hog.acc = (spd - hog.spdPrev) / dt;
+  hog.spdPrev = spd;
   const step = Math.min(spd*dt, moving ? gap : spd*dt);   // never overshoot the target
   hog.x  += Math.sin(hog.hd) * step;
   hog.wy += Math.cos(hog.hd) * step;
@@ -2019,14 +2085,31 @@ function drawHog(){
   const sqz   = 1 + Math.sin(p*2 + 1.3)*.055*g;      // squash and stretch
   const shiv  = hog.shiver * (Math.sin(time*34)*1.5 + Math.sin(time*23.3)*.9);
 
-  // ── the snuffle: nose down, quick twitchy sniffing, head swaying about
-  const sniff   = Math.sin(time*21) + Math.sin(time*31.7)*.55 + Math.sin(time*13.3)*.35;
-  const noseTw  = (.45 + d*2.2) * sniff + hog.shiver*Math.sin(time*30)*1.2;
-  const noseUp  = (.3 + d*1.1) * Math.sin(time*17.5);
+  /* ── the snuffle ──────────────────────────────────────────────────────
+     A hedgehog sniffing is not a jittering dot. It is a TRAIN OF DISCRETE
+     SNIFFS, and the whole muzzle moves on each one — snout, nose, whiskers
+     together — because they are all one piece of him.
+
+     `sniff` is that train: squaring a half-rectified sine gives separate
+     pulses with a rest between, rather than a continuous buzz. It is fed
+     into the head rig's pitch and yaw further down, so the muzzle works and
+     the nose only flares on top of it. Sliding the nose across a muzzle
+     that never moved was what read as a twitching speck. */
+  const sniffR  = 6.5 + d*4.5;                                  // sniffs/sec
+  const sniff   = Math.pow(Math.max(0, Math.sin(time*sniffR)), 2);  // 0..1, in pulses
+  const jitter  = Math.sin(time*27)*.5 + Math.sin(time*41)*.3;         // fine tremor on top
+  const noseTw  = (.10 + d*.35) * jitter + hog.shiver*Math.sin(time*30)*.5;
   const headDip = d*4.6;
   const headSw  = d*Math.sin(time*1.7)*2.4;
-  const ear     = Math.sin(time*6.5)*.7 + d*Math.sin(time*11)*1.6 + hog.shiver*Math.sin(time*26)*1.1;
   const eyeH    = 1 - hog.blink*.92;
+
+  /* ── the ears ─────────────────────────────────────────────────────────
+     They FLICK. They do not bob: a constant sine on the ear's y was a 3px
+     ear sliding up and down for ever, which is the first thing you notice
+     and the last thing an ear does. A flick is fast, occasional, and it is
+     a ROTATION — so it is applied as one, not as a translation. */
+  const earTilt = hog.flick*.55 + c*-.45 + (hog.gait > .5 ? -.12 : 0);
+  const earSq   = 1 - hog.flick*.22;
 
   ctx.save();
   ctx.translate(hog.x + shiv, sy);
@@ -2076,93 +2159,147 @@ function drawHog(){
   function leg(x0, ph, base){
     if (legUp < .05 || afloat) return;
     const sw = Math.max(0, Math.sin(ph));
-    const fx = x0 + Math.cos(ph)*3.8*g;
-    const fy = (base - sw*3.2*g) * legUp;
-    ctx.strokeStyle = C.limb; ctx.lineWidth = 5.2; ctx.lineCap = "round";
-    ctx.beginPath(); ctx.moveTo(x0, 12*legUp); ctx.lineTo(fx, fy - 1); ctx.stroke();
-    ctx.fillStyle = C.limb;
-    ctx.beginPath(); ctx.ellipse(fx + 1, fy, 4.0, 3.1, 0, 0, TAU); ctx.fill();
+    const fx = x0 + Math.cos(ph)*3.4*g;
+    const fy = (base - sw*3.0*g) * legUp;
+    ctx.strokeStyle = C.limb; ctx.lineWidth = 4.6; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(x0, 13*legUp); ctx.lineTo(fx, fy - 1); ctx.stroke();
+    ctx.fillStyle = C.paw;
+    ctx.beginPath(); ctx.ellipse(fx + .8, fy, 3.0, 2.4, 0, 0, TAU); ctx.fill();
   }
-  leg(-12, p + Math.PI, 20.5);                 // far back
-  leg(  9, p,           20.5);                 // far front
-  leg( -7, p,           22.0);                 // near back, 1.5px lower
-  leg( 14, p + Math.PI, 22.0);                 // near front
+  leg(-12, p + Math.PI, 20.5);              // far back
+  leg(  9, p,           20.5);              // far front
+  leg( -7, p,           22.0);              // near back, 1.5px lower
+  leg( 14, p + Math.PI, 22.0);              // near front
 
-  // ── the pale underside, showing between the dome and the ground
-  ctx.fillStyle = C.belly;
-  ctx.beginPath(); ctx.ellipse(-1, 10, 24, 8.5 * sqz, 0, 0, TAU); ctx.fill();
+  /* ── the cream mass ───────────────────────────────────────────────────
+     Face, chest and belly in ONE shape. There is deliberately no separate
+     pale head: in the reference the cream of his face runs straight down
+     into his chest, and the mantle is laid over the top of it. A pale
+     sphere for a head is what made him read as a seal. The head rig below
+     only uses HEAD as a coordinate frame for the features. */
+  const bgc = ctx.createLinearGradient(0, -15, 0, 21);
+  bgc.addColorStop(0,   C.creamHi);
+  bgc.addColorStop(.60, C.cream);
+  bgc.addColorStop(1,   C.creamLo);
+  ctx.fillStyle = bgc;
+  ctx.beginPath(); ctx.ellipse(1.5, 5.5, 24.5, 14*sqz, -.03, 0, TAU); ctx.fill();
 
-  /* ── the spine dome ───────────────────────────────────────────────────
-     Most of the animal, and it hoods FORWARD over the head. Four passes:
-     a dark under-layer that makes the silhouette prickly, the dome itself,
-     a dense speckle of banded ticks, then cream tips round the rim. Short
-     and dense, not long spikes — at this size the banding is what reads. */
-  const a0 = lerp(-3.02, -Math.PI - .5, c);
-  const a1 = lerp(-0.10,  Math.PI - .2, c);        // stops above the face, never across it
-  const mx = -3*(1-c), my = -2.5*(1-c);
-  const drx = lerp(29.5, 21, c), dry = lerp(17, 21, c);
+  /* ── the spiny mantle ─────────────────────────────────────────────────
+     The mass that IS his back. It runs from over his brow, round the top,
+     and all the way DOWN to the ground at the rump — that lower sweep is
+     the whole difference between a mantle and a wig. It is dark brown;
+     only a minority of needles are tipped pale. Four passes: dark needles
+     for the silhouette, the mantle fill, fine streaks for texture, then
+     the pale tips. */
+  const a0 = lerp(-4.25, -4.95, c);      // sweeping down round the rump
+  const a1 = lerp(-0.12,  1.33, c);      // right over the brow, never across it
+  const mx = -4*(1-c), my = -4*(1-c);
+  const drx = lerp(23, 21.5, c), dry = lerp(17.5, 21.5, c);
 
-  function quill(ang, rx, ry, len, wid, col){
+  // Needles rake toward his rump rather than radiating dead straight, which
+  // is the difference between a hedgehog and a sunburst.
+  function quill(ang, rx, ry, len, wid, col, rake){
+    const ta = ang + (rake || 0);
     const bx = mx + Math.cos(ang)*rx,  by = my + Math.sin(ang)*ry;
-    const tx = mx + Math.cos(ang)*(rx+len), ty = my + Math.sin(ang)*(ry+len)*.94;
+    const tx = mx + Math.cos(ta)*(rx+len), ty = my + Math.sin(ta)*(ry+len)*.94;
     const nx = -Math.sin(ang)*wid, ny = Math.cos(ang)*wid;
     ctx.fillStyle = col;
     ctx.beginPath();
     ctx.moveTo(bx + nx, by + ny); ctx.lineTo(tx, ty); ctx.lineTo(bx - nx, by - ny);
     ctx.closePath(); ctx.fill();
   }
+  // u = 0 at the rump, 1 at the brow. The rump needles are the longest, as
+  // they are on a real hedgehog and in the badge.
+  const qlen = u => lerp(11.6, 6.8, u*u);
+  const RAKE = -.16 * (1 - c);
 
-  // 1. dark under-layer, just proud of the dome
-  for (let i=0;i<30;i++){
-    const wob = Math.sin(p*2 + i*.55)*.035*g;      // the mass jiggles as he trots
-    quill(lerp(a0, a1, i/29) + wob, drx*.99, dry*.99,
-          (8.5 + Math.sin(i*1.9)*2.6) * (1 - c*.35), 3.0 + c*.9, C.quillDark);
+  // 1. dark needles, fine and dense — this pass is the silhouette
+  for (let i=0;i<92;i++){
+    const u = i/91, wob = Math.sin(p*2 + i*.55)*.035*g;
+    quill(lerp(a0, a1, u) + wob, drx*.97, dry*.97,
+          (qlen(u) + Math.sin(i*1.9)*1.9) * (1 + c*.18), 1.25 + c*.7, C.quillDk, RAKE);
   }
 
-  // 2. the dome
+  /* 2. the mantle itself. NOT an ellipse: an arc round the back and top,
+        closed by a diagonal front edge running from the brow down and back
+        to behind his front leg. Drawn as an ellipse it bulged forward in a
+        convex arc across the middle of him and read as a beetle's shell. */
+  const bx0 = mx + Math.cos(a1)*drx*.98, by0 = my + Math.sin(a1)*dry*.98;   // brow
+  const rx0 = mx + Math.cos(a0)*drx*.98, ry0 = my + Math.sin(a0)*dry*.98;   // rump
   const dg = ctx.createLinearGradient(0, my - dry, 0, my + dry);
-  dg.addColorStop(0,   C.domeHi);
-  dg.addColorStop(.62, C.quillMid);
-  dg.addColorStop(1,   C.domeLo);
+  dg.addColorStop(0,   C.mantleHi);
+  dg.addColorStop(1,   C.mantleLo);
   ctx.fillStyle = dg;
-  ctx.beginPath(); ctx.ellipse(mx, my, drx*.97, dry*.97, 0, 0, TAU); ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(mx, my, drx*.98, dry*.98, 0, a1, a0, true);
+  ctx.quadraticCurveTo((bx0 + rx0)/2 + 9, (by0 + ry0)/2 + 5, bx0, by0);
+  ctx.closePath(); ctx.fill();
 
-  // 3. banded speckle — this is the texture that makes him read as a hedgehog
-  for (let i=0;i<52;i++){
-    const t2 = i/51;
-    const ang = lerp(a0 + .06, a1 - .06, t2) + Math.sin(p*2 + i*.9)*.045*g;
-    const band = i % 3;
-    const r0 = .30 + (i%5)*.10, r1 = r0 + .34;
-    ctx.strokeStyle = band === 0 ? C.quillTip : (band === 1 ? C.quillDark : C.quillMid);
-    ctx.lineWidth = band === 0 ? 2.6 : 2.0;
-    ctx.lineCap = "round";
+  // 3. fine streaks inside it, running out to the rim so they read as
+  //    needles lying along the mantle and not as marks painted on a dome
+  for (let i=0;i<44;i++){
+    const u = i/43;
+    const ang = lerp(a0 + .05, a1 - .05, u) + Math.sin(p*2 + i*.9)*.045*g;
+    const r0 = .42 + (i%4)*.11;
+    ctx.strokeStyle = i%3 ? C.quillDk : C.quillLt;
+    ctx.globalAlpha = a * (i%3 ? .30 : .12);
+    ctx.lineWidth = 1.1; ctx.lineCap = "round";
     ctx.beginPath();
-    ctx.moveTo(mx + Math.cos(ang)*drx*r0, my + Math.sin(ang)*dry*r0);
-    ctx.lineTo(mx + Math.cos(ang)*drx*r1, my + Math.sin(ang)*dry*r1);
+    ctx.moveTo(mx + Math.cos(ang)*drx*r0,  my + Math.sin(ang)*dry*r0);
+    ctx.lineTo(mx + Math.cos(ang)*drx*.99, my + Math.sin(ang)*dry*.99);
     ctx.stroke();
   }
+  ctx.globalAlpha = a;
 
-  // 4. cream tips round the rim
-  for (let i=0;i<30;i++){
-    const wob = Math.sin(p*2 + i*.62)*.04*g;
-    quill(lerp(a0 + .04, a1 - .04, i/29) + wob + .03, drx*.90, dry*.90,
-          (6.5 + Math.sin(i*2.6)*2.2) * (1 - c*.30), 2.5 + c*.8, i%4 ? C.quillTip : C.quillMid);
+  // 4. the pale tips — every third needle only, so the mass stays brown
+  for (let i=0;i<18;i++){
+    const u = i/17, wob = Math.sin(p*2 + i*.62)*.04*g;
+    quill(lerp(a0 + .06, a1 - .06, u) + wob, drx*.99, dry*.99,
+          (qlen(u)*.62 + Math.sin(i*2.6)*1.2) * (1 + c*.18), 1.1, C.quillLt, RAKE);
   }
 
-  // ── his face, in front of the quills so nothing important is buried
-  const fa = 1 - c;
+  // He pulls his head IN as he curls, and it is gone well before the ball has
+  // closed. Fading cream over dark brown only gives grey, and fading on 1-c
+  // left a translucent grey ghost of a face lying over the spines for the whole
+  // middle of the curl. So he stays opaque and is pulled in to nothing; the
+  // alpha only catches the last of it.
+  const fa = clamp((1 - c*1.85)*1.7, 0, 1);
   if (fa > .02){
     ctx.globalAlpha = a * fa;
 
-    const sniffP = d * Math.sin(time*9.5)*.055 + hog.shiver*Math.sin(time*26)*.03;
-    const yaw   = hog.yaw + d*Math.sin(time*1.3)*.16;
-    const hEl   = hog.pitch + sniffP + headDip*.012;
+    // Every sniff tips the whole muzzle up and swings it a little, so snout,
+    // nose and whiskers work as one piece. This is the snuffle; the nose's own
+    // flare below is only the top note on it.
+    const sniffP = sniff * (.055 + d*.115) + jitter*(.008 + d*.020)
+                 + hog.shiver*Math.sin(time*26)*.03;
+    const sniffY = Math.sin(time*sniffR*.5) * (.03 + d*.075);
+    const yaw   = hog.yaw + hog.lag + sniffY + d*Math.sin(time*1.3)*.16;
+    // the trailing head also noses down as it is thrown forward, and lifts as
+    // it is left behind — one spring, read twice
+    const hEl   = hog.pitch + sniffP + headDip*.012 - hog.hlag*.030;
     const cy2 = Math.cos(yaw), sy2 = Math.sin(yaw);
 
     ctx.save();
-    ctx.translate(headSw*.4, headDip*.5);
+    // hlag slides the face under the hood, so the dome stays put and only his
+    // head moves — which is what a small face under a big spine mass does
+    ctx.translate(headSw*.4 + hog.hlag, headDip*.5 + Math.abs(hog.hlag)*.18);
+    // retracting the head: scaling about the body origin draws it back and up
+    // into the ball, which is what he actually does. Never let this reach 0.
+    if (c > .005) ctx.scale(1 - c*.85, 1 - c*.85);
 
-    // ── both ears, behind the face
+    // ── the cheek. Filled with the SAME gradient as the chest, so there is
+    //    no seam and no separate head — it only guarantees cream under the
+    //    features when he pitches his head about, and it is what cuts the
+    //    round of his head out of the mantle.
+    ctx.fillStyle = bgc;
+    ctx.beginPath();
+    ctx.ellipse(HEAD.x + sy2*1.4, HEAD.y - 1, HEAD.rx*(1 + Math.abs(sy2)*.10), HEAD.ry*.96,
+                -.04, 0, TAU);
+    ctx.fill();
+
+    // ── the ears, ON the cream and drawn AFTER the cheek fill. Under it they
+    //    were painted over, and out at rr > 1 they landed on the mantle and
+    //    were dark on dark — either way they were simply not there.
     for (const side of [-1, 1]){
       const e2 = facePt(side*AZ_EAR, EL_EAR, yaw, hEl, RR_EAR);
       const v2 = faceVis(e2.z) * (side < 0 ? .8 : 1);
@@ -2170,70 +2307,76 @@ function drawHog(){
       const sc = .82 + .18*Math.max(0, e2.z);
       ctx.globalAlpha = a * fa * v2;
       // kept dark and plain: a bright inner here reads as a second eye
-      ctx.fillStyle = side < 0 ? "#3a2d26" : C.ear;
-      ctx.beginPath(); ctx.ellipse(e2.x, e2.y + ear, 3.5*sc, 3.9*sc, .12, 0, TAU); ctx.fill();
+      ctx.fillStyle = side < 0 ? "#3a2a1e" : C.ear;
+      ctx.beginPath();
+      // an angled OVAL, half buried in the mantle. Drawn round and out on
+      // the cream it read as a second eye sitting beside the real one.
+      ctx.ellipse(e2.x, e2.y, 2.15*sc*earSq, 3.5*sc, -.34 + earTilt*side, 0, TAU);
+      ctx.fill();
     }
     ctx.globalAlpha = a * fa;
 
-    // ── the small pale face, tucked under the front of the dome
-    const hg = ctx.createLinearGradient(0, HEAD.y - HEAD.ry, 0, HEAD.y + HEAD.ry);
-    hg.addColorStop(0, C.face);
-    hg.addColorStop(1, C.faceLo);
-    ctx.fillStyle = hg;
-    ctx.beginPath();
-    ctx.ellipse(HEAD.x + sy2*1.4, HEAD.y, HEAD.rx*(1 + Math.abs(sy2)*.12), HEAD.ry, -.04, 0, TAU);
-    ctx.fill();
-    // a taper toward the muzzle, so the face is a wedge and not a pale ball
-    const tp = facePt(0, -.10, yaw, hEl, .78);
-    ctx.beginPath(); ctx.ellipse(tp.x, tp.y, 6.4, 5.4, -.06, 0, TAU); ctx.fill();
-
-    // ── short dark muzzle
+    // ── the muzzle: short, and barely warmer than the face. The contrast on
+    //    his face comes from the nose alone.
     const tip = facePt(0, -.16, yaw, hEl, SNOUT_R);
-    const bse = facePt(0, -.16, yaw, hEl, .30);
+    const bse = facePt(0, -.16, yaw, hEl, .26);
     const dx2 = tip.x - bse.x, dy2 = tip.y - bse.y;
     const slen = Math.hypot(dx2, dy2);
     ctx.save();
     ctx.translate((tip.x + bse.x)/2, (tip.y + bse.y)/2);
     ctx.rotate(Math.atan2(dy2, dx2));
     ctx.fillStyle = C.muzzle;
-    ctx.beginPath(); ctx.ellipse(0, 0, Math.max(5.0, slen*.5 + 2.6), 3.5, 0, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0, 0, Math.max(4.2, slen*.5 + 2.2), 2.9, 0, 0, TAU); ctx.fill();
     ctx.restore();
 
-    // ── the nose. It never stops working: side to side, up and down, and a
-    //    small swell on each sniff.
+    // ── the cheek blush, which is a surprising amount of the charm. Placed
+    //    off the EYE, not off the head, so it can never land on the muzzle.
+    const bl = facePt(AZ_EYE*.80, EL_EYE - .62, yaw, hEl, .95);
+    if (bl.z > .04){
+      ctx.globalAlpha = a * fa * clamp(bl.z*2.4, 0, 1);
+      ctx.fillStyle = C.blush;
+      ctx.beginPath(); ctx.ellipse(bl.x, bl.y, 3.2, 2.2, 0, 0, TAU); ctx.fill();
+      ctx.globalAlpha = a * fa;
+    }
+
+    // ── the nose. It rides on the muzzle rather than sliding about on it, and
+    //    FLARES on each sniff — a wet nose working is a change of shape, not a
+    //    change of position. It squashes wider than it is tall as it opens.
     const near = .5 + .5*Math.max(0, sy2);
-    const nsw  = 1 + Math.max(0, sniff)*.08*(.5 + d);
-    const nx2 = tip.x + noseTw*.7*cy2, ny2 = tip.y + noseUp*.45;
-    const nr = (2.0 + near*.8) * nsw;
+    const fl   = sniff * (.30 + d*.34);
+    const nx2 = tip.x + noseTw*.35*cy2, ny2 = tip.y - fl*.9;
+    const nr  = 1.8 + near*.7;
     ctx.fillStyle = C.nose;
-    ctx.beginPath(); ctx.ellipse(nx2, ny2, nr, nr*.88, .1, 0, TAU); ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(nx2, ny2, nr*(1 + fl*.34), nr*.88*(1 - fl*.14), .1, 0, TAU);
+    ctx.fill();
     ctx.fillStyle = "rgba(255,255,255,.55)";
     ctx.beginPath(); ctx.ellipse(nx2 - nr*.3, ny2 - nr*.4, nr*.34, nr*.26, -.3, 0, TAU); ctx.fill();
 
     // ── his mouth, tucked under the nose. Narrows as he turns to face you.
-    ctx.strokeStyle = "rgba(62,44,36,.62)"; ctx.lineWidth = 1.0; ctx.lineCap = "round";
-    const mw = 2.7 * Math.abs(cy2) + 1.3;
+    ctx.strokeStyle = "rgba(74,52,40,.80)"; ctx.lineWidth = 1.15; ctx.lineCap = "round";
+    const mw = 3.1 * Math.abs(cy2) + 1.4;
     ctx.beginPath();
     ctx.moveTo(nx2 - mw, ny2 + nr*1.5);
     ctx.quadraticCurveTo(nx2, ny2 + nr*2.4, nx2 + mw, ny2 + nr*1.5);
     ctx.stroke();
 
-    // whiskers
-    ctx.globalAlpha = a * fa * .20;
-    ctx.strokeStyle = "rgba(246,240,228,1)"; ctx.lineWidth = .6;
+    // whiskers — short and fine. Long straight ones read as fishing line.
+    ctx.globalAlpha = a * fa * .17;
+    ctx.strokeStyle = "rgba(246,240,228,1)"; ctx.lineWidth = .55;
     for (let side=-1; side<=1; side+=2)
-      for (let i=0;i<3;i++){
-        const spread = (i - 1) * 2.4 + side*1.2;
-        const reach  = 11 * (.45 + .55*Math.abs(cy2));
+      for (let i=0;i<2;i++){
+        const spread = (i - .5) * 2.2 + side*1.1;
+        const reach  = 7 * (.45 + .55*Math.abs(cy2)) * (1 + sniff*.28);
         ctx.beginPath();
         ctx.moveTo(nx2, ny2 + 1);
-        ctx.quadraticCurveTo(nx2 + cy2*reach*.5 + side*2.6, ny2 + spread + 2,
-                             nx2 + cy2*reach + side*Math.abs(sy2)*7, ny2 + spread*1.7);
+        ctx.quadraticCurveTo(nx2 + cy2*reach*.5 + side*1.8, ny2 + spread + 1.6,
+                             nx2 + cy2*reach + side*Math.abs(sy2)*4.5, ny2 + spread*1.7);
         ctx.stroke();
       }
     ctx.globalAlpha = a * fa;
 
-    // ── eyes: small, round, glossy black on the pale face
+    // ── eyes: small, round, glossy black on the cream
     function eye(az, far){
       const e = facePt(az, EL_EYE, yaw, hEl, RR_EYE);
       const v = faceVis(e.z) * (far ? .82 : 1);
@@ -2241,14 +2384,14 @@ function drawHog(){
       const sc = (.74 + .26*Math.max(0, e.z)) * (far ? .94 : 1);
       ctx.globalAlpha = a * fa * v;
       ctx.fillStyle = "#120c0b";
-      ctx.beginPath(); ctx.ellipse(e.x, e.y, 1.9*sc, 2.1*sc*eyeH, 0, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(e.x, e.y, 1.78*sc, 2.0*sc*eyeH, 0, 0, TAU); ctx.fill();
       if (eyeH > .35){
         ctx.fillStyle = "rgba(255,255,255,.9)";
-        ctx.beginPath(); ctx.arc(e.x + .65*sc, e.y - .75*sc, .72*sc, 0, TAU); ctx.fill();
+        ctx.beginPath(); ctx.arc(e.x + .60*sc, e.y - .68*sc, .66*sc, 0, TAU); ctx.fill();
       }
       // the brow crease — small, but it is most of what makes him look sweet
-      ctx.strokeStyle = "rgba(74,54,42,.34)"; ctx.lineWidth = .9*sc;
-      ctx.beginPath(); ctx.arc(e.x, e.y, 2.9*sc, -2.5, -1.0); ctx.stroke();
+      ctx.strokeStyle = "rgba(74,54,42,.30)"; ctx.lineWidth = .8*sc;
+      ctx.beginPath(); ctx.arc(e.x, e.y, 2.5*sc, -2.5, -1.0); ctx.stroke();
       ctx.globalAlpha = a * fa;
     }
     eye(-AZ_EYE, 1);
@@ -2260,13 +2403,13 @@ function drawHog(){
     //    short arc of them is redrawn HERE, after the face, to overlap it.
     //    Without this the face reads as painted on top of the dome.
     ctx.globalAlpha = a * fa;
-    for (let i=0;i<12;i++){
-      const t2 = i/11;
+    for (let i=0;i<16;i++){
+      const t2 = i/15;
       // crowns the top of his head only — push the end of this arc past about
-      // -0.05 and the quills start raking down across his face
-      const ang = lerp(-1.20, -0.06, t2) + Math.sin(p*2 + i*.62)*.04*g;
-      quill(ang, drx*.88, dry*.88, 5.8 + Math.sin(i*2.2)*1.6, 2.4,
-            i%3 ? C.quillTip : C.quillDark);
+      // -0.22 and the quills start raking down across his face
+      const ang = lerp(-1.45, -0.16, t2) + Math.sin(p*2 + i*.62)*.04*g;
+      quill(ang, drx*.90, dry*.90, 6.4 + Math.sin(i*2.2)*1.7, 1.5,
+            i%3 ? C.quillDk : C.quillLt, -.10);
     }
     ctx.globalAlpha = a;
   }
