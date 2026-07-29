@@ -95,11 +95,56 @@ function glow(rgb){
 }
 const SP_MAGIC = glow("238,226,186");
 
+/* ── the head rig ──────────────────────────────────────────────────────
+   His features sit on a head sphere rather than being painted flat on a
+   profile. `az` runs round the vertical axis: 0 points straight along his
+   snout, +90° points straight out at the camera. Adding the head's yaw to
+   every feature turns the whole face on the front of the head — the snout
+   swings round and foreshortens, the far eye comes into view, the near one
+   slides across. The body never has to move for him to look at something.
+
+   z is the camera-facing component: positive is the near side, negative is
+   round the back and hidden.
+   ────────────────────────────────────────────────────────────────────── */
+const HEAD = { x:11, y:6, rx:17, ry:12.5 };
+
+function facePt(az, el, yaw, pitch, rr){
+  const A = az + yaw, E = el + pitch, ce = Math.cos(E);
+  return {
+    x: HEAD.x + HEAD.rx * (rr||1) * ce * Math.cos(A),
+    y: HEAD.y - HEAD.ry * (rr||1) * Math.sin(E),
+    z: ce * Math.sin(A)
+  };
+}
+// how visible a feature is as it comes round the edge of the head
+const faceVis = z => clamp((z + .10)/.30, 0, 1);
+
+const AZ_EYE = 1.26, EL_EYE = .47;      // 72° round, high on the head
+const AZ_EAR = 2.15, EL_EAR = .72;      // well back and up
+const SNOUT_R = 1.62;                   // it sticks out past the head sphere
+
+// He looks about and sniffs of his own accord.
+function updateLook(h, dt){
+  h.lookT -= dt;
+  if (h.lookT <= 0){
+    h.lookT = lerp(.9, 2.8, Math.random());
+    const r = Math.random();
+    h.yawT   = r < .26 ? lerp(.95, 1.45, Math.random())     // straight at you
+             : r < .52 ? lerp(-.50, -.10, Math.random())    // away, over his shoulder
+             :           lerp(.05,  .65, Math.random());    // a glance round
+    h.pitchT = h.dip > .5 ? lerp(-.44, -.10, Math.random()) // nose in the grass
+                          : lerp(-.22,  .40, Math.random());
+  }
+  h.yaw   = lerp(h.yaw,   h.yawT,   1 - Math.exp(-4.5*dt));
+  h.pitch = lerp(h.pitch, h.pitchT, 1 - Math.exp(-3.8*dt));
+}
+
 /* ── one hedgepig ─────────────────────────────────────────────────────── */
 function makeHog(){
   return {
     dir:1, walk:0, gait:0, dip:0, curl:0, arrive:0, shiver:0,
-    blink:0, blinkT:2.4, hd:0, x:0
+    blink:0, blinkT:2.4, hd:0, x:0,
+    yaw:0, pitch:0, yawT:0, pitchT:0, lookT:0
   };
 }
 
@@ -206,50 +251,124 @@ function drawHog(ctx, hog, t, K, cx, cy){
   const fa = 1 - c;
   if (fa > .02){
     ctx.globalAlpha = a * fa;
-    ctx.save();
-    ctx.translate(headSw, headDip);
-    ctx.fillStyle = "#9a7a55";
-    ctx.beginPath(); ctx.ellipse(11, 7, 17, 12.5, -.06, 0, TAU); ctx.fill();
-    ctx.fillStyle = "#e2c8a8";
-    ctx.beginPath(); ctx.ellipse(21.8 + noseTw*.5, 8.6, 10.2, 7.2, -.10, 0, TAU); ctx.fill();
-    ctx.fillStyle = "rgba(230,152,138,.30)";
-    ctx.beginPath(); ctx.ellipse(15.5, 9.5, 4.8, 3.2, 0, 0, TAU); ctx.fill();
 
-    const nx2 = 30.4 + noseTw*1.15, ny2 = 6.8 + noseUp*.55;
-    const ns  = 1 + Math.max(0, sniff)*.09*(0.5 + d);
-    ctx.fillStyle = "#2a1b14";
-    ctx.beginPath(); ctx.ellipse(nx2, ny2, 3.3*ns, 2.8*ns, .1, 0, TAU); ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,.6)";
-    ctx.beginPath(); ctx.ellipse(nx2 - .9, ny2 - 1.1, 1.2, .9, -.3, 0, TAU); ctx.fill();
-    ctx.strokeStyle = "rgba(40,26,20,.5)"; ctx.lineWidth = .8; ctx.lineCap = "round";
-    ctx.beginPath(); ctx.moveTo(nx2, ny2 + 2.4); ctx.lineTo(nx2 - .4, ny2 + 4.2); ctx.stroke();
-    ctx.globalAlpha = a * fa * .22;
-    ctx.strokeStyle = "rgba(240,232,214,1)"; ctx.lineWidth = .6;
-    for (let i=0;i<3;i++){
-      const wa = -.30 + i*.34 + noseTw*.012;
+    // the sniff wobbles the head itself, not just the nose
+    const sniffP = d * Math.sin(t*9.5)*.055 + hog.shiver*Math.sin(t*26)*.03;
+    const yaw   = hog.yaw + d*Math.sin(t*1.3)*.16;
+    const hEl   = hog.pitch + sniffP + headDip*.012;   // head pitch, not body pitch
+    const cy2 = Math.cos(yaw), sy2 = Math.sin(yaw);
+
+    ctx.save();
+    ctx.translate(headSw*.4, headDip*.5);
+
+    // the head itself: it widens a touch as he comes front-on
+    ctx.fillStyle = "#9a7a55";
+    ctx.beginPath();
+    ctx.ellipse(HEAD.x + sy2*1.6, HEAD.y + 1, HEAD.rx*(1 + Math.abs(sy2)*.10),
+                HEAD.ry, -.06, 0, TAU);
+    ctx.fill();
+
+    // ── far ear, behind the head
+    const earF = facePt(-AZ_EAR, EL_EAR, yaw, hEl);
+    const earFv = faceVis(earF.z);
+    if (earFv > .02){
+      ctx.globalAlpha = a * fa * earFv * .85;
+      ctx.fillStyle = "#5f462f";
       ctx.beginPath();
-      ctx.moveTo(nx2 - 2, ny2 + 1.5);
-      ctx.quadraticCurveTo(nx2 + 7, ny2 + 3 + i*2.2, nx2 + 13, ny2 + 1 + wa*9);
-      ctx.stroke();
+      ctx.ellipse(earF.x, earF.y + ear*.6, 4.0*(.7 + .3*earF.z), 4.5*(.7 + .3*earF.z), .2, 0, TAU);
+      ctx.fill();
     }
     ctx.globalAlpha = a * fa;
-    ctx.strokeStyle = "rgba(56,36,26,.65)"; ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.moveTo(23.6, 13.4); ctx.quadraticCurveTo(26.4, 15.4, 29.2, 13.4); ctx.stroke();
-    ctx.fillStyle = "#160f0c";
-    ctx.beginPath(); ctx.ellipse(15.6, 1.4, 2.7, 2.9*eyeH, 0, 0, TAU); ctx.fill();
-    if (eyeH > .35){
-      ctx.fillStyle = "rgba(255,255,255,.92)";
-      ctx.beginPath(); ctx.arc(16.5, .3, 1.0, 0, TAU); ctx.fill();
-      ctx.fillStyle = "rgba(255,255,255,.4)";
-      ctx.beginPath(); ctx.arc(14.7, 2.5, .5, 0, TAU); ctx.fill();
+
+    // ── the snout, swinging round on the front of the head. Face-on it
+    //    foreshortens to a stub and the nose comes at you.
+    const tip = facePt(0, -.10, yaw, hEl, SNOUT_R);
+    const bse = facePt(0, -.10, yaw, hEl, .35);
+    const dx = tip.x - bse.x, dy = tip.y - bse.y;
+    const slen = Math.hypot(dx, dy);
+    ctx.save();
+    ctx.translate((tip.x + bse.x)/2, (tip.y + bse.y)/2);
+    ctx.rotate(Math.atan2(dy, dx));
+    ctx.fillStyle = "#e2c8a8";
+    ctx.beginPath(); ctx.ellipse(0, 0, Math.max(7.0, slen*.5 + 4.2), 7.0, 0, 0, TAU); ctx.fill();
+    ctx.restore();
+
+    // blush, on whichever cheek is toward us
+    const blush = facePt(1.5, .05, yaw, hEl, .95);
+    if (faceVis(blush.z) > .05){
+      ctx.globalAlpha = a * fa * faceVis(blush.z) * .30;
+      ctx.fillStyle = "rgba(230,152,138,1)";
+      ctx.beginPath(); ctx.ellipse(blush.x, blush.y + 3, 4.6, 3.1, 0, 0, TAU); ctx.fill();
+      ctx.globalAlpha = a * fa;
     }
-    ctx.strokeStyle = "rgba(48,32,22,.34)"; ctx.lineWidth = 1.1;
-    ctx.beginPath(); ctx.arc(15.6, 1.4, 5.0, -2.5, -1.0); ctx.stroke();
-    ctx.fillStyle = "#7a5c3e";
-    ctx.beginPath(); ctx.ellipse(8.5, -6.5 + ear, 4.5, 5.0, .2, 0, TAU); ctx.fill();
-    ctx.fillStyle = "rgba(212,158,144,.45)";
-    ctx.beginPath(); ctx.ellipse(9.0, -6.0 + ear, 2.2, 2.6, .2, 0, TAU); ctx.fill();
+
+    // ── nose at the snout tip, bigger as it comes toward the lens
+    const near = .5 + .5*Math.max(0, Math.sin(yaw));
+    const nsw  = 1 + Math.max(0, sniff)*.09*(.5 + d);
+    const nx2 = tip.x + noseTw*.8*cy2, ny2 = tip.y + noseUp*.5;
+    const nr = (2.7 + near*1.1) * nsw;
+    ctx.fillStyle = "#2a1b14";
+    ctx.beginPath(); ctx.ellipse(nx2, ny2, nr, nr*.86, .1, 0, TAU); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,.6)";
+    ctx.beginPath(); ctx.ellipse(nx2 - nr*.3, ny2 - nr*.4, nr*.36, nr*.28, -.3, 0, TAU); ctx.fill();
+    ctx.strokeStyle = "rgba(40,26,20,.5)"; ctx.lineWidth = .8; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(nx2, ny2 + nr*.8); ctx.lineTo(nx2 - .4, ny2 + nr*1.5); ctx.stroke();
+
+    // whiskers: they fan wider the more front-on he is
+    ctx.globalAlpha = a * fa * .22;
+    ctx.strokeStyle = "rgba(240,232,214,1)"; ctx.lineWidth = .6;
+    for (let side=-1; side<=1; side+=2)
+      for (let i=0;i<3;i++){
+        const spread = (i - 1) * 2.6 + side*1.4;
+        const reach  = 12 * (0.45 + 0.55*Math.abs(cy2));
+        ctx.beginPath();
+        ctx.moveTo(nx2, ny2 + 1);
+        ctx.quadraticCurveTo(nx2 + cy2*reach*.5 + side*3, ny2 + spread + 2,
+                             nx2 + cy2*reach + side*Math.abs(sy2)*8, ny2 + spread*1.8);
+        ctx.stroke();
+      }
+    ctx.globalAlpha = a * fa;
+
+    // mouth, tucked under the snout, narrowing as he turns to face us
+    ctx.strokeStyle = "rgba(56,36,26,.6)"; ctx.lineWidth = 1.1;
+    const mw = 3.0 * Math.abs(cy2) + 1.4;
+    ctx.beginPath();
+    ctx.moveTo(nx2 - mw, ny2 + nr*1.9);
+    ctx.quadraticCurveTo(nx2, ny2 + nr*2.7, nx2 + mw, ny2 + nr*1.9);
+    ctx.stroke();
+
+    // ── eyes. In profile only the near one shows; turn toward the camera and
+    //    the far one swings into view on the other side of the snout.
+    function eye(az){
+      const e = facePt(az, EL_EYE, yaw, hEl);
+      const v = faceVis(e.z);
+      if (v <= .02) return;
+      const sc = .78 + .22*Math.max(0, e.z);
+      ctx.globalAlpha = a * fa * v;
+      ctx.fillStyle = "#160f0c";
+      ctx.beginPath(); ctx.ellipse(e.x, e.y, 2.0*sc, 2.2*sc*eyeH, 0, 0, TAU); ctx.fill();
+      if (eyeH > .35){
+        ctx.fillStyle = "rgba(255,255,255,.92)";
+        ctx.beginPath(); ctx.arc(e.x + .7*sc, e.y - .8*sc, .8*sc, 0, TAU); ctx.fill();
+      }
+      ctx.strokeStyle = "rgba(48,32,22,.30)"; ctx.lineWidth = 1.0;
+      ctx.beginPath(); ctx.arc(e.x, e.y, 4.2*sc, -2.5, -1.0); ctx.stroke();
+      ctx.globalAlpha = a * fa;
+    }
+    eye(-AZ_EYE);          // far eye first, so the near one overlaps it
+    eye( AZ_EYE);
+
+    // ── near ear, over the top of everything
+    const earN = facePt(AZ_EAR, EL_EAR, yaw, hEl);
+    const earNv = faceVis(earN.z);
+    if (earNv > .02){
+      const sc = .8 + .2*earN.z;
+      ctx.globalAlpha = a * fa * earNv;
+      ctx.fillStyle = "#7a5c3e";
+      ctx.beginPath(); ctx.ellipse(earN.x, earN.y + ear, 4.5*sc, 5.0*sc, .2, 0, TAU); ctx.fill();
+      ctx.fillStyle = "rgba(212,158,144,.45)";
+      ctx.beginPath(); ctx.ellipse(earN.x + .5, earN.y + .5 + ear, 2.2*sc, 2.6*sc, .2, 0, TAU); ctx.fill();
+    }
     ctx.restore();
     ctx.globalAlpha = a;
   }
@@ -287,8 +406,14 @@ const STALLS = [
       h.gait = 0; h.dip = 0; } },
   { tag:"shivering",note:"deep snow — cold, breath showing",
     set:(h,dt)=>{ h.gait=0; h.dip=.4; h.shiver=1; } },
-  { tag:"blinking", note:"idle face only — blink timing and eye",
-    set:(h,dt)=>{ h.gait=0; h.dip=.15; } },
+  { tag:"looking about", note:"face turns on the front of the head — he glances round and sniffs",
+    set:(h,dt)=>{ h.gait=0; h.dip=.25; } },
+  { tag:"face-on", note:"held front-on — both eyes, snout foreshortened at you",
+    set:(h,dt,t)=>{ h.gait=0; h.dip=.1;
+      h.yawT = 1.30; h.pitchT = .05; h.lookT = 9; } },
+  { tag:"yaw sweep", note:"driven through the full turn, away to front-on",
+    set:(h,dt,t)=>{ h.gait=0; h.dip=.2;
+      h.yawT = -0.5 + 1.9*(0.5+0.5*Math.sin(t*.55)); h.pitchT = Math.sin(t*.37)*.3; h.lookT = 9; } },
 ];
 
 const grid = document.getElementById("grid");
@@ -342,6 +467,7 @@ function frame(now){
     s.hog.blinkT -= dt;
     if (s.hog.blinkT <= 0){ s.hog.blinkT = lerp(2.2, 5.5, Math.random()); s.hog.blink = 1; }
     s.hog.blink = Math.max(0, s.hog.blink - dt*7);
+    updateLook(s.hog, dt);
     s.S.set(s.hog, dt, s.t);
 
     const x = s.ctx;
