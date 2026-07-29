@@ -120,7 +120,7 @@ const C = {
   domeLo:    "#6a5942",
   face:      "#f0e8d8",   // pale cream, the strongest contrast on him
   faceLo:    "#d3c5ab",
-  muzzle:    "#8a7a6d",   // grey-brown, a shade darker than the face
+  muzzle:    "#9b8b7c",   // grey-brown; the CONTRAST should come from the nose
   nose:      "#241b19",
   ear:       "#4e3d34",
   earIn:     "#8d6f64",
@@ -143,8 +143,9 @@ const faceVis = z => clamp(z/.26, 0, 1);
 
 const AZ_EYE = 1.10, EL_EYE = .44;      // above and behind the muzzle, on the cream
 const RR_EYE = .80;
-const AZ_EAR = 2.46, EL_EAR = .52;      // back of the head; drawn behind the face
-const SNOUT_R = 1.22;                   // short and blunt, but it must clear the face
+const AZ_EAR = 2.35, EL_EAR = .52;      // back of the head; drawn behind the face
+const RR_EAR = 1.30;                    // OUTSIDE the head, or the face hides them entirely
+const SNOUT_R = 1.48;                   // long enough to read as a snout, not a disc
 
 // He looks about and sniffs of his own accord.
 function updateLook(h, dt){
@@ -234,7 +235,7 @@ function drawHog(ctx, hog, t, K, cx, cy){
      a dense speckle of banded ticks, then cream tips round the rim. Short
      and dense, not long spikes — at this size the banding is what reads. */
   const a0 = lerp(-3.02, -Math.PI - .5, c);
-  const a1 = lerp( 0.42,  Math.PI - .2, c);        // sweeps round over the brow
+  const a1 = lerp(-0.10,  Math.PI - .2, c);        // stops above the face, never across it
   const mx = -3*(1-c), my = -2.5*(1-c);
   const drx = lerp(29.5, 21, c), dry = lerp(17, 21, c);
 
@@ -299,15 +300,14 @@ function drawHog(ctx, hog, t, K, cx, cy){
 
     // ── both ears, behind the face
     for (const side of [-1, 1]){
-      const e2 = facePt(side*AZ_EAR, EL_EAR, yaw, hEl);
+      const e2 = facePt(side*AZ_EAR, EL_EAR, yaw, hEl, RR_EAR);
       const v2 = faceVis(e2.z) * (side < 0 ? .8 : 1);
       if (v2 <= .02) continue;
       const sc = .82 + .18*Math.max(0, e2.z);
       ctx.globalAlpha = a * fa * v2;
-      ctx.fillStyle = side < 0 ? "#3d2f28" : C.ear;
-      ctx.beginPath(); ctx.ellipse(e2.x, e2.y + ear, 4.1*sc, 4.5*sc, .12, 0, TAU); ctx.fill();
-      ctx.fillStyle = C.earIn;
-      ctx.beginPath(); ctx.ellipse(e2.x + .4, e2.y + .6 + ear, 2.0*sc, 2.3*sc, .12, 0, TAU); ctx.fill();
+      // kept dark and plain: a bright inner here reads as a second eye
+      ctx.fillStyle = side < 0 ? "#3a2d26" : C.ear;
+      ctx.beginPath(); ctx.ellipse(e2.x, e2.y + ear, 3.5*sc, 3.9*sc, .12, 0, TAU); ctx.fill();
     }
     ctx.globalAlpha = a * fa;
 
@@ -332,18 +332,26 @@ function drawHog(ctx, hog, t, K, cx, cy){
     ctx.translate((tip.x + bse.x)/2, (tip.y + bse.y)/2);
     ctx.rotate(Math.atan2(dy, dx));
     ctx.fillStyle = C.muzzle;
-    ctx.beginPath(); ctx.ellipse(0, 0, Math.max(4.6, slen*.5 + 2.4), 4.1, 0, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0, 0, Math.max(5.0, slen*.5 + 2.6), 3.5, 0, 0, TAU); ctx.fill();
     ctx.restore();
 
     // ── nose
     const near = .5 + .5*Math.max(0, sy2);
     const nsw  = 1 + Math.max(0, sniff)*.08*(.5 + d);
     const nx2 = tip.x + noseTw*.7*cy2, ny2 = tip.y + noseUp*.45;
-    const nr = (2.3 + near*.9) * nsw;
+    const nr = (2.0 + near*.8) * nsw;
     ctx.fillStyle = C.nose;
     ctx.beginPath(); ctx.ellipse(nx2, ny2, nr, nr*.88, .1, 0, TAU); ctx.fill();
     ctx.fillStyle = "rgba(255,255,255,.55)";
     ctx.beginPath(); ctx.ellipse(nx2 - nr*.3, ny2 - nr*.4, nr*.34, nr*.26, -.3, 0, TAU); ctx.fill();
+
+    // ── his mouth, tucked under the nose. Narrows as he turns to face you.
+    ctx.strokeStyle = "rgba(62,44,36,.62)"; ctx.lineWidth = 1.0; ctx.lineCap = "round";
+    const mw = 2.7 * Math.abs(cy2) + 1.3;
+    ctx.beginPath();
+    ctx.moveTo(nx2 - mw, ny2 + nr*1.5);
+    ctx.quadraticCurveTo(nx2, ny2 + nr*2.4, nx2 + mw, ny2 + nr*1.5);
+    ctx.stroke();
 
     // whiskers
     ctx.globalAlpha = a * fa * .20;
@@ -373,6 +381,9 @@ function drawHog(ctx, hog, t, K, cx, cy){
         ctx.fillStyle = "rgba(255,255,255,.9)";
         ctx.beginPath(); ctx.arc(e.x + .65*sc, e.y - .75*sc, .72*sc, 0, TAU); ctx.fill();
       }
+      // the brow crease — small, but it is most of what makes him look sweet
+      ctx.strokeStyle = "rgba(74,54,42,.34)"; ctx.lineWidth = .9*sc;
+      ctx.beginPath(); ctx.arc(e.x, e.y, 2.9*sc, -2.5, -1.0); ctx.stroke();
       ctx.globalAlpha = a * fa;
     }
     eye(-AZ_EYE, 1);
@@ -384,10 +395,12 @@ function drawHog(ctx, hog, t, K, cx, cy){
     //    short arc of them is redrawn HERE, after the face, to overlap it.
     //    Without this the face reads as painted on top of the dome.
     ctx.globalAlpha = a * fa;
-    for (let i=0;i<13;i++){
-      const t2 = i/12;
-      const ang = lerp(-1.02, 0.50, t2) + Math.sin(p*2 + i*.62)*.04*g;
-      quill(ang, drx*.90, dry*.90, 7.0 + Math.sin(i*2.2)*2.0, 2.6,
+    for (let i=0;i<12;i++){
+      const t2 = i/11;
+      // crowns the top of his head only — push the end of this arc past about
+      // -0.05 and the quills start raking down across his face
+      const ang = lerp(-1.20, -0.06, t2) + Math.sin(p*2 + i*.62)*.04*g;
+      quill(ang, drx*.88, dry*.88, 5.8 + Math.sin(i*2.2)*1.6, 2.4,
             i%3 ? C.quillTip : C.quillDark);
     }
     ctx.globalAlpha = a;
