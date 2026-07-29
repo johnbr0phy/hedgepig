@@ -432,6 +432,59 @@ veers off for 1.3s instead of walking straight back into the same bush.
   jitter, slows his turn rate, puts two little arcs off his back, and makes his
   breath show as pale motes.
 
+### The animation lab
+
+`hog-lab.html` is a bench rig for the hedgepig, away from the grass. Ten stalls,
+each running an independent copy in one fixed state — amble, scurry, snuffling,
+start/stop, turning, curled, shivering, looking about, face-on, yaw sweep — plus
+speed and size sliders, a frame stepper and a bones toggle.
+
+**Use the size slider.** It is there because at default scale his faults are
+invisible. Two separate rounds of "that looks fine" shipped a muzzle that read
+as a giant grey eyeball and a set of ears that were not being drawn at all. Turn
+him up before judging anything.
+
+It holds a WORKING COPY of `drawHog()`. Iterate there, then port the finished
+function into `index.html`. Nothing in the game reads this file, and the two are
+**currently out of sync — the lab has the good hedgehog, the game has the old
+one.** Porting it is the next job.
+
+### The head rig (lab only so far)
+
+His features sit on a head sphere rather than painted flat on a profile. `az`
+runs round the vertical axis: 0 along the snout, +90° straight at the camera.
+Adding the head's yaw to every feature turns the whole face on the front of the
+head — the snout swings round and foreshortens, the far eye comes past it,
+whiskers fan, the mouth narrows. The body never moves. `updateLook()` drives it:
+he glances about, noses down to sniff, occasionally looks right at you.
+
+Three rules learned the hard way here:
+
+- **`faceVis` must start at z = 0.** It ramped from −0.10, which drew far-side
+  features straight through his skull.
+- **Ears need a radius greater than 1.** On the head sphere they are always
+  inside its own outline, so they vanish entirely behind the face. And keep them
+  dark and plain — a bright inner reads as a second eye.
+- **Quill arcs must stop at or below angle 0.** Past that they point
+  down-and-forward and rake across his face.
+
+### Still to do on the animation
+
+Nine of the ten planned improvements are outstanding. In rough order of payoff:
+
+1. Turn instead of mirror-flip — `ctx.scale(dir*K, K)` snaps instantly; ease a
+   `face` value −1→+1 and squash through zero so he pivots.
+2. Jointed legs with planted feet — currently straight stubs whose feet slide.
+3. Head on its own spring, lagging the body through turns. Probably the single
+   biggest one for making him read as alive.
+4. Anticipation and follow-through on setting off and arriving.
+5. Two gaits blended by speed, not one stride shape played faster.
+6. A ripple through the spines, nose to rump, per footfall.
+7. Ears that react — flick on footfall, prick when called, pin back when hurt.
+8. *(done — superseded by the head rig above)*
+9. Idle variety — a scratch, a shake, sitting up, a yawn.
+10. A curl with weight — flinch, squash, bounce, wary unroll.
+
 ### Drawing and animating him
 
 `drawHog()` builds him in layers, and the order is the whole reason he reads as
