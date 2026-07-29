@@ -449,6 +449,10 @@ function into `index.html`. Nothing in the game reads this file. The two are
 **currently in sync** — keep them that way, and port in whole blocks rather than
 by hand.
 
+The **3d** button toggles between the current 3D renderer (`drawHog3`) and the
+last 2D one (`drawHog`), which is kept only for comparison. Delete `drawHog`
+once you are sure.
+
 Two things about looking at it in a browser, both of which wasted a cycle:
 
 - **Cache-bust the URL.** Reloading `hog-lab.html` served the previous render and
@@ -457,6 +461,67 @@ Two things about looking at it in a browser, both of which wasted a cycle:
   while an automated tool call has focus, so `await`ing a frame hangs outright
   and screenshots repeat. Patch a counter onto `window.requestAnimationFrame`
   and read it between calls to know whether anything actually advanced.
+
+### He is 3D now
+
+**`drawHog()` is a software 3D renderer.** He is geometry — a body ellipsoid, a
+head sphere, and a coat of quills rooted on the ellipsoid's surface with real
+outward normals — projected orthographically into Canvas 2D and drawn back to
+front by the painter's algorithm. No WebGL, no library, no build step. The file
+is still one file.
+
+Why, after three 2D rebuilds:
+
+- **A 2D arrangement can only be correct from one angle.** Every version was
+  hand-tuned in profile and wrong everywhere else, and the mirror flip meant he
+  could face exactly two directions.
+- **Quills pointing at the lens must foreshorten to stubs while the rim ones
+  stay long spikes.** That contrast *is* the read of a quill coat — it is the
+  same thing the shells-and-fins fur literature exploits. 2D cannot do it: it
+  can only draw the rim and then paint "texture" on the middle, which is exactly
+  why he kept coming out a smooth loaf with a fringe.
+- Turning is now free and continuous, which was improvement #1.
+- Real normals give real shading, so he has form rather than a gradient.
+
+Model space is **+x along his snout, +y up, +z across him**; canvas y is down so
+screen y = −y; the ground is y = −20.5. There is exactly one rotation,
+`th = π/2 − hog.hd`, about the vertical axis: `th = 0` is profile facing right,
+`+90°` is nose-on. Projection is orthographic **on purpose** — §1, the field has
+no perspective falloff, so neither does he.
+
+Things worth knowing before touching it:
+
+- **`hd = π/2` is profile, `hd = 0` is walking at the lens.** Every lab stall
+  defaulted to 0 and they all came up nose-on.
+- **An ellipsoid under a rotation about the vertical axis projects to an
+  axis-aligned ellipse, exactly**: half-width `sqrt(a²cos²θ + c²sin²θ)`, half
+  height `b`. His body is one fill and no approximation. A sphere projects to a
+  circle, so his head is too.
+- **The mantle boundary is a plane** (`MN`, `MK0`), not a curve. This replaces
+  the hand-drawn diagonal edge of the 2D version and is right from every angle.
+- **The dark mass under the coat is the body ellipse shifted along that plane's
+  own normal.** 250 narrow needles nowhere near cover an ellipsoid, so without
+  it the cream body shows between them and he reads as an **artichoke**. Filling
+  the true mantle region means compositing a plane-section curve with the
+  silhouette; the offset ellipse is one fill and is correct back-and-up in
+  profile, straight up nose-on, and over all of him from behind.
+- **Do not pick quill properties off the loop index.** A regular pick over a
+  golden-angle spiral *is* phyllotaxis, and it drew a literal pinecone. Hash them.
+- **Band every quill that is long enough on screen to show a band**, and only
+  those: on a foreshortened quill the pale tip overlay is a fat blob, and a few
+  hundred of those read as scales. A field of flat dark triangles is noise; the
+  dark-base-to-pale-tip band plus a strong backward rake is what reads as a coat.
+- **All four legs still go down before the body**, and **the near half of the
+  coat goes down before the face.** The depth sort will happily paint legs
+  across his belly and quills across his eye if you let it — both are the old
+  faults of §10, reintroduced by giving a sort the chance to make them.
+- **He costs about 250 fills a frame more than the 2D version** (~1880 vs ~1630
+  in `walk`). `quality < .72` halves his coat, so the adaptive scaler thins
+  *him* before it thins the grass — the meadow is the thing you are looking at.
+
+`hog.dir` no longer draws anything. It is still maintained because the snuffle
+motes, the breath and the nose's grass field all need to know which way he
+faces.
 
 ### What he is made of, and the reference
 
@@ -553,10 +618,8 @@ as he pulls up. It is read twice — once as a shift, once as a nod.
 
 In rough order of payoff:
 
-1. Turn instead of mirror-flip — `ctx.scale(dir*K, K)` snaps instantly; ease a
-   `face` value −1→+1 and squash through zero so he pivots. **Still the biggest
-   one left.** Note `bodyAz = asin(cos(hd))` is the rig azimuth matching his
-   heading, if that helps: 0 in profile, ±π/2 straight at or away from the lens.
+1. *(done — the 3D rebuild turns him continuously; there is no mirror flip left
+   to remove.)*
 2. Jointed legs with planted feet — currently straight stubs whose feet slide.
 3. *(done — the head spring, above)*
 4. Anticipation and follow-through on setting off and arriving. Partly there:

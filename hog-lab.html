@@ -60,6 +60,7 @@
   <button id="pause">pause</button>
   <button id="step">step</button>
   <button id="bones">bones</button>
+  <button id="three" class="on">3d</button>
 </header>
 <div id="grid"></div>
 <script>
@@ -147,7 +148,7 @@ const faceVis = z => clamp(z/.26, 0, 1);
 
 const AZ_EYE = 1.30, EL_EYE = .52;      // well above and behind the muzzle, on the cream
 const RR_EYE = .80;
-const AZ_EAR = 2.32, EL_EAR = .72;      // top-BACK of the head. Near 90° it projects
+const AZ_EAR = 2.02, EL_EAR = .46;      // top-BACK of the head. Near 90° it projects
                                         // onto the middle of his face beside the eye.
 const RR_EAR = 1.00;                    // ON the head: the ears are drawn AFTER the cheek fill
 const SNOUT_R = 1.12;                   // SHORT. Past about 1.25 he reads as an anteater.
@@ -178,9 +179,14 @@ function updateLook(h, dt){
   if (h.lookT <= 0){
     h.lookT = lerp(.9, 2.8, Math.random());
     const r = Math.random();
-    h.yawT   = r < .26 ? lerp(.95, 1.45, Math.random())     // straight at you
-             : r < .52 ? lerp(-.50, -.10, Math.random())    // away, over his shoulder
-             :           lerp(.05,  .65, Math.random());    // a glance round
+    /* Head yaw is BODY-relative — 0 is straight along his own snout. To look
+       at the lens he must turn his head by his own heading, which is why the
+       first branch reads h.hd: a hedgehog walking at you is already looking
+       at you and need not turn at all. Camera-relative gaze was wrong; it
+       counter-rotated his head every time his body turned. */
+    h.yawT   = r < .26 ? clamp(wrapAng(h.hd), -1.35, 1.35)  // straight at you
+             : r < .52 ? lerp(-.85, -.25, Math.random())    // away, over his shoulder
+             :           lerp(-.45,  .45, Math.random());   // a glance round
     h.pitchT = h.dip > .5 ? lerp(-.44, -.10, Math.random()) // nose in the grass
                           : lerp(-.22,  .40, Math.random());
   }
@@ -199,7 +205,7 @@ function updateLook(h, dt){
      back overshooting by about a degree. */
   const rate = (h.turn || 0) / Math.max(dt, 1/240);
   h.turn = 0;
-  const lagT = clamp(h.dir * rate * LAG_S, -.62, .62);
+  const lagT = clamp(-rate * LAG_S, -.62, .62);
   h.lagV += (LG_K*(lagT - h.lag) - LG_D*h.lagV) * dt;
   h.lag  += h.lagV * dt;
 
@@ -225,13 +231,14 @@ function updateLook(h, dt){
 function makeHog(){
   return {
     dir:1, walk:0, gait:0, dip:0, curl:0, arrive:0, shiver:0,
-    blink:0, blinkT:2.4, hd:0, x:0,
+    blink:0, blinkT:2.4, hd:Math.PI/2, x:0,   // 90° = profile, facing right
     yaw:0, pitch:0, yawT:0, pitchT:0, lookT:0,
     yawV:0, pitchV:0, hlag:0, hlagV:0, lag:0, lagV:0, turn:0, acc:0, spdPrev:0, flick:0, earT:1.2
   };
 }
 
 let showBones = false;
+const quality = 1;    // the game's adaptive scaler; here he is always full detail
 
 // A faithful copy of the current in-game drawing, parameterised so the rig can
 // drive several at once. `t` is that stall's own clock.
@@ -556,6 +563,466 @@ function drawHog(ctx, hog, t, K, cx, cy){
   ctx.globalAlpha = 1;
 }
 
+
+/* ═══ the hedgepig in three dimensions ═════════════════════════════════════
+   He is geometry now rather than an arrangement of shapes. A body ellipsoid,
+   a head sphere, and a coat of quills rooted on the ellipsoid's surface with
+   real outward normals — projected orthographically and drawn back to front,
+   painter's algorithm.
+
+   Why bother:
+
+   - Every 2D version only worked from one angle. The mantle's front edge had
+     to be hand-drawn as a diagonal that is only right in profile; here it is
+     a PLANE through his body, and correct from everywhere for nothing.
+   - Quills pointing at the lens foreshorten to stubs while the ones on the
+     rim stay long spikes. That contrast is what makes a quill coat read at
+     all, and it is the one thing a 2D fan of triangles can never do — it can
+     only ever draw the rim and then paint "texture" on the middle, which is
+     precisely why he kept reading as a smooth loaf with a fringe.
+   - Turning is free and continuous. `ctx.scale(dir,1)` and its instant
+     mirror flip are gone, which was improvement #1 on the list.
+   - Real normals mean real shading, so he has form instead of a gradient.
+
+   Orthographic on purpose: §1 of the handover says the field has no
+   perspective falloff, so neither does he.
+
+   Model space: +x along his snout, +y up, +z across him. Canvas y is down,
+   so screen y = -y. Ground is y = -20.5.
+   ═════════════════════════════════════════════════════════════════════════ */
+const BODY = { a:26, b:16.5, c:19.5 };       // semi-axes: fore-aft, up, across
+const HD_R = 8.4;                            // head sphere radius. Bigger than
+                                             // this and nose-on he is all head.
+const HD_C = { x:20.4, y:-1.6, z:0 };        // where the head sits on him
+const GROUND = -20.5;
+
+// The mantle boundary is a plane cutting forward-and-down. Quills root
+// OUTSIDE it; the cream face-chest-belly is the part inside. This single
+// constant replaces the hand-tuned diagonal path of the 2D version.
+const MN = { x:.821, y:-.571, z:0 };
+const MK0 = .30;                             // 0 = half of him, higher = more coat
+
+// A golden-angle spiral over the sphere: even, deterministic, and it never
+// tiles — which §5 of the handover asks of anything procedural.
+const QUILLS = (() => {
+  const out = [], N = 340, ga = Math.PI*(3 - Math.sqrt(5));
+  for (let i=0;i<N;i++){
+    const ny = 1 - (i/(N-1))*2, rr = Math.sqrt(Math.max(0, 1 - ny*ny));
+    const th = ga*i;
+    const n = { x:Math.cos(th)*rr, y:ny, z:Math.sin(th)*rr };
+    const jit = (Math.sin(i*12.9898)*.5 + .5);
+    out.push({
+      n,
+      d: n.x*MN.x + n.y*MN.y + n.z*MN.z,     // which side of the mantle plane
+      lf: (.78 + jit*.46),                    // length jitter
+      // Do NOT pick these off i: a regular pick over a golden-angle spiral IS
+      // phyllotaxis, and it drew a pinecone. Hashed, so they scatter.
+      pale: (Math.sin(i*78.233)*.5 + .5) < .62,
+      wob: (Math.sin(i*4.1)*.5 + .5) * 6.3     // phase, so the coat is not one mass
+    });
+  }
+  return out;
+})();
+
+/* Shading is precomputed into a small table. Building a colour string per
+   quill per frame would be ~250 string allocations a frame, and §6 of the
+   handover records killing exactly that pattern for a real win. */
+const QSHADE = 10;
+const QCOL = [[70,51,31], [214,199,168], [124,104,76], [58,42,26]].map(rgb =>
+  Array.from({length:QSHADE}, (_, s) => {
+    const k = .52 + .48*(s/(QSHADE-1));
+    return "rgb(" + Math.round(rgb[0]*k) + "," + Math.round(rgb[1]*k) + "," +
+                    Math.round(rgb[2]*k) + ")";
+  }));
+const L3 = { x:-.30, y:.86, d:.41 };          // light: up, a little front-left
+
+// a point on the head sphere. az 0 is along the snout, +az swings toward the
+// lens; el is up. Returns a UNIT direction in model space, so it doubles as
+// the outward normal for visibility.
+function hRot(v, hy, hp){
+  const cp = Math.cos(hp), sp = Math.sin(hp);
+  const px = v.x*cp - v.y*sp, py = v.x*sp + v.y*cp;
+  const cy = Math.cos(hy), sy = Math.sin(hy);
+  return { x: px*cy - v.z*sy, y: py, z: px*sy + v.z*cy };
+}
+
+/* The badge has spines over the crown of his head, not just on his back, and
+   a bald cream head with one dark ear on it is most of what still read as
+   wrong. These root on the HEAD sphere and ride its yaw and pitch. */
+const HQUILLS = (() => {
+  const out = [], N = 110, ga = Math.PI*(3 - Math.sqrt(5));
+  for (let i=0;i<N;i++){
+    const ny = 1 - (i/(N-1))*2, rr = Math.sqrt(Math.max(0, 1 - ny*ny));
+    const th = ga*i;
+    const n = { x:Math.cos(th)*rr, y:ny, z:Math.sin(th)*rr };
+    if (n.x*MN.x + n.y*MN.y + n.z*MN.z > -.34) continue;  // crown and nape ONLY:
+                                                          // past this it rakes his face
+    let dx = n.x - .40, dy = n.y - .06, dz = n.z;         // raked back off the brow
+    const dl = Math.sqrt(dx*dx + dy*dy + dz*dz) || 1;
+    const jit = Math.sin(i*12.9898)*.5 + .5;
+    out.push({ n, dir:{ x:dx/dl, y:dy/dl, z:dz/dl },
+               len: (3.2 + jit*2.2),
+               pale: (Math.sin(i*78.233)*.5 + .5) < .30 });
+  }
+  return out;
+})();
+
+function headDir(az, el, hy, hp){
+  const ce = Math.cos(el);
+  const lx = ce*Math.cos(az), ly = Math.sin(el), lz = ce*Math.sin(az);
+  const cp = Math.cos(hp), sp = Math.sin(hp);          // pitch, about across
+  const px = lx*cp - ly*sp, py = lx*sp + ly*cp;
+  const cy = Math.cos(hy), sy = Math.sin(hy);          // yaw, about up
+  return { x: px*cy - lz*sy, y: py, z: px*sy + lz*cy };
+}
+
+function drawHog3(ctx, hog, t, K, cx, cy){
+  const c = hog.curl, g = hog.gait*(1 - c), d = hog.dip*(1 - c);
+  const a = 1;
+
+  const p    = hog.walk;
+  const bob  = Math.sin(p*2)*2.1*g + Math.sin(t*2.1)*0.8*(1-g);
+  const lean = Math.sin(p*2 + .7)*.05*g - hog.arrive*.06;
+  const sqz  = 1 + Math.sin(p*2 + 1.3)*.055*g;
+  const shiv = hog.shiver * (Math.sin(t*34)*1.5 + Math.sin(t*23.3)*.9);
+
+  const sniffR = 6.5 + d*4.5;
+  const sniff  = Math.pow(Math.max(0, Math.sin(t*sniffR)), 2);
+  const jitter = Math.sin(t*27)*.5 + Math.sin(t*41)*.3;
+  const eyeH   = 1 - hog.blink*.92;
+  const earTilt = hog.flick*.55 + c*-.45;
+  const earSq   = 1 - hog.flick*.22;
+
+  // ── the one rotation. th = 0 is profile facing right, +90° is nose-on.
+  //    hog.hd is his heading: 0 walks toward the lens, +90° walks right.
+  const th = Math.PI/2 - hog.hd;
+  const ct = Math.cos(th), st = Math.sin(th);
+  const PX = q => q.x*ct - q.z*st;            // screen x
+  const PD = q => q.x*st + q.z*ct;            // depth, + is toward the lens
+
+  // body axes: he rounds up into a ball as he curls, and breathes
+  const A = lerp(BODY.a, 21.5, c), B = lerp(BODY.b, 21.5, c)*sqz,
+        Cc = lerp(BODY.c, 21.5, c);
+  const MK = lerp(MK0, 1.01, c);              // curled, the coat closes over him
+
+  ctx.save();
+  ctx.translate(cx + shiv, cy + bob);
+  ctx.rotate(lean);
+  ctx.scale(K, K);
+
+  ctx.globalCompositeOperation = "lighter";
+  ctx.globalAlpha = a * (.09 + .05*Math.sin(t*3.2));
+  ctx.drawImage(SP_MAGIC, -80, -84, 160, 160);
+  ctx.globalCompositeOperation = "source-over";
+
+  ctx.globalAlpha = a*.32; ctx.fillStyle = "#02100a";
+  ctx.beginPath(); ctx.ellipse(0, -GROUND - 1.5, 27 + c*4, 6.5, 0, 0, TAU); ctx.fill();
+  ctx.globalAlpha = a;
+
+  /* ── the coat. One pass over the quills, projected and depth-sorted. The
+        far half is drawn, then the body, then the near half — so the far
+        quills show only where they stick out past his outline, which is the
+        jagged silhouette, and the near ones lie over his back as stubs. */
+  const qs = [];
+  // The adaptive scaler thins HIS coat before it thins the field: the grass is
+  // the thing you are looking at, and §6's budget has no room for a coat that
+  // costs more than the meadow it stands in.
+  const thin = quality < .72;
+  for (let i=0;i<QUILLS.length;i++){
+    if (thin && (i & 1)) continue;
+    const Q = QUILLS[i];
+    if (Q.d > MK) continue;
+    const n = Q.n;
+    const px = A*n.x, py = B*n.y, pz = Cc*n.z;             // root, on the surface
+    // the true outward normal of an ellipsoid is the gradient, not the radius
+    let gx = n.x/A, gy = n.y/B, gz = n.z/Cc;
+    const gl = Math.sqrt(gx*gx + gy*gy + gz*gz) || 1;
+    gx /= gl; gy /= gl; gz /= gl;
+    // raked toward his rump, and the whole coat stirs as he trots
+    const stir = Math.sin(p*2 + Q.wob)*.055*g;
+    let dx = gx - .58 + stir, dy = gy - .16, dz = gz;
+    const dl = Math.sqrt(dx*dx + dy*dy + dz*dz) || 1;
+    dx /= dl; dy /= dl; dz /= dl;
+    const len = lerp(12.6, 6.0, (n.x + 1)/2) * Q.lf * (1 + c*.16);
+    const tx = px + dx*len, ty = py + dy*len, tz = pz + dz*len;
+
+    const bX = px*ct - pz*st, bD = px*st + pz*ct;
+    const tX = tx*ct - tz*st, tD = tx*st + tz*ct;
+    // lit off the quill's own direction, in screen space
+    const wX = dx*ct - dz*st, wD = dx*st + dz*ct;
+    const lit = Math.max(0, wX*L3.x + dy*L3.y + wD*L3.d);
+    qs.push({ bX, bY:-py, tX, tY:-ty, D:(bD + tD)*.5,
+              s:(lit*(QSHADE - 1))|0, pale:Q.pale, rim: Math.abs(wD) < .62 });
+  }
+  qs.sort((u, v) => u.D - v.D);
+
+  function quills(from, to){
+    for (let i=from;i<to;i++){
+      const q = qs[i];
+      let vx = q.tX - q.bX, vy = q.tY - q.bY;
+      let vl = Math.hypot(vx, vy);
+      // a quill aimed at the lens foreshortens to nothing; keep a stub, or it
+      // degenerates and vanishes instead of reading as a cut-off spine
+      if (vl < 1.4){ const k = 1.4/(vl || 1); vx *= k; vy *= k; vl = 1.4; }
+      const nx = -vy/vl*2.00, ny = vx/vl*2.00;      // half-width at the root
+      ctx.fillStyle = QCOL[q.pale ? 2 : 0][q.s];
+      ctx.beginPath();
+      ctx.moveTo(q.bX + nx, q.bY + ny);
+      ctx.lineTo(q.bX + vx, q.bY + vy);
+      ctx.lineTo(q.bX - nx, q.bY - ny);
+      ctx.closePath(); ctx.fill();
+      // the band: pale tip over a dark base. Only where the quill is long
+      // enough in SCREEN space to show one — on a foreshortened quill the
+      // overlay is just a fat pale blob, and a few hundred of those read as
+      // scales on a pinecone.
+      if (q.pale && vl > 4.2 && q.rim){
+        ctx.fillStyle = QCOL[1][q.s];
+        ctx.beginPath();
+        ctx.moveTo(q.bX + vx*.54 + nx*.48, q.bY + vy*.54 + ny*.48);
+        ctx.lineTo(q.bX + vx, q.bY + vy);
+        ctx.lineTo(q.bX + vx*.54 - nx*.48, q.bY + vy*.54 - ny*.48);
+        ctx.closePath(); ctx.fill();
+      }
+    }
+  }
+
+  let split = 0;
+  while (split < qs.length && qs[split].D <= 0) split++;
+  quills(0, split);
+
+  // ── legs, sorted the same way. Depth does the near/far pairing now, so
+  //    there is no draw-order rule to get wrong and no colour trick needed.
+  const legs = [];
+  if (c < .82){
+    const up = 1 - c/.82;
+    for (const [lx, lz, ph] of [[11.5,  Cc*.52, p], [-11.5,  Cc*.52, p + Math.PI],
+                                [11.5, -Cc*.52, p + Math.PI], [-11.5, -Cc*.52, p]]){
+      const sw = Math.max(0, Math.sin(ph));
+      const hipY = -(-B*.62), footY = -(GROUND + sw*3.2*g)*up + (1 - up)*-B*.5;
+      const fx = lx + Math.cos(ph)*3.4*g;
+      legs.push({ D: lx*st + lz*ct,
+                  hX: lx*ct - lz*st, hY: hipY,
+                  fX: fx*ct - lz*st, fY: footY });
+    }
+  }
+  /* All four legs go down BEFORE the body, so only the part below his belly
+     ever shows. Sorting them against the body instead painted the near pair
+     across his chest — the "legs through his body" fault of §10, which the
+     depth sort reintroduced the moment it was given the chance. */
+  legs.sort((u, v) => u.D - v.D);
+  for (const L of legs){
+    const near = L.D > 0;
+    ctx.strokeStyle = near ? C.limb : "#a5895f";
+    ctx.lineWidth = 4.6; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(L.hX, L.hY); ctx.lineTo(L.fX, L.fY - 1); ctx.stroke();
+    ctx.fillStyle = near ? C.paw : "#7a6046";
+    ctx.beginPath(); ctx.ellipse(L.fX + .8, L.fY, 3.0, 2.4, 0, 0, TAU); ctx.fill();
+  }
+
+  /* ── his body. An ellipsoid under a rotation about the vertical axis
+        projects to an axis-aligned ellipse exactly, so this is one fill and
+        no approximation: the half-width is sqrt(a²cos²θ + c²sin²θ). */
+  const bw = Math.sqrt(A*A*ct*ct + Cc*Cc*st*st);
+  const bgc = ctx.createLinearGradient(0, -B, 0, B*1.15);
+  bgc.addColorStop(0,   C.creamHi);
+  bgc.addColorStop(.60, C.cream);
+  bgc.addColorStop(1,   C.creamLo);
+  ctx.fillStyle = bgc;
+  ctx.beginPath(); ctx.ellipse(0, 0, bw, B, 0, 0, TAU); ctx.fill();
+
+  /* ── the dark mass under the coat. Without this the cream body shows
+        between the quills and he reads as an artichoke: 250 narrow needles
+        nowhere near cover an ellipsoid. Rather than fill the true mantle
+        region — a plane section of an ellipsoid, which projects to an awkward
+        composite of curve and silhouette — it is the body ellipse shifted
+        along the boundary plane's own normal. Which means it is correct from
+        every angle for one fill: back-and-up in profile, straight up when he
+        is nose-on, over all of him from behind. The ragged quill roots hide
+        the seam, which is what they do on the animal too. */
+  const off = 7.6 * (1 - c*.75);
+  const mgc = ctx.createLinearGradient(0, -B, 0, B*.6);
+  mgc.addColorStop(0, C.mantleHi);
+  mgc.addColorStop(1, C.mantleLo);
+  ctx.fillStyle = mgc;
+  ctx.beginPath();
+  ctx.ellipse(-MN.x*off*ct + MN.z*off*st, MN.y*off, bw*.94, B*.94, 0, 0, TAU);
+  ctx.fill();
+
+  /* The near half of the coat goes down BEFORE his face. Drawn after it, any
+     quill on this side that happened to overlap his head was painted straight
+     over his eye — §10's "the quills were once drawn last, over everything,
+     which buried his ear and eye". Only the crown hood belongs on top, and
+     that is drawn from inside the face block. */
+  quills(split, qs.length);
+
+  // ── the head, and the face on it
+  const fa = clamp((1 - c*1.85)*1.7, 0, 1);
+  if (fa > .02){
+    ctx.globalAlpha = a * fa;
+    const rt = 1 - c*.85;                       // he pulls his head in as he curls
+    const hc = { x: HD_C.x*rt + hog.hlag, y: HD_C.y*rt - d*3.4, z: HD_C.z };
+    const hcX = hc.x*ct - hc.z*st;
+
+    // head yaw is BODY-relative now, which is what an animal's neck is. The
+    // gaze aim from updateLook is converted where it is set.
+    const hy = hog.yaw + hog.lag + Math.sin(t*sniffR*.5)*(.03 + d*.075)
+             + d*Math.sin(t*1.3)*.16;
+    const hp = hog.pitch + sniff*(.055 + d*.115) + jitter*(.008 + d*.020)
+             - hog.hlag*.030 - d*.34 + hog.shiver*Math.sin(t*26)*.03;
+
+    const R = HD_R*rt;
+    const HP = (dir, rr) => ({
+      X: (hc.x + R*rr*dir.x)*ct - (hc.z + R*rr*dir.z)*st,
+      Y: -(hc.y + R*rr*dir.y),
+      D:  (hc.x + R*rr*dir.x)*st + (hc.z + R*rr*dir.z)*ct,
+      n:  dir.x*st + dir.z*ct                   // the normal's depth: is it facing us
+    });
+
+    // ── the coat over his crown. Built here rather than in the body list
+    //    because it rides the head's own yaw and pitch.
+    const crown = [];
+    for (const Q of HQUILLS){
+      const rn = hRot(Q.n, hy, hp), rd = hRot(Q.dir, hy, hp);
+      const bx = hc.x + R*rn.x, by = hc.y + R*rn.y, bz = hc.z + R*rn.z;
+      const l  = Q.len * rt;
+      const tx = bx + rd.x*l, ty = by + rd.y*l, tz = bz + rd.z*l;
+      const wX = rd.x*ct - rd.z*st, wD = rd.x*st + rd.z*ct;
+      crown.push({
+        bX: bx*ct - bz*st, bY: -by, tX: tx*ct - tz*st, tY: -ty,
+        D: (bx*st + bz*ct + tx*st + tz*ct)*.5,
+        s: (Math.max(0, wX*L3.x + rd.y*L3.y + wD*L3.d)*(QSHADE - 1))|0,
+        pale: Q.pale
+      });
+    }
+    crown.sort((u, v) => u.D - v.D);
+    let hsplit = 0;
+    while (hsplit < crown.length && crown[hsplit].D <= hc.x*st + hc.z*ct) hsplit++;
+    function crownQuills(from, to){
+      for (let i=from;i<to;i++){
+        const q = crown[i];
+        let vx = q.tX - q.bX, vy = q.tY - q.bY;
+        let vl = Math.hypot(vx, vy);
+        if (vl < 1.1){ const k = 1.1/(vl || 1); vx *= k; vy *= k; vl = 1.1; }
+        const nx = -vy/vl*1.35, ny = vx/vl*1.35;
+        ctx.fillStyle = QCOL[q.pale ? 1 : 3][q.s];
+        ctx.beginPath();
+        ctx.moveTo(q.bX + nx, q.bY + ny);
+        ctx.lineTo(q.bX + vx, q.bY + vy);
+        ctx.lineTo(q.bX - nx, q.bY - ny);
+        ctx.closePath(); ctx.fill();
+      }
+    }
+    crownQuills(0, hsplit);                     // the nape, behind his head
+
+    // a sphere projects to a circle, whatever the rotation
+    ctx.fillStyle = bgc;
+    ctx.beginPath(); ctx.arc(hcX, -hc.y, R, 0, TAU); ctx.fill();
+
+    // ears, behind the muzzle but over the head, at the coat's edge
+    for (const side of [-1, 1]){
+      const e = HP(headDir(side*AZ_EAR, EL_EAR, hy, hp), 1.0);
+      const v = faceVis(e.n) * (side < 0 ? .8 : 1);
+      if (v <= .02) continue;
+      const sc = .82 + .18*Math.max(0, e.n);
+      ctx.globalAlpha = a * fa * v;
+      ctx.fillStyle = side < 0 ? "#3a2a1e" : C.ear;
+      ctx.beginPath();
+      ctx.ellipse(e.X, e.Y, 1.75*sc*earSq, 2.6*sc, -.34 + earTilt*side, 0, TAU);
+      ctx.fill();
+    }
+    ctx.globalAlpha = a * fa;
+
+    // the muzzle: a short cone along his snout, drawn as the projected axis
+    const tipD = headDir(0, -.16, hy, hp);
+    const tip = HP(tipD, SNOUT_R), bse = HP(tipD, .26);
+    const mdx = tip.X - bse.X, mdy = tip.Y - bse.Y;
+    const slen = Math.hypot(mdx, mdy);
+    ctx.save();
+    ctx.translate((tip.X + bse.X)/2, (tip.Y + bse.Y)/2);
+    ctx.rotate(Math.atan2(mdy, mdx));
+    ctx.fillStyle = C.muzzle;
+    ctx.beginPath(); ctx.ellipse(0, 0, Math.max(4.2, slen*.5 + 2.2), 2.9, 0, 0, TAU); ctx.fill();
+    ctx.restore();
+
+    // the blush, hung off the eye so it can never land on the snout
+    const bl = HP(headDir(AZ_EYE*.80, EL_EYE - .62, hy, hp), .95);
+    if (bl.n > .04){
+      ctx.globalAlpha = a * fa * clamp(bl.n*2.4, 0, 1);
+      ctx.fillStyle = C.blush;
+      ctx.beginPath(); ctx.ellipse(bl.X, bl.Y, 3.2, 2.2, 0, 0, TAU); ctx.fill();
+      ctx.globalAlpha = a * fa;
+    }
+
+    // the nose. It flares on each sniff rather than sliding about.
+    const fl = sniff*(.30 + d*.34);
+    const nX = tip.X + jitter*(.10 + d*.35)*.35, nY = tip.Y - fl*.9;
+    const nr = 1.8 + .7*(.5 + .5*Math.max(0, tipD.x*st + tipD.z*ct));
+    ctx.fillStyle = C.nose;
+    ctx.beginPath();
+    ctx.ellipse(nX, nY, nr*(1 + fl*.34), nr*.88*(1 - fl*.14), .1, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,.55)";
+    ctx.beginPath(); ctx.ellipse(nX - nr*.3, nY - nr*.4, nr*.34, nr*.26, -.3, 0, TAU); ctx.fill();
+
+    // mouth, and whiskers. Both narrow as his snout turns toward the lens,
+    // which now falls out of the projection instead of being faked.
+    const fore = Math.abs(tipD.x*ct - tipD.z*st);       // how side-on the snout is
+    ctx.strokeStyle = "rgba(74,52,40,.80)"; ctx.lineWidth = 1.15; ctx.lineCap = "round";
+    const mw = 3.1*fore + 1.4;
+    ctx.beginPath();
+    ctx.moveTo(nX - mw, nY + nr*1.5);
+    ctx.quadraticCurveTo(nX, nY + nr*2.4, nX + mw, nY + nr*1.5);
+    ctx.stroke();
+
+    ctx.globalAlpha = a * fa * .17;
+    ctx.strokeStyle = "rgba(246,240,228,1)"; ctx.lineWidth = .55;
+    for (let side=-1; side<=1; side+=2)
+      for (let i=0;i<2;i++){
+        const spread = (i - .5)*2.2 + side*1.1;
+        const reach  = 7*(.45 + .55*fore)*(1 + sniff*.28);
+        ctx.beginPath();
+        ctx.moveTo(nX, nY + 1);
+        ctx.quadraticCurveTo(nX + (mdx/(slen||1))*reach*.5 + side*1.8, nY + spread + 1.6,
+                             nX + (mdx/(slen||1))*reach + side*1.4, nY + spread*1.7);
+        ctx.stroke();
+      }
+    ctx.globalAlpha = a * fa;
+
+    // eyes. Both are real points on the sphere, so the far one comes past the
+    // snout of its own accord as he turns.
+    for (const side of [-1, 1]){
+      const e = HP(headDir(side*AZ_EYE, EL_EYE, hy, hp), RR_EYE);
+      const v = faceVis(e.n) * (side < 0 ? .82 : 1);
+      if (v <= .02) continue;
+      const sc = (.74 + .26*Math.max(0, e.n)) * (side < 0 ? .94 : 1);
+      ctx.globalAlpha = a * fa * v;
+      ctx.fillStyle = "#120c0b";
+      ctx.beginPath(); ctx.ellipse(e.X, e.Y, 1.78*sc, 2.0*sc*eyeH, 0, 0, TAU); ctx.fill();
+      if (eyeH > .35){
+        ctx.fillStyle = "rgba(255,255,255,.9)";
+        ctx.beginPath(); ctx.arc(e.X + .60*sc, e.Y - .68*sc, .66*sc, 0, TAU); ctx.fill();
+      }
+      ctx.strokeStyle = "rgba(74,54,42,.30)"; ctx.lineWidth = .8*sc;
+      ctx.beginPath(); ctx.arc(e.X, e.Y, 2.5*sc, -2.5, -1.0); ctx.stroke();
+      ctx.globalAlpha = a * fa;
+    }
+    ctx.globalAlpha = a * fa;
+    crownQuills(hsplit, crown.length);          // and the spines over his brow
+    ctx.globalAlpha = a;
+  }
+
+
+  if (hog.shiver > .35){
+    ctx.globalAlpha = a * hog.shiver * (.35 + .3*Math.sin(t*11));
+    ctx.strokeStyle = "rgba(198,226,246,1)"; ctx.lineWidth = 1.5;
+    for (let i=0;i<2;i++){
+      ctx.beginPath(); ctx.arc(-6, -6, 30 + i*7, -2.5, -1.6); ctx.stroke();
+    }
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
 /* ── the stalls ───────────────────────────────────────────────────────── */
 const STALLS = [
   { tag:"amble",    note:"slow walk — the everyday gait",
@@ -570,12 +1037,10 @@ const STALLS = [
       h.dip  = lerp(h.dip, go?0:1, 1-Math.exp(-5.5*dt));
       h.arrive = go?0:Math.max(0,1-((ph-.55)*6));
       h.walk += dt*6*h.gait; } },
-  { tag:"turning",  note:"body steers, head holds its bearing then catches up — facing is still an instant flip",
+  { tag:"turning",  note:"steers right round through nose-on — no mirror flip any more",
     set:(h,dt,t)=>{ h.gait=1; h.walk += dt*5;
-      const hd2 = Math.sin(t*.55)*2.4;                  // he steers about
-      h.turn += wrapAng(hd2 - h.hd); h.hd = hd2;        // what the head has to resist
-      if (Math.abs(Math.sin(hd2)) > .10)                // same flip rule as the game
-        h.dir = Math.sin(hd2) > 0 ? 1 : -1; } },
+      const hd2 = t*.85;                                // walks a slow full circle
+      h.turn += wrapAng(hd2 - h.hd); h.hd = hd2; } },
   { tag:"curled",   note:"hit — curls into a ball and unrolls",
     set:(h,dt,t)=>{ const on = Math.sin(t*.7)>0;
       h.curl = lerp(h.curl, on?1:0, 1-Math.exp((on?-9:-6)*dt));
@@ -584,12 +1049,12 @@ const STALLS = [
     set:(h,dt)=>{ h.gait=0; h.dip=.4; h.shiver=1; } },
   { tag:"looking about", note:"face turns on the front of the head — he glances round and sniffs",
     set:(h,dt)=>{ h.gait=0; h.dip=.25; } },
-  { tag:"face-on", note:"held front-on — both eyes, snout foreshortened at you",
-    set:(h,dt,t)=>{ h.gait=0; h.dip=.1;
-      h.yawT = 1.30; h.pitchT = .05; h.lookT = 9; } },
-  { tag:"yaw sweep", note:"driven through the full turn, away to front-on",
+  { tag:"face-on", note:"body walked straight at the lens — both eyes, snout foreshortened",
+    set:(h,dt,t)=>{ h.gait=1; h.dip=.1; h.walk += dt*3.4; h.hd = 0;
+      h.yawT = 0; h.pitchT = .05; h.lookT = 9; } },
+  { tag:"yaw sweep", note:"body held still, head turned right across him and back",
     set:(h,dt,t)=>{ h.gait=0; h.dip=.2;
-      h.yawT = -0.5 + 1.9*(0.5+0.5*Math.sin(t*.55)); h.pitchT = Math.sin(t*.37)*.3; h.lookT = 9; } },
+      h.yawT = Math.sin(t*.55)*1.35; h.pitchT = Math.sin(t*.37)*.3; h.lookT = 9; } },
 ];
 
 const grid = document.getElementById("grid");
@@ -620,11 +1085,13 @@ const elScl = document.getElementById("scl");
 const btnPause = document.getElementById("pause");
 const btnStep  = document.getElementById("step");
 const btnBones = document.getElementById("bones");
-let paused = false, stepOnce = false;
+let paused = false, stepOnce = false, use3d = true;
 btnPause.onclick = () => { paused = !paused; btnPause.classList.toggle("on", paused);
                            btnPause.textContent = paused ? "play" : "pause"; };
 btnStep.onclick  = () => { stepOnce = true; };
 btnBones.onclick = () => { showBones = !showBones; btnBones.classList.toggle("on", showBones); };
+const btnThree = document.getElementById("three");
+btnThree.onclick = () => { use3d = !use3d; btnThree.classList.toggle("on", use3d); };
 
 let last = performance.now();
 function frame(now){
@@ -662,7 +1129,7 @@ function frame(now){
     x.strokeStyle = "rgba(200,228,180,.10)"; x.lineWidth = 1;
     x.beginPath(); x.moveTo(0, s.h*.62 + 19*K); x.lineTo(s.w, s.h*.62 + 19*K); x.stroke();
 
-    drawHog(x, s.hog, s.t, K, s.w*.5, s.h*.62);
+    (use3d ? drawHog3 : drawHog)(x, s.hog, s.t, K, s.w*.5, s.h*.62);
   }
   requestAnimationFrame(frame);
 }
