@@ -227,7 +227,7 @@ function drawHog(ctx, hog, t, K, cx, cy){
 
   // ── the pale underside, showing between the dome and the ground
   ctx.fillStyle = C.belly;
-  ctx.beginPath(); ctx.ellipse(-1, 10, 24, 8.5 * (1 + Math.sin(p*2 + 1.3)*.05*g), 0, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(-1, 10, 24, 8.5 * sqz, 0, 0, TAU); ctx.fill();
 
   /* ── the spine dome ───────────────────────────────────────────────────
      Most of the animal, and it hoods FORWARD over the head. Four passes:
