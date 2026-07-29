@@ -106,7 +106,27 @@ const SP_MAGIC = glow("238,226,186");
    z is the camera-facing component: positive is the near side, negative is
    round the back and hidden.
    ────────────────────────────────────────────────────────────────────── */
-const HEAD = { x:11, y:6, rx:17, ry:12.5 };
+// Proportions taken from a real hedgehog: the spine dome is most of the animal
+// and hoods forward over a SMALL pale face tucked underneath it. The face is
+// cream, the short muzzle is dark, and the ears sit low at the sides of the
+// head near eye level — not up on top.
+const HEAD = { x:16, y:10, rx:9.8, ry:8.4 };
+
+const C = {
+  quillTip:  "#e9dcc0",   // cream tips — most of what you see
+  quillDark: "#4b3a29",   // the dark band below them
+  quillMid:  "#9d8a68",
+  domeHi:    "#c2ae8a",
+  domeLo:    "#6a5942",
+  face:      "#f0e8d8",   // pale cream, the strongest contrast on him
+  faceLo:    "#d3c5ab",
+  muzzle:    "#8a7a6d",   // grey-brown, a shade darker than the face
+  nose:      "#241b19",
+  ear:       "#4e3d34",
+  earIn:     "#8d6f64",
+  belly:     "#8c7a63",
+  limb:      "#5a4a3c",
+};
 
 function facePt(az, el, yaw, pitch, rr){
   const A = az + yaw, E = el + pitch, ce = Math.cos(E);
@@ -116,12 +136,15 @@ function facePt(az, el, yaw, pitch, rr){
     z: ce * Math.sin(A)
   };
 }
-// how visible a feature is as it comes round the edge of the head
-const faceVis = z => clamp((z + .10)/.30, 0, 1);
+// How visible a feature is as it comes round the edge of the head. This MUST
+// start at z = 0: anything on the far hemisphere is behind the head, and a ramp
+// that reaches into negative z draws it straight through his skull.
+const faceVis = z => clamp(z/.26, 0, 1);
 
-const AZ_EYE = 1.26, EL_EYE = .47;      // 72° round, high on the head
-const AZ_EAR = 2.15, EL_EAR = .72;      // well back and up
-const SNOUT_R = 1.62;                   // it sticks out past the head sphere
+const AZ_EYE = 1.10, EL_EYE = .44;      // above and behind the muzzle, on the cream
+const RR_EYE = .80;
+const AZ_EAR = 2.46, EL_EAR = .52;      // back of the head; drawn behind the face
+const SNOUT_R = 1.22;                   // short and blunt, but it must clear the face
 
 // He looks about and sniffs of his own accord.
 function updateLook(h, dt){
@@ -186,38 +209,36 @@ function drawHog(ctx, hog, t, K, cx, cy){
   ctx.globalAlpha = a;
 
   const legUp = 1 - c;
-  function leg(x0, ph, base, col){
+  function leg(x0, ph, base){
     if (legUp < .05) return;
     const sw = Math.max(0, Math.sin(ph));
-    const fx = x0 + Math.cos(ph)*4.2*g;
-    const fy = (base - sw*3.6*g) * legUp;
-    ctx.strokeStyle = col; ctx.lineWidth = 5.0; ctx.lineCap = "round";
-    ctx.beginPath(); ctx.moveTo(x0, 10*legUp); ctx.lineTo(fx, fy - 1); ctx.stroke();
-    ctx.fillStyle = col;
-    ctx.beginPath(); ctx.ellipse(fx + 1, fy, 4.2, 3.2, 0, 0, TAU); ctx.fill();
-    if (showBones){
-      ctx.strokeStyle = "#ff5c7a"; ctx.lineWidth = .8;
-      ctx.beginPath(); ctx.moveTo(x0, 10*legUp); ctx.lineTo(fx, fy-1); ctx.stroke();
-    }
+    const fx = x0 + Math.cos(ph)*3.8*g;
+    const fy = (base - sw*3.2*g) * legUp;
+    ctx.strokeStyle = C.limb; ctx.lineWidth = 5.2; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(x0, 12*legUp); ctx.lineTo(fx, fy - 1); ctx.stroke();
+    ctx.fillStyle = C.limb;
+    ctx.beginPath(); ctx.ellipse(fx + 1, fy, 4.0, 3.1, 0, 0, TAU); ctx.fill();
   }
-  leg(-13, p + Math.PI, 19.5, "#241a12");
-  leg( 10, p,           19.5, "#241a12");
-  leg( -8, p,           21.5, "#3d2d1f");
-  leg( 15, p + Math.PI, 21.5, "#3d2d1f");
+  leg(-12, p + Math.PI, 20.5);
+  leg(  9, p,           20.5);
+  leg( -7, p,           22.0);
+  leg( 14, p + Math.PI, 22.0);
 
-  const bw = lerp(27, 22, c), bh = lerp(15.5, 22, c) * sqz;
-  const bg = ctx.createLinearGradient(0, -bh, 0, bh);
-  bg.addColorStop(0, "#7c6144");
-  bg.addColorStop(1, "#4a3626");
-  ctx.fillStyle = bg;
-  ctx.beginPath(); ctx.ellipse(-1, 2, bw, bh, 0, 0, TAU); ctx.fill();
+  // ── the pale underside, showing between the dome and the ground
+  ctx.fillStyle = C.belly;
+  ctx.beginPath(); ctx.ellipse(-1, 10, 24, 8.5 * (1 + Math.sin(p*2 + 1.3)*.05*g), 0, 0, TAU); ctx.fill();
 
-  const a0 = lerp(-3.05, -Math.PI - .5, c);
-  const a1 = lerp(-0.22,  Math.PI - .2, c);
-  const mx = -4*(1-c), my = -3.5*(1-c);
-  const drx = lerp(24.5, 22, c), dry = lerp(15, 22, c);
+  /* ── the spine dome ───────────────────────────────────────────────────
+     Most of the animal, and it hoods FORWARD over the head. Four passes:
+     a dark under-layer that makes the silhouette prickly, the dome itself,
+     a dense speckle of banded ticks, then cream tips round the rim. Short
+     and dense, not long spikes — at this size the banding is what reads. */
+  const a0 = lerp(-3.02, -Math.PI - .5, c);
+  const a1 = lerp( 0.42,  Math.PI - .2, c);        // sweeps round over the brow
+  const mx = -3*(1-c), my = -2.5*(1-c);
+  const drx = lerp(29.5, 21, c), dry = lerp(17, 21, c);
 
-  function spike(ang, rx, ry, len, wid, col){
+  function quill(ang, rx, ry, len, wid, col){
     const bx = mx + Math.cos(ang)*rx,  by = my + Math.sin(ang)*ry;
     const tx = mx + Math.cos(ang)*(rx+len), ty = my + Math.sin(ang)*(ry+len)*.94;
     const nx = -Math.sin(ang)*wid, ny = Math.cos(ang)*wid;
@@ -226,150 +247,149 @@ function drawHog(ctx, hog, t, K, cx, cy){
     ctx.moveTo(bx + nx, by + ny); ctx.lineTo(tx, ty); ctx.lineTo(bx - nx, by - ny);
     ctx.closePath(); ctx.fill();
   }
+
+  // 1. dark under-layer, just proud of the dome
   for (let i=0;i<30;i++){
-    const wob = Math.sin(p*2 + i*.55)*.04*g;
-    const ang = lerp(a0, a1, i/29) + wob;
-    spike(ang, drx*.98, dry*.98, 19 + Math.sin(i*1.9)*5.0, 3.4, i%2 ? "#2b2017" : "#402e1e");
+    const wob = Math.sin(p*2 + i*.55)*.035*g;
+    quill(lerp(a0, a1, i/29) + wob, drx*.99, dry*.99,
+          (8.5 + Math.sin(i*1.9)*2.6) * (1 - c*.35), 3.0 + c*.9, C.quillDark);
   }
+
+  // 2. the dome
   const dg = ctx.createLinearGradient(0, my - dry, 0, my + dry);
-  dg.addColorStop(0,   "#7a6247");
-  dg.addColorStop(.55, "#54402c");
-  dg.addColorStop(1,   "#372719");
+  dg.addColorStop(0,   C.domeHi);
+  dg.addColorStop(.62, C.quillMid);
+  dg.addColorStop(1,   C.domeLo);
   ctx.fillStyle = dg;
-  ctx.beginPath(); ctx.ellipse(mx, my, drx*.94, dry*.94, 0, 0, TAU); ctx.fill();
-  ctx.globalAlpha = a*.22;
-  ctx.strokeStyle = "rgba(226,206,168,1)"; ctx.lineWidth = 2.2;
-  ctx.beginPath(); ctx.ellipse(mx, my, drx*.90, dry*.90, 0, -2.7, -.5); ctx.stroke();
-  ctx.globalAlpha = a;
-  for (let i=0;i<26;i++){
-    const wob = Math.sin(p*2 + i*.72)*.05*g;
-    const ang = lerp(a0 + .10, a1 - .10, i/25) + wob + .05;
-    spike(ang, drx*.74, dry*.74, 15 + Math.sin(i*2.6)*4.2, 3.0,
-          i%3===0 ? "#ab8f65" : (i%3===1 ? "#6b5335" : "#8d7149"));
+  ctx.beginPath(); ctx.ellipse(mx, my, drx*.97, dry*.97, 0, 0, TAU); ctx.fill();
+
+  // 3. banded speckle — this is the texture that makes him read as a hedgehog
+  for (let i=0;i<52;i++){
+    const t2 = i/51;
+    const ang = lerp(a0 + .06, a1 - .06, t2) + Math.sin(p*2 + i*.9)*.045*g;
+    const band = i % 3;
+    const r0 = .30 + (i%5)*.10, r1 = r0 + .34;
+    ctx.strokeStyle = band === 0 ? C.quillTip : (band === 1 ? C.quillDark : C.quillMid);
+    ctx.lineWidth = band === 0 ? 2.6 : 2.0;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(mx + Math.cos(ang)*drx*r0, my + Math.sin(ang)*dry*r0);
+    ctx.lineTo(mx + Math.cos(ang)*drx*r1, my + Math.sin(ang)*dry*r1);
+    ctx.stroke();
+  }
+
+  // 4. cream tips round the rim
+  for (let i=0;i<30;i++){
+    const wob = Math.sin(p*2 + i*.62)*.04*g;
+    quill(lerp(a0 + .04, a1 - .04, i/29) + wob + .03, drx*.90, dry*.90,
+          (6.5 + Math.sin(i*2.6)*2.2) * (1 - c*.30), 2.5 + c*.8, i%4 ? C.quillTip : C.quillMid);
   }
 
   const fa = 1 - c;
   if (fa > .02){
     ctx.globalAlpha = a * fa;
 
-    // the sniff wobbles the head itself, not just the nose
     const sniffP = d * Math.sin(t*9.5)*.055 + hog.shiver*Math.sin(t*26)*.03;
     const yaw   = hog.yaw + d*Math.sin(t*1.3)*.16;
-    const hEl   = hog.pitch + sniffP + headDip*.012;   // head pitch, not body pitch
+    const hEl   = hog.pitch + sniffP + headDip*.012;
     const cy2 = Math.cos(yaw), sy2 = Math.sin(yaw);
 
     ctx.save();
     ctx.translate(headSw*.4, headDip*.5);
 
-    // the head itself: it widens a touch as he comes front-on
-    ctx.fillStyle = "#9a7a55";
-    ctx.beginPath();
-    ctx.ellipse(HEAD.x + sy2*1.6, HEAD.y + 1, HEAD.rx*(1 + Math.abs(sy2)*.10),
-                HEAD.ry, -.06, 0, TAU);
-    ctx.fill();
-
-    // ── far ear, behind the head
-    const earF = facePt(-AZ_EAR, EL_EAR, yaw, hEl);
-    const earFv = faceVis(earF.z);
-    if (earFv > .02){
-      ctx.globalAlpha = a * fa * earFv * .85;
-      ctx.fillStyle = "#5f462f";
-      ctx.beginPath();
-      ctx.ellipse(earF.x, earF.y + ear*.6, 4.0*(.7 + .3*earF.z), 4.5*(.7 + .3*earF.z), .2, 0, TAU);
-      ctx.fill();
+    // ── both ears, behind the face
+    for (const side of [-1, 1]){
+      const e2 = facePt(side*AZ_EAR, EL_EAR, yaw, hEl);
+      const v2 = faceVis(e2.z) * (side < 0 ? .8 : 1);
+      if (v2 <= .02) continue;
+      const sc = .82 + .18*Math.max(0, e2.z);
+      ctx.globalAlpha = a * fa * v2;
+      ctx.fillStyle = side < 0 ? "#3d2f28" : C.ear;
+      ctx.beginPath(); ctx.ellipse(e2.x, e2.y + ear, 4.1*sc, 4.5*sc, .12, 0, TAU); ctx.fill();
+      ctx.fillStyle = C.earIn;
+      ctx.beginPath(); ctx.ellipse(e2.x + .4, e2.y + .6 + ear, 2.0*sc, 2.3*sc, .12, 0, TAU); ctx.fill();
     }
     ctx.globalAlpha = a * fa;
 
-    // ── the snout, swinging round on the front of the head. Face-on it
-    //    foreshortens to a stub and the nose comes at you.
-    const tip = facePt(0, -.10, yaw, hEl, SNOUT_R);
-    const bse = facePt(0, -.10, yaw, hEl, .35);
+    // ── the small pale face, tucked under the front of the dome
+    const hg = ctx.createLinearGradient(0, HEAD.y - HEAD.ry, 0, HEAD.y + HEAD.ry);
+    hg.addColorStop(0, C.face);
+    hg.addColorStop(1, C.faceLo);
+    ctx.fillStyle = hg;
+    ctx.beginPath();
+    ctx.ellipse(HEAD.x + sy2*1.4, HEAD.y, HEAD.rx*(1 + Math.abs(sy2)*.12), HEAD.ry, -.04, 0, TAU);
+    ctx.fill();
+    // a taper toward the muzzle, so the face is a wedge and not a pale ball
+    const tp = facePt(0, -.10, yaw, hEl, .78);
+    ctx.beginPath(); ctx.ellipse(tp.x, tp.y, 6.4, 5.4, -.06, 0, TAU); ctx.fill();
+
+    // ── short dark muzzle
+    const tip = facePt(0, -.16, yaw, hEl, SNOUT_R);
+    const bse = facePt(0, -.16, yaw, hEl, .30);
     const dx = tip.x - bse.x, dy = tip.y - bse.y;
     const slen = Math.hypot(dx, dy);
     ctx.save();
     ctx.translate((tip.x + bse.x)/2, (tip.y + bse.y)/2);
     ctx.rotate(Math.atan2(dy, dx));
-    ctx.fillStyle = "#e2c8a8";
-    ctx.beginPath(); ctx.ellipse(0, 0, Math.max(7.0, slen*.5 + 4.2), 7.0, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = C.muzzle;
+    ctx.beginPath(); ctx.ellipse(0, 0, Math.max(4.6, slen*.5 + 2.4), 4.1, 0, 0, TAU); ctx.fill();
     ctx.restore();
 
-    // blush, on whichever cheek is toward us
-    const blush = facePt(1.5, .05, yaw, hEl, .95);
-    if (faceVis(blush.z) > .05){
-      ctx.globalAlpha = a * fa * faceVis(blush.z) * .30;
-      ctx.fillStyle = "rgba(230,152,138,1)";
-      ctx.beginPath(); ctx.ellipse(blush.x, blush.y + 3, 4.6, 3.1, 0, 0, TAU); ctx.fill();
-      ctx.globalAlpha = a * fa;
-    }
+    // ── nose
+    const near = .5 + .5*Math.max(0, sy2);
+    const nsw  = 1 + Math.max(0, sniff)*.08*(.5 + d);
+    const nx2 = tip.x + noseTw*.7*cy2, ny2 = tip.y + noseUp*.45;
+    const nr = (2.3 + near*.9) * nsw;
+    ctx.fillStyle = C.nose;
+    ctx.beginPath(); ctx.ellipse(nx2, ny2, nr, nr*.88, .1, 0, TAU); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,.55)";
+    ctx.beginPath(); ctx.ellipse(nx2 - nr*.3, ny2 - nr*.4, nr*.34, nr*.26, -.3, 0, TAU); ctx.fill();
 
-    // ── nose at the snout tip, bigger as it comes toward the lens
-    const near = .5 + .5*Math.max(0, Math.sin(yaw));
-    const nsw  = 1 + Math.max(0, sniff)*.09*(.5 + d);
-    const nx2 = tip.x + noseTw*.8*cy2, ny2 = tip.y + noseUp*.5;
-    const nr = (2.7 + near*1.1) * nsw;
-    ctx.fillStyle = "#2a1b14";
-    ctx.beginPath(); ctx.ellipse(nx2, ny2, nr, nr*.86, .1, 0, TAU); ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,.6)";
-    ctx.beginPath(); ctx.ellipse(nx2 - nr*.3, ny2 - nr*.4, nr*.36, nr*.28, -.3, 0, TAU); ctx.fill();
-    ctx.strokeStyle = "rgba(40,26,20,.5)"; ctx.lineWidth = .8; ctx.lineCap = "round";
-    ctx.beginPath(); ctx.moveTo(nx2, ny2 + nr*.8); ctx.lineTo(nx2 - .4, ny2 + nr*1.5); ctx.stroke();
-
-    // whiskers: they fan wider the more front-on he is
-    ctx.globalAlpha = a * fa * .22;
-    ctx.strokeStyle = "rgba(240,232,214,1)"; ctx.lineWidth = .6;
+    // whiskers
+    ctx.globalAlpha = a * fa * .20;
+    ctx.strokeStyle = "rgba(246,240,228,1)"; ctx.lineWidth = .6;
     for (let side=-1; side<=1; side+=2)
       for (let i=0;i<3;i++){
-        const spread = (i - 1) * 2.6 + side*1.4;
-        const reach  = 12 * (0.45 + 0.55*Math.abs(cy2));
+        const spread = (i - 1) * 2.4 + side*1.2;
+        const reach  = 11 * (.45 + .55*Math.abs(cy2));
         ctx.beginPath();
         ctx.moveTo(nx2, ny2 + 1);
-        ctx.quadraticCurveTo(nx2 + cy2*reach*.5 + side*3, ny2 + spread + 2,
-                             nx2 + cy2*reach + side*Math.abs(sy2)*8, ny2 + spread*1.8);
+        ctx.quadraticCurveTo(nx2 + cy2*reach*.5 + side*2.6, ny2 + spread + 2,
+                             nx2 + cy2*reach + side*Math.abs(sy2)*7, ny2 + spread*1.7);
         ctx.stroke();
       }
     ctx.globalAlpha = a * fa;
 
-    // mouth, tucked under the snout, narrowing as he turns to face us
-    ctx.strokeStyle = "rgba(56,36,26,.6)"; ctx.lineWidth = 1.1;
-    const mw = 3.0 * Math.abs(cy2) + 1.4;
-    ctx.beginPath();
-    ctx.moveTo(nx2 - mw, ny2 + nr*1.9);
-    ctx.quadraticCurveTo(nx2, ny2 + nr*2.7, nx2 + mw, ny2 + nr*1.9);
-    ctx.stroke();
-
-    // ── eyes. In profile only the near one shows; turn toward the camera and
-    //    the far one swings into view on the other side of the snout.
-    function eye(az){
-      const e = facePt(az, EL_EYE, yaw, hEl);
-      const v = faceVis(e.z);
+    // ── eyes: small, round, glossy black on the pale face
+    function eye(az, far){
+      const e = facePt(az, EL_EYE, yaw, hEl, RR_EYE);
+      const v = faceVis(e.z) * (far ? .82 : 1);
       if (v <= .02) return;
-      const sc = .78 + .22*Math.max(0, e.z);
+      const sc = (.74 + .26*Math.max(0, e.z)) * (far ? .94 : 1);
       ctx.globalAlpha = a * fa * v;
-      ctx.fillStyle = "#160f0c";
-      ctx.beginPath(); ctx.ellipse(e.x, e.y, 2.0*sc, 2.2*sc*eyeH, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = "#120c0b";
+      ctx.beginPath(); ctx.ellipse(e.x, e.y, 1.9*sc, 2.1*sc*eyeH, 0, 0, TAU); ctx.fill();
       if (eyeH > .35){
-        ctx.fillStyle = "rgba(255,255,255,.92)";
-        ctx.beginPath(); ctx.arc(e.x + .7*sc, e.y - .8*sc, .8*sc, 0, TAU); ctx.fill();
+        ctx.fillStyle = "rgba(255,255,255,.9)";
+        ctx.beginPath(); ctx.arc(e.x + .65*sc, e.y - .75*sc, .72*sc, 0, TAU); ctx.fill();
       }
-      ctx.strokeStyle = "rgba(48,32,22,.30)"; ctx.lineWidth = 1.0;
-      ctx.beginPath(); ctx.arc(e.x, e.y, 4.2*sc, -2.5, -1.0); ctx.stroke();
       ctx.globalAlpha = a * fa;
     }
-    eye(-AZ_EYE);          // far eye first, so the near one overlaps it
-    eye( AZ_EYE);
+    eye(-AZ_EYE, 1);
+    eye( AZ_EYE, 0);
 
-    // ── near ear, over the top of everything
-    const earN = facePt(AZ_EAR, EL_EAR, yaw, hEl);
-    const earNv = faceVis(earN.z);
-    if (earNv > .02){
-      const sc = .8 + .2*earN.z;
-      ctx.globalAlpha = a * fa * earNv;
-      ctx.fillStyle = "#7a5c3e";
-      ctx.beginPath(); ctx.ellipse(earN.x, earN.y + ear, 4.5*sc, 5.0*sc, .2, 0, TAU); ctx.fill();
-      ctx.fillStyle = "rgba(212,158,144,.45)";
-      ctx.beginPath(); ctx.ellipse(earN.x + .5, earN.y + .5 + ear, 2.2*sc, 2.6*sc, .2, 0, TAU); ctx.fill();
-    }
     ctx.restore();
+
+    // ── the hood. In the reference the spines come down over the brow, so a
+    //    short arc of them is redrawn HERE, after the face, to overlap it.
+    //    Without this the face reads as painted on top of the dome.
+    ctx.globalAlpha = a * fa;
+    for (let i=0;i<13;i++){
+      const t2 = i/12;
+      const ang = lerp(-1.02, 0.50, t2) + Math.sin(p*2 + i*.62)*.04*g;
+      quill(ang, drx*.90, dry*.90, 7.0 + Math.sin(i*2.2)*2.0, 2.6,
+            i%3 ? C.quillTip : C.quillDark);
+    }
     ctx.globalAlpha = a;
   }
 
