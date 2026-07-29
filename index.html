@@ -1203,7 +1203,6 @@ function sow(px, py){
   const z = segBiome(Math.floor(wy/SEG));
   if (z === MGARD){ plantMush(px, py);     return; }
   if (z === WOOD) { kickLeaves(px, py);    return; }
-  if (z === POOL) { blowBubbles(px, py);   return; }
   if (z === HENS) { layEgg(px, py);        return; }
   if (winterAt(wy) > .52){ buildSnowman(px, py);   return; }   // deep winter
   if (nightAt(wy)  > .50){ releaseFireflies(px, py); return; } // after dark
@@ -2177,7 +2176,9 @@ const MEADOW = 0, DRY = 1, MUD = 2, LAKE = 3, FARM = 4, ROAD = 5, TOWN = 6, MGAR
 // meadow, parched grass, the lake, meadow again, the farm, its mud,
 // the road, the edge of town, and back out into the fields
 const WOOD = AUTUMN;
-const ORDER = [BGARD, WOOD, MGARD, LAKE, POOL, MUD, HENS, FARM, ROAD, TOWN, MEADOW];
+// POOL (the rock pool with the bubbles) was dropped: it read as an aquarium
+// dropped into a meadow. Its code is still here but it is never reached.
+const ORDER = [BGARD, WOOD, MGARD, LAKE, MUD, HENS, FARM, ROAD, TOWN, MEADOW];
 const ZONE_NAME = ["long meadow","dry grass","the mire","the lake","the farmyard",
                    "the road","edge of town","mushroom garden","butterfly garden",
                    "the snowfield","the shore","the wood","the night meadow","the hen run"];
@@ -3671,14 +3672,15 @@ function spawnBird(){
   const B = BIRDS[t];
   const sz = lerp(B.sz[0], B.sz[1], Math.random());
   const perch = perches.length ? perches[(Math.random()*perches.length)|0] : null;
-  const dir = perch ? (perch.x < W*.5 ? 1 : -1) : (Math.random() < .5 ? 1 : -1);
+  if (!perch) return;                        // no perch, no bird
+  const dir = perch.x < W*.5 ? 1 : -1;
   birds.push({
     t, sz, dir, ph: Math.random()*TAU,
     x: dir > 0 ? -sz*2 : W + sz*2,
-    y: perch ? perch.y - lerp(160, 340, Math.random()) : lerp(H*.15, H*.7, Math.random()),
+    y: perch.y - lerp(160, 340, Math.random()),
     vx: dir*lerp(220, 400, Math.random()), vy: 0,
-    state: perch ? 0 : 2,
-    key: perch ? perch.key : null,
+    state: 0,
+    key: perch.key,
     sit: lerp(5, 14, Math.random()),
     look: 0, flick: 0, land: 0,
     wing: Math.random()*TAU, glide: 0, flapT: lerp(.4, .9, Math.random())
@@ -4195,7 +4197,7 @@ function mushCell(ci){
   const items = [];
   const n = r() < .30 ? 0 : r() < .72 ? 1 : 2 + (r()*2|0);
   for (let i=0;i<n;i++) items.push({
-    x: r()*1.2 - .1, y: r()*MUSH_ROW,
+    fx: r()*1.2 - .1, x: 0, y: r()*MUSH_ROW,
     r: lerp(17, 54, Math.pow(r(), 1.4)),
     t: (r()*MUSH.length)|0, a: r()*TAU,
     lean: (r()*2-1)*.16, pop: 0, cool: 0
@@ -4505,7 +4507,12 @@ function drawGardens(dt){
     const m = segAt(wy);
     const a = m.a === MGARD ? (m.t ? 1 - m.t : 1) : m.t;
     if (a < .05) continue;
-    for (const it of mushCell(ci).items) drawMushroom(it, wy + it.y - scrollY, dt, a);
+    // fx is a fraction of the width; resolving it here keeps them spread
+    // after a resize. Using it raw put every mushroom on the left edge.
+    for (const it of mushCell(ci).items){
+      it.x = it.fx * W;
+      drawMushroom(it, wy + it.y - scrollY, dt, a);
+    }
   }
   const s0 = Math.floor((scrollY - 500)/SEG), s1 = Math.floor((scrollY + H + 500)/SEG);
   for (let sg=s0; sg<=s1; sg++){
@@ -4705,13 +4712,20 @@ function tappedNear(x, y, rad){
 
 /* ─────────────────────────── 1. snowfield ─────────────────────────── */
 const snowmen = [], flakes = [];
+function newFlake(z0){
+  return {
+    x0: lerp(-.3, 1.3, Math.random())*W,
+    y0: lerp(-.4, 1.3, Math.pow(Math.random(), 1.35))*H,
+    xE: lerp(.14, .86, Math.random())*W,
+    yE: lerp(AIR_BAND - .09, AIR_BAND + .10, Math.random())*H,
+    x: 0, y: 0, r: lerp(1.5, 3.4, Math.random()),
+    z: z0, zv: lerp(.055, .14, Math.random()), ph: Math.random()*TAU
+  };
+}
 function seedFlakes(){
   flakes.length = 0;
   const n = Math.round(clamp(W*H/5200, 60, 200));
-  for (let i=0;i<n;i++) flakes.push({
-    x: Math.random()*(W+120)-60, y: Math.random()*H,
-    z: lerp(.35,1.5,Math.random()), ph: Math.random()*TAU
-  });
+  for (let i=0;i<n;i++) flakes.push(newFlake(Math.random()));
 }
 function drawSnowGround(){
   if (snowCover < .03) return;
@@ -4756,30 +4770,34 @@ function drawSnowGround(){
     ctx.globalAlpha = 1;
   }
 }
-function drawSnowfall(){
+// Split over the two plates like the leaves: near flakes are big and go on the
+// blurred foreground, far ones are small and sharp.
+function drawSnowfall(x, nearPass){
   if (snowNow < .02) return;
   const n = Math.floor(flakes.length*snowNow);
+  x.fillStyle = "#ffffff";
   for (let i=0;i<n;i++){
     const f = flakes[i];
-    const rr = (1.6 + f.z*3.4);
-    ctx.globalAlpha = (.25 + .5*f.z)*snowNow;
-    ctx.fillStyle = "#ffffff";
-    ctx.beginPath();
-    ctx.arc(f.x + Math.sin(time*.9 + f.ph)*22*f.z, f.y, rr, 0, TAU);
-    ctx.fill();
+    const nf = clamp((.56 - f.z)/.18, 0, 1);
+    const share = nearPass ? nf : 1 - nf;
+    if (share <= .01) continue;
+    x.globalAlpha = (.32 + .48*(1 - f.z)) * snowNow * share * (nearPass ? .8 : 1);
+    x.beginPath();
+    x.arc(f.x, f.y, f.r * airK(f.z), 0, TAU);
+    x.fill();
   }
-  ctx.globalAlpha = 1;
+  x.globalAlpha = 1;
 }
 function updateSnowfall(dt){
   if (snowNow < .02) return;
   const n = Math.floor(flakes.length*snowNow);
   for (let i=0;i<n;i++){
     const f = flakes[i];
-    f.y += (26 + f.z*70)*dt;
-    f.x += (gustAt(f.x)*40 + 8)*f.z*dt;
-    if (f.y > H+20){ f.y = -20 - Math.random()*80; f.x = Math.random()*(W+120)-60; }
-    if (f.x > W+60) f.x -= W+120;
-    if (f.x < -60)  f.x += W+120;
+    f.z += f.zv*dt;
+    if (f.z >= 1){ flakes[i] = newFlake(0); continue; }
+    const e = airEase(f.z), k = airK(f.z);
+    f.x = lerp(f.x0, f.xE, e) + (Math.sin(time*.7 + f.ph)*20 + gustAt(f.x0)*26) * k;
+    f.y = lerp(f.y0, f.yE, e) + Math.sin(time*1.2 + f.ph*1.4)*7 * k;
   }
 }
 function buildSnowman(px, py){
@@ -5150,15 +5168,28 @@ const kicked = [], fallLeaves = [];
 // camera is at grass level, so a leaf on its way down is mostly going away.
 // This is the one place depth is faked, and it is legitimate: these leaves are
 // between the lens and the field, like the bokeh and the canopy, not in it.
-const FL_NEAR = 1.7, FL_FAR = 0.14;
-const flScale = z => lerp(FL_NEAR, FL_FAR, z*z*.55 + z*.45);
+// Anything airborne between the lens and the field uses this. z is 0 at the
+// lens and 1 out in the far field.
+//
+// The thing that makes it read as depth is not the shrinking on its own, it is
+// that everything CONVERGES on the same band as it recedes — a vanishing point.
+// Spawn all round the frame, close and big and blurred, and let some drift down
+// and some drift up into that band while they shrink. A uniform downward sweep
+// reads as rain no matter how much you scale it, which is what was wrong before.
+const AIR_NEAR = 1.9, AIR_FAR = 0.10;
+const airK    = z => lerp(AIR_NEAR, AIR_FAR, z*z*.5 + z*.5);
+const airEase = z => z*z*.45 + z*.55;
+const AIR_BAND = .40;                   // where the far field sits, as a share of H
 
 function newFallLeaf(z0){
   return {
-    x: lerp(-.12, 1.12, Math.random())*W,
-    y: lerp(-.18, .52, Math.random())*H,
+    x0: lerp(-.3, 1.3, Math.random())*W,
+    y0: lerp(-.4, 1.3, Math.pow(Math.random(), 1.35))*H,   // biased above the band
+    xE: lerp(.16, .84, Math.random())*W,
+    yE: lerp(AIR_BAND - .08, AIR_BAND + .09, Math.random())*H,
+    x: 0, y: 0,
     z: z0,
-    zv: lerp(.055, .125, Math.random()),          // how fast it recedes
+    zv: lerp(.05, .115, Math.random()),           // how fast it recedes
     r: lerp(11, 19, Math.random()),
     rot: Math.random()*TAU, spin: (Math.random()*2-1)*2.4,
     ci: (Math.random()*LEAFC.length)|0, ph: Math.random()*TAU
@@ -5354,14 +5385,13 @@ function updateFallLeaves(dt){
   for (let i=0;i<fallLeaves.length;i++){
     const f = fallLeaves[i];
     f.z += f.zv*dt;
-    if (f.z >= 1 || f.y > H + 70){ fallLeaves[i] = newFallLeaf(0); continue; }
-    const k = flScale(f.z);
-    // near leaves sweep past fast and big; far ones barely creep
-    f.y += (30 + f.r*1.1) * k * dt;
-    f.x += (Math.sin(time*.8 + f.ph)*30 + gustAt(f.x)*80) * k * dt;
-    f.rot += f.spin * dt * (.4 + .6*k);
-    if (f.x < -60*k) f.x = W + 60*k;
-    if (f.x > W + 60*k) f.x = -60*k;
+    if (f.z >= 1){ fallLeaves[i] = newFallLeaf(0); continue; }
+    const e = airEase(f.z), k = airK(f.z);
+    // it falls toward the band, and flutters as it goes — the flutter is scaled
+    // by nearness too, so a distant leaf barely stirs
+    f.x = lerp(f.x0, f.xE, e) + (Math.sin(time*.9 + f.ph)*24 + gustAt(f.x0)*30) * k;
+    f.y = lerp(f.y0, f.yE, e) + Math.sin(time*1.6 + f.ph*1.7)*9 * k;
+    f.rot += f.spin * dt * (.35 + .65*k);
   }
 }
 // Drawn twice: the near end of the run goes on the blurred foreground plate so
@@ -5371,10 +5401,10 @@ function drawFallLeaves(x, nearPass){
   if (leafFall < .02) return;
   const pal = leafSpring ? BLOSSOM : LEAFC;
   for (const f of fallLeaves){
-    const nf = clamp((.44 - f.z)/.16, 0, 1);
+    const nf = clamp((.56 - f.z)/.18, 0, 1);
     const share = nearPass ? nf : 1 - nf;
     if (share <= .01) continue;
-    const k = flScale(f.z);
+    const k = airK(f.z);
     x.save();
     x.globalAlpha = leafFall * .95 * share * (nearPass ? .72 : 1);
     x.translate(f.x, f.y);
@@ -6300,7 +6330,8 @@ function render(dt){
   leafSpots.length = 0;
   for (const L of LAYERS) if (L.plate === "fg") drawLayer(fgx, L, dt);
   drawFgProps(fgx, dt);
-  drawFallLeaves(fgx, 1);     // the near, out-of-focus end of the drift
+  drawSnowfall(fgx, 1);      // the near, out-of-focus end of the drift
+  drawFallLeaves(fgx, 1);
   drawZoneFgPlate(fgx);
   ctx.imageSmoothingQuality = "high";
   ctx.globalAlpha = .96;
@@ -6308,8 +6339,8 @@ function render(dt){
   ctx.globalAlpha = 1;
 
   drawRain();
-  drawSnowfall();
-  drawFallLeaves(ctx, 0);    // and the far, sharp, small end
+  drawSnowfall(ctx, 0);      // and the far, sharp, small end
+  drawFallLeaves(ctx, 0);
   drawFeathers();
   drawCanopy();
   drawZoneFgSharp(dt);

@@ -188,6 +188,14 @@ scenario with a tap, so it never looked at the state before that. *A draw
 function and its update must agree about when the thing exists.* `smoke.js` now
 warms up 120 frames and asserts `hogWy` is still 0.
 
+**Every mushroom grew on the left edge.** `mushCell` stored `x: r()*1.2 - .1`,
+which is a *fraction* of the width, and `drawMushroom` used it as a pixel
+coordinate — so the whole crop sat within about one pixel of x=0 and had done
+since the mushroom garden was written. Cell systems in here are split on this:
+some store pixels, some store fractions. If a cell stores a fraction, name the
+field `fx` and resolve it against `W` at draw time, which also survives a resize.
+`thornCell` and `mushCell` now both do.
+
 **Green showing through the wood floor** was my leaf-mould base fill, which I'd
 coloured olive in spring. Ground under leaves is dark brown in every season.
 
@@ -299,9 +307,15 @@ Never trust a scenario without first checking it travelled the distance it claim
   than 4.5m, because a real car is five screen widths and unreadable.
 - Zone name announcements are suppressed if one is already showing, so fast
   scrolling skips some. Intentional anti-spam.
-- `DRY`, `SNOW` and `NIGHT` remain as biome constants but are no longer in
-  `ORDER`. `WOOD` is an alias for `AUTUMN`. Harmless, but confusing if you're
-  grepping.
+- `DRY`, `SNOW`, `NIGHT` and now `POOL` remain as biome constants but are no
+  longer in `ORDER`. `WOOD` is an alias for `AUTUMN`. Harmless, but confusing if
+  you're grepping. The rock pool went because a tidal pool full of bubbles in the
+  middle of a meadow did not make sense; its code is intact if you want it back,
+  just put `POOL` back in `ORDER`. The round is now 10 zones, 200m.
+- **Birds only ever fly in order to land.** `spawnBird()` returns early when
+  there is no perch available. A bird with no perch used to cross the entire
+  frame in level flight and read as an aircraft rather than a bird. State 2 is
+  now only ever reached on departure.
 
 ---
 
@@ -464,16 +478,23 @@ sweep to a full ring, rounds the dome, retracts the legs and fades the face out.
 Falling leaves are not in the field — they are between the lens and it, like the
 bokeh and the canopy, and they are the one thing that scales with distance.
 
-- **`fallLeaves` recede, they do not descend.** Each carries a `z` from 0 at the
-  lens to 1 in the far field; `flScale(z)` runs 1.7 down to 0.14. The shrinking
-  is what reads as falling — the camera is at grass level, so a leaf on its way
-  down is mostly going *away*. Screen-y travel is deliberately small: about 330px
-  of a 900px frame over ten seconds. They used to run top-to-bottom like rain,
-  which is wrong for this camera.
-- They are drawn **twice**, crossfading on `z` around 0.44: the near end on the
-  blurred foreground plate (`drawFallLeaves(fgx, 1)`) so it is genuinely out of
-  focus, the far end sharp in the main pass. That, not the size alone, is where
-  the sense of distance comes from.
+- **Everything airborne converges on a band.** `airK(z)` scales 1.9 down to 0.10,
+  and every leaf and flake is interpolated from a spawn point scattered all round
+  the frame toward `AIR_BAND` (40% of H), where the far field sits. Some drift
+  down into it, some drift up — a healthy mix is roughly 60/40, and you can
+  measure it.
+
+  **Shrinking alone is not enough.** The first attempt at this kept a uniform
+  downward drift and just scaled it; the report back was that it still looked
+  like it fell top-to-bottom, and that was right. A directional sweep reads as
+  rain no matter what you do to the size. It is the *convergence on a vanishing
+  point* that reads as depth. If you rework this, check that near and far
+  particles differ in their distance from the band by at least 3x, and that
+  spawns still go both above and below it.
+- Leaves and snow are each drawn **twice**, crossfading on `z` around 0.56: the
+  near end on the blurred foreground plate (`drawFallLeaves(fgx, 1)`,
+  `drawSnowfall(fgx, 1)`) so it is genuinely out of focus, the far end sharp in
+  the main pass. Snow uses the identical model — it had the same fault.
 - **`kicked` leaves track height separately from world position.** `h` lifts them
   up the frame *and* scales them up slightly (up is nearer the lens); gravity
   returns them to the exact `wy` they came from, with one small bounce. Their
