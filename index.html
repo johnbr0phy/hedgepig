@@ -2447,14 +2447,33 @@ function drawHog(){
        can see the spines on his head through his head" was. */
     crownQuills(crown, 0, crown.length);
 
-    // ears, BEFORE the head sphere so it buries all but the tip
+    /* ── ears, drawn BEFORE the head sphere ────────────────────────────
+       Two bugs lived here at once.
+
+       They used to pass a literal 1.0 for the radius, so RR_EAR — which the
+       handover documents as load-bearing, "an ear reads as an ear by poking
+       out of the head's outline" — was declared and never used. The ear sat
+       ON the sphere and was then buried by it almost entirely.
+
+       And they were gated on faceVis of their own surface normal. An ear
+       PROTRUDES; it is not a patch on the surface whose normal decides
+       whether you can see it. It is hidden when the head is in front of it,
+       and drawing it before the sphere is precisely what makes the sphere
+       hide it. The normal gate hid BOTH ears whenever he was nose-on, since
+       at an azimuth behind the equator both normals point away — and nose-on
+       is exactly the view where you should see the pair of them, one either
+       side of his head.
+
+       In profile the two coincide, because the z that separates them
+       projects away. That costs one redundant fill and looks like the single
+       ear it is. */
     for (const side of [-1, 1]){
-      const e = HP(headDir(side*AZ_EAR, EL_EAR, hy, hp), 1.0);
-      const v = faceVis(e.n) * (side < 0 ? .8 : 1);
-      if (v <= .02) continue;
-      const sc = .82 + .18*Math.max(0, e.n);
-      ctx.globalAlpha = a * fa * v;
-      ctx.fillStyle = side < 0 ? "#3a2a1e" : C.ear;
+      const e = HP(headDir(side*AZ_EAR, EL_EAR, hy, hp), RR_EAR);
+      const far = e.n < 0;
+      const sc = .88 + .12*Math.max(0, e.n);
+      ctx.globalAlpha = a * fa * (far ? .82 : 1);
+      ctx.fillStyle = far ? "#3a2a1e" : C.ear;
+      // an angled OVAL: round and whole on the cream it read as a second eye
       ctx.beginPath();
       ctx.ellipse(e.X, e.Y, 2.30*sc*earSq, 2.95*sc, -.34 + earTilt*side, 0, TAU);
       ctx.fill();
