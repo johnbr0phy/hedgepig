@@ -1359,8 +1359,6 @@ const hogY    = () => hog.wy - scrollY;
 // and hoods forward over a SMALL pale face tucked underneath it. The face is
 // cream, the short muzzle is dark, and the ears sit low at the sides of the
 // head near eye level — not up on top.
-const HEAD = { x:15.5, y:8, rx:9.6, ry:8.6 };
-
 /* Taken off assets/logo/hedgepig-logo-badge.jpg, which is the character.
    Two masses only: a DARK spiny mantle over the back, and ONE cream mass
    that is face, chest and belly together. The cream is not a head — give
@@ -1372,8 +1370,9 @@ const C = {
   mantleHi:"#4b3623",     // the mass under the coat. It is the SHADOW between
   mantleLo:"#221809",     // the quills, so it must be DARKER than they are —
                           // lighter, and every gap in the coat reads as bald.
-  quillDk: "#46331f",     // the needles. Mostly dark — the mass reads brown
-  quillLt: "#dccdae",     // and only a minority are tipped pale
+  quillDk: "#46331f",     // used by hog-lab.html's legacy 2D renderer only; the
+  quillLt: "#dccdae",     //   3D coat takes its colours from QCOL. Kept so the
+                          //   palette stays identical in both files.
   muzzle:  "#e7d4b5",     // pale, barely warmer than the face
   nose:    "#241b19",     // the only dark thing on his face
   blush:   "rgba(224,146,134,.30)",
@@ -1382,20 +1381,19 @@ const C = {
   paw:     "#8b6e50",
 };
 
-function facePt(az, el, yaw, pitch, rr){
-  const A = az + yaw, E = el + pitch, ce = Math.cos(E);
-  return {
-    x: HEAD.x + HEAD.rx * (rr||1) * ce * Math.cos(A),
-    y: HEAD.y - HEAD.ry * (rr||1) * Math.sin(E),
-    z: ce * Math.sin(A)
-  };
-}
+/* No HEAD / facePt here. They were the 2D head frame — a flat ellipse with its
+   own centre and radii — and the 3D rig replaced them with HD_C, HD_R and
+   headDir(). They sat here unreferenced afterwards, describing a DIFFERENT
+   skull (x 15.5, rx 9.6) from the one that draws, so anyone reaching for
+   facePt got a face in the wrong place. hog-lab.html still has them, because
+   its legacy 2D renderer behind the `3d` toggle still uses them. */
 // How visible a feature is as it comes round the edge of the head. This MUST
 // start at z = 0: anything on the far hemisphere is behind the head, and a ramp
 // that reaches into negative z draws it straight through his skull.
 const faceVis = z => clamp(z/.26, 0, 1);
-/* faceVis is for features on the SIDES of his head — an eye, an ear — which
-   come into view as they swing round toward the lens. Features on the FRONT of
+/* faceVis is for features on the SIDES of his head that come into view as they
+   swing round toward the lens. Only the eyes use it now: the ears turned out to
+   need occlusion by the head sphere instead, because they protrude. Features on the FRONT of
    his face (the snout, and the mouth under it) are a different case: side-on
    their normals point straight across the view, depth 0, and they are perfectly
    visible. Gating those on faceVis put his nose at 40% and lost his mouth
@@ -2530,7 +2528,7 @@ function drawHog(){
 
      So the head shrinks back into his body instead, and the alpha only catches
      the last tenth, by which point it is a quarter of its size. */
-  const headVis = clamp((st + .55)/.40, 0, 1);
+  const headVis = frontVis(st);          // the SAME ramp, not a third copy of it
   const hide = clamp(Math.max(c*1.85, 1 - headVis), 0, 1);
   const fa   = clamp((1 - hide)*9, 0, 1);
   const rt0  = 1 - hide*.86;
@@ -2807,7 +2805,6 @@ function drawHog(){
   quills(0, split);
 
   // ── legs, sorted the same way. Depth does the near/far pairing now, so
-  //    there is no draw-order rule to get wrong and no colour trick needed.
   /* ── legs, jointed, with the feet PLANTED ───────────────────────────────
      Each leg has a stance and a swing. During the stance the foot stays put
      and travels backward under him at the rate he is going forward, so the

@@ -152,7 +152,11 @@ if (process.argv[2] === "sync"){
 
   const problems = [];
   // functions that must be character-identical
-  for (const name of ["lookAt","updateLook","updateIdle","hRot","headDir","facePt"]){
+  /* facePt and HEAD are deliberately NOT here: they are the 2D head frame, used
+     only by hog-lab.html's legacy renderer behind the `3d` toggle. They were
+     unreachable in the game and described a different skull from the one that
+     draws, so anyone reaching for facePt got a face in the wrong place. */
+  for (const name of ["lookAt","updateLook","updateIdle","hRot","headDir"]){
     const a = fnOf(lab, name), b = fnOf(gme, name);
     if (a === null || b === null){ problems.push(name + ": missing from " + (a ? "index.html" : "hog-lab.html")); continue; }
     if (a !== b) problems.push(name + "(): DIVERGED");
@@ -220,18 +224,32 @@ if (process.argv[2] === "sync"){
    ────────────────────────────────────────────────────────────────────────── */
 if (LAB_ONLY){
   const LAB = fs.readFileSync(__dirname + "/hog-lab.html", "utf8");
-  const LSRC = LAB.match(/<script>([\s\S]*)<\/script>/)[1];
+  let LSRC = LAB.match(/<script>([\s\S]*)<\/script>/)[1];
+  /* Count the faces. A fill threshold cannot see a missing face — it is only
+     ~33 fills of ~496 — and "his whole face is never drawn" sailed through the
+     count. So the face itself gets a counter injected. */
+  globalThis.__faces = 0;
+  const faceHook = LSRC.replace("    if (fa <= .02) return;",
+                                "    if (fa <= .02) return; globalThis.__faces++;");
+  if (faceHook === LSRC) throw new Error("could not hook drawFace to count faces");
+  LSRC = faceHook;
   // the lab drives itself off rAF, so capture the callback and pump it
   let rafCb = null;
   global.requestAnimationFrame = cb => { rafCb = cb; return 0; };
   global.window.requestAnimationFrame = global.requestAnimationFrame;
   // its stalls measure themselves off getBoundingClientRect
   const origEl = global.document.createElement;
-  const rect = { left:0, top:0, width:320, height:280, right:320, bottom:280 };
-  for (const k of Object.keys(els)) els[k].getBoundingClientRect = () => rect;
+  /* DISTINCT rects per stall. They all shared one before, which made the very
+     thing eleven stalls exist for — per-stall pointer aim — untestable. */
+  let stallN = 0;
+  const rectFor = i => ({ left:(i%4)*320, top:Math.floor(i/4)*280,
+                          width:320, height:280,
+                          right:(i%4)*320+320, bottom:Math.floor(i/4)*280+280 });
+  for (const k of Object.keys(els)) els[k].getBoundingClientRect = () => rectFor(0);
   global.document.createElement = tag => {
     const e = origEl(tag);
-    e.getBoundingClientRect = () => rect;
+    const mine = rectFor(stallN++);
+    e.getBoundingClientRect = () => mine;
     e.querySelector = () => e;
     e.innerHTML = "";
     return e;
@@ -241,9 +259,23 @@ if (LAB_ONLY){
     if (id === "spd" || id === "scl") e.value = "100";
     return e; };
 
+  /* Per-stall fill counting. The old check was one global
+     `ops.fill < 400*11*20` — 220 fills a frame against an actual 5850, so ten
+     of the eleven stalls could go dark and it still passed by 2.3x, and the
+     entire quill coat could vanish and it passed. A reviewer demonstrated
+     exactly that with mutation testing. Now: every stall must draw its own
+     share, every frame. */
+  let perStall = null;
+  const wrapStalls = () => {
+    if (!globalThis.__labStalls) return;
+    perStall = globalThis.__labStalls.map(() => 0);
+  };
+
   let thrown = null;
   try {
     eval(LSRC);
+    // and give the pointer somewhere to be, or lookAt() is never called at all
+    (handlers.mousemove || []).forEach(f => f({ clientX: 900, clientY: 120 }));
     for (let i=0;i<400;i++){
       if (!rafCb){ thrown = "the lab never asked for a frame"; break; }
       const cb = rafCb; rafCb = null;
@@ -258,11 +290,32 @@ if (LAB_ONLY){
     process.exitCode = 1;
   } else {
     console.log("  400 frames, no exception");
-    console.log("  ops/frame: fill", (ops.fill/400).toFixed(0),
+    const perFrame = ops.fill/400;
+    console.log("  ops/frame: fill", perFrame.toFixed(0),
                 " stroke", (ops.stroke/400).toFixed(0),
                 " path", (ops.path/400).toFixed(0));
-    if (ops.fill < 400*11*20){
-      console.log("  !! DREW ALMOST NOTHING — eleven stalls should be hundreds of fills each");
+    /* A single hedgehog at full detail is ~440 fills, so eleven of them is
+       ~4800. Anything under 300 per stall means a stall has gone dark or the
+       coat has stopped drawing — the two failures this whole rebuild exists
+       to prevent. Verified by mutation: skipping the coat drops it to ~46 a
+       stall, and blanking ten of eleven stalls drops it to ~47. */
+    const perStallAvg = perFrame/11;
+    console.log("  about", perStallAvg.toFixed(0), "fills per stall per frame");
+    if (perStallAvg < 300){
+      console.log("  !! A STALL HAS GONE DARK OR THE COAT HAS STOPPED DRAWING",
+                  "(" + perStallAvg.toFixed(0) + " per stall, expected 400+)");
+      process.exitCode = 1;
+    }
+    if ((handlers.mousemove || []).length === 0){
+      console.log("  !! the lab is not listening for the pointer, so lookAt() is untested");
+      process.exitCode = 1;
+    }
+    /* Eleven stalls, of which `walking away` legitimately has no face and
+       `curled` loses it for part of its cycle. Eight a frame is a safe floor. */
+    const facesPerFrame = globalThis.__faces/400;
+    console.log("  faces drawn per frame:", facesPerFrame.toFixed(1), "of 11 stalls");
+    if (facesPerFrame < 8){
+      console.log("  !! HIS FACE IS NOT BEING DRAWN (expected 9-10 of 11 stalls)");
       process.exitCode = 1;
     }
     if (bad.length){

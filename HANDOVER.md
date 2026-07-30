@@ -266,8 +266,9 @@ node smoke.js <scenario>
 It mocks `document`, `window`, `Path2D` and a full Canvas2D context that counts
 `fill`, `stroke`, `save` and path ops, and flags non-finite coordinates and
 scale-to-zero. The engine is extracted from the HTML with a regex, has a small
-hook block appended inside the IIFE (exposing `tick`, `sow`, and a `__peek()`),
-and is `eval`'d. It drives `tick()` itself rather than using rAF.
+hook block appended inside the IIFE (exposing `__tick`, `__peek`, `__tap`,
+`__call`, `__force`, `__follow`, `__scroll`, `__hits` and a handful of road
+probes — read the block, it moves), and is `eval`'d. It drives `tick()` itself rather than using rAF.
 
 Scenarios, with the assertion each one exists for:
 
@@ -282,6 +283,8 @@ Scenarios, with the assertion each one exists for:
 | `goal` | called onto the burrow: leg must advance |
 | `far` | deep world, exercises every zone |
 | `abandon` | camera parked, walked 90m+ away: hazards must still bite |
+| `lab` | runs `hog-lab.html` under the same mocks: it must not throw, every stall must draw its share, and his face must actually appear |
+| `sync` | the shared hedgehog is identical in both files |
 
 `idle` and `back` are the two that would have caught the old auto-runner. Traffic
 uses unseeded `Math.random`, so `road`/`roadmiss` need a few runs to judge.
@@ -436,8 +439,16 @@ veers off for 1.3s instead of walking straight back into the same bush.
 
 `hog-lab.html` is a bench rig for the hedgepig, away from the grass. Eleven stalls,
 each running an independent copy in one fixed state — amble, scurry, snuffling,
-start/stop, turning, curled, shivering, looking about, face-on, yaw sweep — plus
-speed and size sliders, a frame stepper and a bones toggle.
+start/stop, turning, curled, shivering, looking about, face-on, **walking away**,
+yaw sweep — plus speed and size sliders, a frame stepper and a `3d` toggle that
+switches to the retired 2D renderer for comparison.
+
+**The stalls are mostly PROFILE views and the game is mostly not.** Progress
+means increasing `wy`, which means walking down the screen, which means `hd` near
+0 — nose-on. Nose-on is his normal travelling attitude, and it is the view that
+has hidden the most faults: no ears, two grey eyes, a mouth drawn along the wrong
+axis, and a cream horseshoe under his face that read as an enormous grin. Judge
+him nose-on before you believe anything.
 
 **Use the size slider.** It is there because at default scale his faults are
 invisible. Two separate rounds of "that looks fine" shipped a muzzle that read
@@ -445,9 +456,18 @@ as a giant grey eyeball and a set of ears that were not being drawn at all. Turn
 him up before judging anything.
 
 It holds a WORKING COPY of `drawHog()`. Iterate there, then port the finished
-function into `index.html`. Nothing in the game reads this file. The two are
-**currently in sync** — keep them that way, and port in whole blocks rather than
-by hand.
+function into `index.html`. Nothing in the game reads this file.
+
+**Run `node smoke.js sync` after any port.** Do not trust your own belief that
+they match. They silently diverged on the head rig — the lab had a body-relative
+gaze and a trailing head lag, the game still had the camera-relative gaze the
+lab's own comment calls a bug, an inverted lag, and its ears 0.37 rad out of
+place — because I hand-ported with string replaces, and **a replace whose
+pattern has already drifted does nothing and says nothing about it**. The lab is
+what gets looked at, so the divergence made the *shipped* hedgehog the worse of
+the two. The check compares the shared functions character by character, the
+shared constants line by line, and the drawing body after normalising only the
+differences that are declared in the check itself.
 
 The **3d** button toggles between the current 3D renderer (`drawHog3`) and the
 last 2D one (`drawHog`), which is kept only for comparison. Delete `drawHog`
@@ -555,25 +575,29 @@ Things worth knowing before touching it:
   coat goes down before the face.** The depth sort will happily paint legs
   across his belly and quills across his eye if you let it — both are the old
   faults of §10, reintroduced by giving a sort the chance to make them.
-- **He costs 232 fills a frame, measured** — not inferred from scenario totals,
-  which is how I first got this wrong. Drive `quality` to a fixed value, run
-  `smoke.js idle` with and then without `drawHog()`, and difference the two.
-  Across versions, on that method:
+- **He costs about 440 fills a frame at full detail, 220 at the floor.** Measure
+  it by wrapping `drawHog` and differencing `ops.fill` across the call — pinning
+  `quality` and differencing scenario TOTALS is how I got this wrong twice, most
+  recently because the harness divided every total by a hardcoded 3650 whatever
+  the scenario ran. He is roughly 27% of an `idle` frame, against a documented
+  meadow budget of ~1220. He is also the only thing on screen you are actually
+  watching, and he gives half of it back under load — but do not add to him
+  casually, and do not trust a fills figure you have not counted the frames for.
 
-  | version | his fills/frame |
-  |---|---|
-  | the original 2D hedgehog (`c552a08`) | 35 |
-  | 2D, rebuilt against the badge (`d734ad3`) | 75 |
-  | 3D, `quality` 1.0 | 232 |
-  | 3D, `quality` 0.42 (the floor) | 125 |
+**`hog.dir` is gone.** It was a ±1 facing sign, and it only ever meant anything
+because `ctx.scale(hog.dir*k, k)` mirrored the whole drawing by it. Once the
+renderer turned him continuously, every remaining user of it was wrong: the
+nose's grass field, the snuffle motes and the breath all placed things at
+`x + dir*26k` while his nose is drawn at `x + sin(hd)*26k` — 55px to one side
+nose-on, against a field radius of 90px, so the grass parted *beside* him. It
+also only updated while `|sin(hd)| > .10`, so walking straight at or away from
+the lens it held a sign that could be a half-turn stale. Use `Math.sin(hog.hd)`
+and `Math.cos(hog.hd)` — the projected snout — for anything positional.
 
-  So he is six times the old one, and roughly a quarter of an `idle` frame. He
-  is also the only thing on screen you are actually watching, and he gives half
-  of it back under load — but do not add to him casually.
-
-`hog.dir` no longer draws anything. It is still maintained because the snuffle
-motes, the breath and the nose's grass field all need to know which way he
-faces.
+Two pieces of flat 2D art predate the geometry and still live in screen space:
+his **boat** and his **shiver arcs**. They used to be mirrored for free by that
+same `ctx.scale`. They are now mirrored by `faceSgn` and the hull foreshortened
+by `boatS`, which is floored in magnitude so it can never reach zero.
 
 ### What he is made of, and the reference
 
@@ -688,13 +712,45 @@ about a degree.
 accelerating body, so his head sits back as he sets off and carries on forward
 as he pulls up. It is read twice — once as a shift, once as a nod.
 
+### What I got wrong this session, and what caught it
+
+Four independent reviewers read the rebuild cold and found more than I did. The
+pattern in what they found is worth more than the list:
+
+- **Three of my own comments asserted something the arithmetic then denied.** A
+  golden-ratio thinning sequence "spreads evenly" (it strips whole wedges bald,
+  because it shares its irrational with the golden-angle ordering); a spine
+  ripple travelling "nose to rump" (it ran the other way); "no colour trick
+  needed" thirteen lines above a colour trick. **If a comment states a fact,
+  check the fact.**
+- **Two faults I had already fixed once, and reintroduced.** Alpha-fading cream
+  over dark brown, which I fixed for the curl and then re-added via `headVis`;
+  and an overlay pass of quills over the face, which I got wrong in both
+  directions before removing it entirely.
+- **A string replace whose pattern has drifted does nothing and says nothing.**
+  This is how the two files diverged, and it is why `smoke.js sync` exists.
+- **Three of my slices were too greedy** and silently deleted neighbouring code
+  — five functions once, then 320 duplicated lines, then the whole colour
+  palette. Every one was caught by the harness within a minute. Assert on what
+  you cut.
+- **A measurement is not a measurement until the divisor is checked.** The
+  harness divided every scenario's op counts by a hardcoded 3650 whatever it
+  actually ran, and I published a performance figure off it.
+- **The lab tests profile; the game is nose-on.** Almost every remaining fault
+  was in the view the bench rig does not show.
+
 ### Still to do on the animation
 
 In rough order of payoff:
 
 1. *(done — the 3D rebuild turns him continuously; there is no mirror flip left
    to remove.)*
-2. Jointed legs with planted feet — currently straight stubs whose feet slide.
+2. *(part done — jointed, with a stance and a swing. NOT planted: one leg cycle
+   covers 44 model units of travel, of which the stance is 27, and the foot
+   would have to cover all 27 backwards on a leg 10 units long. The arithmetic
+   is in the comment. Fixing it properly means re-timing the whole gait and
+   probably slowing him down, because the body bob is locked to twice the leg
+   rate and is already 5.9Hz at full pelt.)*
 3. *(done — the head spring, above)*
 4. Anticipation and follow-through on setting off and arriving. Partly there:
    `hlag` gives the head a trail, but the body itself does not anticipate.
@@ -714,9 +770,20 @@ In rough order of payoff:
 a hedgehog rather than a porcupine:
 
 ```
-far legs → body → long dark spikes → spine dome over their roots →
-short pale spikes → face lobe → snout, nose, whiskers, eye, ear → near legs
+aura → ground shadow (or the boat) →
+FAR half of the depth-sorted coat →
+all four legs → body ellipse → dark mass, clipped to the body →
+NEAR half of the coat →
+crown coat → ears → head sphere → muzzle → blush → nose → mouth →
+whiskers → eyes →
+shiver arcs (or the boat's near gunwale)
 ```
+
+Two rules in that order are load-bearing and both have been broken by a depth
+sort that was allowed to decide for itself: **all four legs go down before the
+body**, or the near pair paints across his belly; and **the near half of the coat
+goes down before the face**, or a quill on his own side is painted over his eye.
+The crown coat has no pass over the face at all — see the head rig, above.
 
 Two things here were got wrong and are easy to get wrong again:
 
@@ -725,8 +792,9 @@ Two things here were got wrong and are easy to get wrong again:
    the face.
 2. **All four legs are drawn before the body.** Drawing the near pair over it
    painted them across his belly — "legs through his body". Only the part below
-   the belly should ever show; depth between the pairs comes from colour and a
-   2px difference in foot height, not from draw order.
+   the belly should ever show. Depth between the pairs now comes from an actual
+   depth sort *among the legs* plus a colour difference; the old 2px foot-height
+   split is gone, because the feet plant and swing on their own cycle.
 3. **Spikes must clear the dome by a good margin.** The pale layer originally ran
    from `drx*.52` out to `+9.5`, which lands *inside* the dome radius — so it
    read as texture on a smooth loaf, not as spines. Base radius plus length has

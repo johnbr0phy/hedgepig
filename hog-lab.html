@@ -59,7 +59,6 @@
   <label class="ctl">size <input id="scl" type="range" min="40" max="220" value="100"></label>
   <button id="pause">pause</button>
   <button id="step">step</button>
-  <button id="bones">bones</button>
   <button id="three" class="on">3d</button>
 </header>
 <div id="grid"></div>
@@ -82,14 +81,17 @@ const clamp = (v,a,b) => v<a?a:v>b?b:v;
 const lerp  = (a,b,t) => a + (b-a)*t;
 const wrapAng = a => Math.atan2(Math.sin(a), Math.cos(a));
 
-// soft radial sprite, as the game builds its glows
+// The game's glow, stop for stop. It used to be a 3-stop approximation with a
+// comment claiming it matched — so the aura being graded here was softer than
+// the one that ships.
 function glow(rgb){
   const s = 128, c = document.createElement("canvas");
   c.width = c.height = s;
   const x = c.getContext("2d");
   const g = x.createRadialGradient(s/2, s/2, 0, s/2, s/2, s/2);
-  g.addColorStop(0,   "rgba("+rgb+",0.9)");
-  g.addColorStop(.45, "rgba("+rgb+",0.18)");
+  g.addColorStop(0,   "rgba("+rgb+",1)");
+  g.addColorStop(.26, "rgba("+rgb+",0.44)");
+  g.addColorStop(.58, "rgba("+rgb+",0.11)");
   g.addColorStop(1,   "rgba("+rgb+",0)");
   x.fillStyle = g; x.fillRect(0,0,s,s);
   return c;
@@ -146,8 +148,9 @@ function facePt(az, el, yaw, pitch, rr){
 // start at z = 0: anything on the far hemisphere is behind the head, and a ramp
 // that reaches into negative z draws it straight through his skull.
 const faceVis = z => clamp(z/.26, 0, 1);
-/* faceVis is for features on the SIDES of his head — an eye, an ear — which
-   come into view as they swing round toward the lens. Features on the FRONT of
+/* faceVis is for features on the SIDES of his head that come into view as they
+   swing round toward the lens. Only the eyes use it now: the ears turned out to
+   need occlusion by the head sphere instead, because they protrude. Features on the FRONT of
    his face (the snout, and the mouth under it) are a different case: side-on
    their normals point straight across the view, depth 0, and they are perfectly
    visible. Gating those on faceVis put his nose at 40% and lost his mouth
@@ -322,7 +325,6 @@ function makeHog(){
   };
 }
 
-let showBones = false;
 const quality = 1;    // the game's adaptive scaler; here he is always full detail
 const afloat  = false;// the game puts him in a boat over water; there is none here.
                       // Both of these exist so the drawing code can be IDENTICAL in
@@ -948,7 +950,7 @@ function drawHog3(ctx, hog, t, K, cx, cy){
 
      So the head shrinks back into his body instead, and the alpha only catches
      the last tenth, by which point it is a quarter of its size. */
-  const headVis = clamp((st + .55)/.40, 0, 1);
+  const headVis = frontVis(st);          // the SAME ramp, not a third copy of it
   const hide = clamp(Math.max(c*1.85, 1 - headVis), 0, 1);
   const fa   = clamp((1 - hide)*9, 0, 1);
   const rt0  = 1 - hide*.86;
@@ -1225,7 +1227,6 @@ function drawHog3(ctx, hog, t, K, cx, cy){
   quills(0, split);
 
   // ── legs, sorted the same way. Depth does the near/far pairing now, so
-  //    there is no draw-order rule to get wrong and no colour trick needed.
   /* ── legs, jointed, with the feet PLANTED ───────────────────────────────
      Each leg has a stance and a swing. During the stance the foot stays put
      and travels backward under him at the rate he is going forward, so the
@@ -1440,12 +1441,11 @@ const elSpd = document.getElementById("spd");
 const elScl = document.getElementById("scl");
 const btnPause = document.getElementById("pause");
 const btnStep  = document.getElementById("step");
-const btnBones = document.getElementById("bones");
+
 let paused = false, stepOnce = false, use3d = true;
 btnPause.onclick = () => { paused = !paused; btnPause.classList.toggle("on", paused);
                            btnPause.textContent = paused ? "play" : "pause"; };
 btnStep.onclick  = () => { stepOnce = true; };
-btnBones.onclick = () => { showBones = !showBones; btnBones.classList.toggle("on", showBones); };
 const btnThree = document.getElementById("three");
 btnThree.onclick = () => { use3d = !use3d; btnThree.classList.toggle("on", use3d); };
 
