@@ -2291,108 +2291,30 @@ function drawHog(){
   }
   qs.sort((u, v) => u.D - v.D);
 
-  function quills(from, to){
-    for (let i=from;i<to;i++){
-      const q = qs[i];
-      let vx = q.tX - q.bX, vy = q.tY - q.bY;
-      let vl = Math.hypot(vx, vy);
-      // a quill aimed at the lens foreshortens to nothing; keep a stub, or it
-      // degenerates and vanishes instead of reading as a cut-off spine
-      if (vl < 1.4){ const k = 1.4/(vl || 1); vx *= k; vy *= k; vl = 1.4; }
-      const nx = -vy/vl*2.00, ny = vx/vl*2.00;      // half-width at the root
-      ctx.fillStyle = QCOL[q.pale ? 2 : 0][q.s];
-      ctx.beginPath();
-      ctx.moveTo(q.bX + nx, q.bY + ny);
-      ctx.lineTo(q.bX + vx, q.bY + vy);
-      ctx.lineTo(q.bX - nx, q.bY - ny);
-      ctx.closePath(); ctx.fill();
-      // the band: pale tip over a dark base. Only where the quill is long
-      // enough in SCREEN space to show one — on a foreshortened quill the
-      // overlay is just a fat pale blob, and a few hundred of those read as
-      // scales on a pinecone.
-      if (q.pale && vl > 4.2 && q.rim){
-        ctx.fillStyle = QCOL[1][q.s];
-        ctx.beginPath();
-        ctx.moveTo(q.bX + vx*.54 + nx*.48, q.bY + vy*.54 + ny*.48);
-        ctx.lineTo(q.bX + vx, q.bY + vy);
-        ctx.lineTo(q.bX + vx*.54 - nx*.48, q.bY + vy*.54 - ny*.48);
-        ctx.closePath(); ctx.fill();
-      }
-    }
-  }
-
-  let split = 0;
-  while (split < qs.length && qs[split].D <= 0) split++;
-  quills(0, split);
-
-  // ── legs, sorted the same way. Depth does the near/far pairing now, so
-  //    there is no draw-order rule to get wrong and no colour trick needed.
-  const legs = [];
-  if (c < .82 && !afloat){
-    const up = 1 - c/.82;
-    for (const [lx, lz, ph] of [[11.5,  Cc*.52, p], [-11.5,  Cc*.52, p + Math.PI],
-                                [11.5, -Cc*.52, p + Math.PI], [-11.5, -Cc*.52, p]]){
-      const sw = Math.max(0, Math.sin(ph));
-      const hipY = -(-B*.62), footY = -(GROUND + sw*3.2*g)*up + (1 - up)*-B*.5;
-      const fx = lx + Math.cos(ph)*3.4*g;
-      legs.push({ D: lx*st + lz*ct,
-                  hX: lx*ct - lz*st, hY: hipY,
-                  fX: fx*ct - lz*st, fY: footY });
-    }
-  }
-  /* All four legs go down BEFORE the body, so only the part below his belly
-     ever shows. Sorting them against the body instead painted the near pair
-     across his chest — the "legs through his body" fault of §10, which the
-     depth sort reintroduced the moment it was given the chance. */
-  legs.sort((u, v) => u.D - v.D);
-  for (const L of legs){
-    const near = L.D > 0;
-    ctx.strokeStyle = near ? C.limb : "#a5895f";
-    ctx.lineWidth = 4.6; ctx.lineCap = "round";
-    ctx.beginPath(); ctx.moveTo(L.hX, L.hY); ctx.lineTo(L.fX, L.fY - 1); ctx.stroke();
-    ctx.fillStyle = near ? C.paw : "#7a6046";
-    ctx.beginPath(); ctx.ellipse(L.fX + .8, L.fY, 3.0, 2.4, 0, 0, TAU); ctx.fill();
-  }
-
-  /* ── his body. An ellipsoid under a rotation about the vertical axis
-        projects to an axis-aligned ellipse exactly, so this is one fill and
-        no approximation: the half-width is sqrt(a²cos²θ + c²sin²θ). */
-  const bw = Math.sqrt(A*A*ct*ct + Cc*Cc*st*st);
   const bgc = ctx.createLinearGradient(0, -B, 0, B*1.15);
   bgc.addColorStop(0,   C.creamHi);
   bgc.addColorStop(.60, C.cream);
   bgc.addColorStop(1,   C.creamLo);
-  ctx.fillStyle = bgc;
-  ctx.beginPath(); ctx.ellipse(0, 0, bw, B, 0, 0, TAU); ctx.fill();
 
-  /* ── the dark mass under the coat. Without this the cream body shows
-        between the quills and he reads as an artichoke: 250 narrow needles
-        nowhere near cover an ellipsoid. Rather than fill the true mantle
-        region — a plane section of an ellipsoid, which projects to an awkward
-        composite of curve and silhouette — it is the body ellipse shifted
-        along the boundary plane's own normal. Which means it is correct from
-        every angle for one fill: back-and-up in profile, straight up when he
-        is nose-on, over all of him from behind. The ragged quill roots hide
-        the seam, which is what they do on the animal too. */
-  const off = 7.6 * (1 - c*.75);
-  const mgc = ctx.createLinearGradient(0, -B, 0, B*.6);
-  mgc.addColorStop(0, C.mantleHi);
-  mgc.addColorStop(1, C.mantleLo);
-  ctx.fillStyle = mgc;
-  ctx.beginPath();
-  ctx.ellipse(-MN.x*off*ct + MN.z*off*st, MN.y*off, bw*.94, B*.94, 0, 0, TAU);
-  ctx.fill();
+  /* ── whether you can see his head at all ──────────────────────────────
+     His head sphere sits INSIDE the body ellipsoid — (20.4/26)² + (1.6/16.5)²
+     is 0.62, comfortably within it — so the two interpenetrate, and that is
+     the one case the painter's algorithm cannot sort. Depth-testing the head
+     against the body puts his face behind his own flank in profile, where
+     the head's depth is exactly zero.
 
-  /* The near half of the coat goes down BEFORE his face. Drawn after it, any
-     quill on this side that happened to overlap his head was painted straight
-     over his eye — §10's "the quills were once drawn last, over everything,
-     which buried his ear and eye". Only the crown hood belongs on top, and
-     that is drawn from inside the face block. */
-  quills(split, qs.length);
+     What is actually true is that the only visible part of his head is the
+     bit that PROTRUDES out of the front of him, and you stop seeing that
+     protrusion as it turns away from the lens. So the whole face group fades
+     on how much his snout axis points toward you: full in profile and
+     nose-on, gone by the time he has his back to you. The features already
+     hide themselves individually on their own normals; this is the mass they
+     sit on. Before it, you could see his whole face straight through him. */
+  const headVis = clamp((st + .55)/.40, 0, 1);
+  const fa = clamp((1 - c*1.85)*1.7, 0, 1) * headVis;
 
-  // ── the head, and the face on it
-  const fa = clamp((1 - c*1.85)*1.7, 0, 1);
-  if (fa > .02){
+  function drawFace(){
+    if (fa <= .02) return;
     ctx.globalAlpha = a * fa;
     const rt = 1 - c*.85;                       // he pulls his head in as he curls
     const hc = { x: HD_C.x*rt + hog.hlag, y: HD_C.y*rt - d*3.4, z: HD_C.z };
@@ -2467,11 +2389,18 @@ function drawHog(){
     }
     ctx.globalAlpha = a * fa;
 
-    // the muzzle: a short cone along his snout, drawn as the projected axis
+    // the muzzle: a short cone along his snout, drawn as the projected axis.
+    // When the snout points away it is behind his own head, so everything hung
+    // off it — muzzle, nose, mouth, whiskers — goes with it. Without this his
+    // nose sat on the back of his head as he walked away.
     const tipD = headDir(0, -.16, hy, hp);
+    const snD = tipD.x*st + tipD.z*ct;
+    const snV = clamp((snD + .12)/.30, 0, 1);
     const tip = HP(tipD, SNOUT_R), bse = HP(tipD, .26);
     const mdx = tip.X - bse.X, mdy = tip.Y - bse.Y;
     const slen = Math.hypot(mdx, mdy);
+    if (snV > .02){
+    ctx.globalAlpha = a * fa * snV;
     ctx.save();
     ctx.translate((tip.X + bse.X)/2, (tip.Y + bse.Y)/2);
     ctx.rotate(Math.atan2(mdy, mdx));
@@ -2521,6 +2450,7 @@ function drawHog(){
                              nX + (mdx/(slen||1))*reach + side*1.4, nY + spread*1.7);
         ctx.stroke();
       }
+    }                                  // ── end of the snout group
     ctx.globalAlpha = a * fa;
 
     // eyes. Both are real points on the sphere, so the far one comes past the
@@ -2546,6 +2476,104 @@ function drawHog(){
     ctx.globalAlpha = a;
   }
 
+
+
+
+  function quills(from, to){
+    for (let i=from;i<to;i++){
+      const q = qs[i];
+      let vx = q.tX - q.bX, vy = q.tY - q.bY;
+      let vl = Math.hypot(vx, vy);
+      // a quill aimed at the lens foreshortens to nothing; keep a stub, or it
+      // degenerates and vanishes instead of reading as a cut-off spine
+      if (vl < 1.4){ const k = 1.4/(vl || 1); vx *= k; vy *= k; vl = 1.4; }
+      const nx = -vy/vl*2.00, ny = vx/vl*2.00;      // half-width at the root
+      ctx.fillStyle = QCOL[q.pale ? 2 : 0][q.s];
+      ctx.beginPath();
+      ctx.moveTo(q.bX + nx, q.bY + ny);
+      ctx.lineTo(q.bX + vx, q.bY + vy);
+      ctx.lineTo(q.bX - nx, q.bY - ny);
+      ctx.closePath(); ctx.fill();
+      // the band: pale tip over a dark base. Only where the quill is long
+      // enough in SCREEN space to show one — on a foreshortened quill the
+      // overlay is just a fat pale blob, and a few hundred of those read as
+      // scales on a pinecone.
+      if (q.pale && vl > 4.2 && q.rim){
+        ctx.fillStyle = QCOL[1][q.s];
+        ctx.beginPath();
+        ctx.moveTo(q.bX + vx*.54 + nx*.48, q.bY + vy*.54 + ny*.48);
+        ctx.lineTo(q.bX + vx, q.bY + vy);
+        ctx.lineTo(q.bX + vx*.54 - nx*.48, q.bY + vy*.54 - ny*.48);
+        ctx.closePath(); ctx.fill();
+      }
+    }
+  }
+
+  let split = 0;
+  while (split < qs.length && qs[split].D <= 0) split++;
+  quills(0, split);
+
+  // ── legs, sorted the same way. Depth does the near/far pairing now, so
+  //    there is no draw-order rule to get wrong and no colour trick needed.
+  const legs = [];
+  if (c < .82 && !afloat){
+    const up = 1 - c/.82;
+    for (const [lx, lz, ph] of [[11.5,  Cc*.52, p], [-11.5,  Cc*.52, p + Math.PI],
+                                [11.5, -Cc*.52, p + Math.PI], [-11.5, -Cc*.52, p]]){
+      const sw = Math.max(0, Math.sin(ph));
+      const hipY = -(-B*.62), footY = -(GROUND + sw*3.2*g)*up + (1 - up)*-B*.5;
+      const fx = lx + Math.cos(ph)*3.4*g;
+      legs.push({ D: lx*st + lz*ct,
+                  hX: lx*ct - lz*st, hY: hipY,
+                  fX: fx*ct - lz*st, fY: footY });
+    }
+  }
+  /* All four legs go down BEFORE the body, so only the part below his belly
+     ever shows. Sorting them against the body instead painted the near pair
+     across his chest — the "legs through his body" fault of §10, which the
+     depth sort reintroduced the moment it was given the chance. */
+  legs.sort((u, v) => u.D - v.D);
+  for (const L of legs){
+    const near = L.D > 0;
+    ctx.strokeStyle = near ? C.limb : "#a5895f";
+    ctx.lineWidth = 4.6; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(L.hX, L.hY); ctx.lineTo(L.fX, L.fY - 1); ctx.stroke();
+    ctx.fillStyle = near ? C.paw : "#7a6046";
+    ctx.beginPath(); ctx.ellipse(L.fX + .8, L.fY, 3.0, 2.4, 0, 0, TAU); ctx.fill();
+  }
+
+  /* ── his body. An ellipsoid under a rotation about the vertical axis
+        projects to an axis-aligned ellipse exactly, so this is one fill and
+        no approximation: the half-width is sqrt(a²cos²θ + c²sin²θ). */
+  const bw = Math.sqrt(A*A*ct*ct + Cc*Cc*st*st);
+  ctx.fillStyle = bgc;
+  ctx.beginPath(); ctx.ellipse(0, 0, bw, B, 0, 0, TAU); ctx.fill();
+
+  /* ── the dark mass under the coat. Without this the cream body shows
+        between the quills and he reads as an artichoke: 250 narrow needles
+        nowhere near cover an ellipsoid. Rather than fill the true mantle
+        region — a plane section of an ellipsoid, which projects to an awkward
+        composite of curve and silhouette — it is the body ellipse shifted
+        along the boundary plane's own normal. Which means it is correct from
+        every angle for one fill: back-and-up in profile, straight up when he
+        is nose-on, over all of him from behind. The ragged quill roots hide
+        the seam, which is what they do on the animal too. */
+  const off = 7.6 * (1 - c*.75);
+  const mgc = ctx.createLinearGradient(0, -B, 0, B*.6);
+  mgc.addColorStop(0, C.mantleHi);
+  mgc.addColorStop(1, C.mantleLo);
+  ctx.fillStyle = mgc;
+  ctx.beginPath();
+  ctx.ellipse(-MN.x*off*ct + MN.z*off*st, MN.y*off, bw*.94, B*.94, 0, 0, TAU);
+  ctx.fill();
+
+  /* The near half of the coat goes down BEFORE his face. Drawn after it, any
+     quill on this side that happened to overlap his head was painted straight
+     over his eye — §10's "the quills were once drawn last, over everything,
+     which buried his ear and eye". Only the crown hood belongs on top, and
+     that is drawn from inside the face block. */
+  quills(split, qs.length);
+  drawFace();
 
   if (afloat){
     ctx.fillStyle = "#6b4c2e";

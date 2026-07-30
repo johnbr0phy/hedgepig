@@ -434,7 +434,7 @@ veers off for 1.3s instead of walking straight back into the same bush.
 
 ### The animation lab
 
-`hog-lab.html` is a bench rig for the hedgepig, away from the grass. Ten stalls,
+`hog-lab.html` is a bench rig for the hedgepig, away from the grass. Eleven stalls,
 each running an independent copy in one fixed state — amble, scurry, snuffling,
 start/stop, turning, curled, shivering, looking about, face-on, yaw sweep — plus
 speed and size sliders, a frame stepper and a bones toggle.
@@ -505,6 +505,18 @@ Things worth knowing before touching it:
   the true mantle region means compositing a plane-section curve with the
   silhouette; the offset ellipse is one fill and is correct back-and-up in
   profile, straight up nose-on, and over all of him from behind.
+- **You could see his face through his body, and the fix is not depth sorting.**
+  His head sphere sits INSIDE the body ellipsoid — `(20.4/26)² + (1.6/16.5)² =
+  0.62` — so the two interpenetrate, which is the one case the painter's
+  algorithm cannot resolve. Depth-testing the head against the body puts his
+  face behind his own flank in profile, where the head's depth is exactly zero.
+  What is actually true is that the only visible part of his head is the bit
+  that **protrudes** out of his front, and you stop seeing that protrusion as it
+  turns away. So the whole face group fades on `st` — how much his snout axis
+  points at the lens — full in profile and nose-on, gone once his back is to
+  you. Everything hung off the snout (muzzle, nose, mouth, whiskers) has the
+  same gate one level down, or his nose sits on the back of his head as he walks
+  away. The `walking away` stall exists for this.
 - **Do not pick quill properties off the loop index.** A regular pick over a
   golden-angle spiral *is* phyllotaxis, and it drew a literal pinecone. Hash them.
 - **Band every quill that is long enough on screen to show a band**, and only
