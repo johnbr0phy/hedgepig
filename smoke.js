@@ -166,10 +166,47 @@ if (process.argv[2] === "sync"){
                      "const SNOUT_R","const HEAD_K","const PITCH_K","const LAG_S",
                      "const HL_K","const BODY","const HD_R","const HD_C",
                      "const GROUND","const MN","const MK0","const QSHADE","const L3",
-                     "const faceVis","const frontVis"]){
+                     "const faceVis","const frontVis","const IDLE_ACTS",
+                     // the first line of the drawing body: everything above
+                     // `const p = hog.walk` is skipped by the body comparison,
+                     // and `g`'s (1 - c) term — curl suppressing the gait —
+                     // lives there
+                     "  const c = hog.curl"]){
     const a = lineOf(lab, key), b = lineOf(gme, key);
     if (a !== b) problems.push(key + ": \n      lab  " + a + "\n      game " + b);
   }
+  /* The blocks. These are IIFEs and object literals rather than named
+     functions, so the comparison above cannot see them — and a probe of eight
+     realistic divergences (quill length curve, rake, pale fraction, thinning
+     priority, crown extent, QCOL, the cream, the shade steps) found ALL EIGHT
+     slipping past. They are compared with comments stripped and whitespace
+     collapsed, because the two files legitimately annotate some of these
+     differently; the named functions above are still compared character for
+     character, so comment drift there is still caught. */
+  const blockOf = (src, start, end) => {
+    const i = src.indexOf(start);
+    if (i < 0) return null;
+    const j = src.indexOf(end, i);
+    return j < 0 ? null : src.slice(i, j + end.length);
+  };
+  const bare = x => x === null ? null : x
+    .replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "")
+    .replace(/\s+/g, " ").trim();
+  for (const [name, start, end] of [
+        ["QUILLS",  "const QUILLS = (() => {",  "})();"],
+        ["HQUILLS", "const HQUILLS = (() => {", "})();"],
+        ["QCOL",    "const QCOL = ",            "}));"],
+        ["C",       "const C = {",              "};"]]){
+    const a = bare(blockOf(lab, start, end)), b = bare(blockOf(gme, start, end));
+    if (a === null || b === null){ problems.push(name + ": block not found in " + (a ? "index.html" : "hog-lab.html")); continue; }
+    if (a !== b){
+      let i = 0; while (i < a.length && i < b.length && a[i] === b[i]) i++;
+      problems.push(name + " DIVERGED at char " + i + ":\n      lab  ..." +
+                    a.slice(Math.max(0,i-50), i+70) + "\n      game ..." +
+                    b.slice(Math.max(0,i-50), i+70));
+    }
+  }
+
   // and the drawing body, after the differences that are DECLARED
   const bodyOf = (src, name) => {
     const f = fnOf(src, name);
@@ -187,11 +224,31 @@ if (process.argv[2] === "sync"){
   const strip = x => x
     .replace(/if \(afloat\)\{[\s\S]*?ctx\.translate\(0, -9\); \} else \{ /g, "")
     .replace(/ctx\.globalAlpha = a; \} \/\* ── the coat/g, "ctx.globalAlpha = a; /* ── the coat")
-    .replace(/ \+ GAME\.flash\*\.5/g, "")
+    .replace("(.09 + .05*Math.sin(time*3.2) + GAME.flash*.5 + invulnPulse)",
+             "(.09 + .05*Math.sin(time*3.2))")
     .replace(/if \(afloat\)\{ ctx\.save\(\); ctx\.scale\(boatS, 1\);[\s\S]*?ctx\.restore\(\); \} /g, "")
-    .replace(/&& !afloat/g, "").replace(/\|\| afloat/g, "")
+    /* ANCHORED, not global. `.replace(/&& !afloat/g,"")` also normalised
+       `&& afloat` away, so inverting either afloat gate passed the check; and a
+       global strip of `+ GAME.flash*.5` let that term be bolted onto any alpha
+       in the game for free. Both were demonstrated. */
+    .replace("if (legUp < .05 || afloat) return;", "if (legUp < .05) return;")
+    .replace("if (c < .82 && !afloat){", "if (c < .82){")
+    .replace("if (hog.shiver > .35 && !afloat){", "if (hog.shiver > .35){")
     .replace(/\s+/g, " ").replace(/ \)/g, ")").replace(/\( /g, "(").trim();
   A = strip(A); B = strip(B);
+  /* The boat strips use `[\s\S]*?`, which is a hole you can drive anything
+     through — a reviewer poked `hog.yaw = 0` inside the hull block and the check
+     passed. Rather than widen the regex (the block has nested braces, so a
+     brace-free match is not possible), assert the boat is what it claims to be:
+     pure art, touching no animation state. */
+  const boat = gme.match(/if \(afloat\)\{[\s\S]*?ctx\.translate\(0, -9\);/);
+  const gunwale = gme.match(/if \(afloat\)\{\s*ctx\.save\(\); ctx\.scale\(boatS, 1\);[\s\S]*?ctx\.restore\(\);/);
+  for (const [name, m] of [["the hull", boat], ["the gunwale", gunwale]]){
+    if (!m){ problems.push(name + " block not found — the sync normaliser will be stripping the wrong thing"); continue; }
+    const bad = m[0].match(/hog\.(?!x\b)[a-zA-Z]+/g);
+    if (bad) problems.push(name + " touches animation state, which the strip would hide: " + [...new Set(bad)].join(", "));
+  }
+
   if (A !== B){
     // find where they first differ, for a useful message
     let i = 0; while (i < A.length && i < B.length && A[i] === B[i]) i++;
@@ -271,7 +328,7 @@ if (LAB_ONLY){
     perStall = globalThis.__labStalls.map(() => 0);
   };
 
-  let thrown = null;
+  let thrown = null, labFrames = 0;
   try {
     eval(LSRC);
     // and give the pointer somewhere to be, or lookAt() is never called at all
@@ -281,6 +338,7 @@ if (LAB_ONLY){
       const cb = rafCb; rafCb = null;
       nowMs += 1000/60;
       cb(nowMs);
+      labFrames++;
     }
   } catch (e){ thrown = e.stack || String(e); }
 
@@ -289,8 +347,9 @@ if (LAB_ONLY){
     console.log("  !! THE LAB THREW\n     " + String(thrown).split("\n").slice(0,4).join("\n     "));
     process.exitCode = 1;
   } else {
-    console.log("  400 frames, no exception");
-    const perFrame = ops.fill/400;
+    console.log("  " + labFrames + " frames, no exception");
+    const perFrame = ops.fill/labFrames;      // counted, not assumed: the 3650
+                                              // divisor bug lived one branch over
     console.log("  ops/frame: fill", perFrame.toFixed(0),
                 " stroke", (ops.stroke/400).toFixed(0),
                 " path", (ops.path/400).toFixed(0));
@@ -312,7 +371,7 @@ if (LAB_ONLY){
     }
     /* Eleven stalls, of which `walking away` legitimately has no face and
        `curled` loses it for part of its cycle. Eight a frame is a safe floor. */
-    const facesPerFrame = globalThis.__faces/400;
+    const facesPerFrame = globalThis.__faces/labFrames;
     console.log("  faces drawn per frame:", facesPerFrame.toFixed(1), "of 11 stalls");
     if (facesPerFrame < 8){
       console.log("  !! HIS FACE IS NOT BEING DRAWN (expected 9-10 of 11 stalls)");

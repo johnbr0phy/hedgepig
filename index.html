@@ -1606,7 +1606,7 @@ function updateIdle(h, dt){
    It sets only the spring TARGETS, so he still lags, overshoots and settles
    onto you rather than snapping to you.
    ────────────────────────────────────────────────────────────────────── */
-function lookAt(h, dx, dy, th){
+function lookAt(h, dx, dy, th, dt){
   const r = Math.hypot(dx, dy);
   if (r < 6) return;                // pointer on top of him: no direction to aim
   h.pitchT = clamp(Math.atan2(-dy, Math.max(7, Math.abs(dx))), -.50, .55);
@@ -1623,7 +1623,26 @@ function lookAt(h, dx, dy, th){
      measuring and fixing a 17-22° whip on the turn lag; this was 155°. */
   const cp   = Math.max(.35, Math.cos(h.pitchT));
   const want = Math.acos(clamp((dx/r)/cp, -1, 1)) - th;
-  h.yawT = clamp(h.yaw + wrapAng(want - h.yaw), -1.35, 1.35);
+  /* ── the aim, and why it is RATE LIMITED ──────────────────────────────
+     `w0` is the aim as a body-relative yaw, taken round the short way. His neck
+     reaches ±1.35, so past that he strains toward the nearer limit.
+
+     The discontinuity here is REAL and cannot be tie-broken away: when the
+     pointer passes directly behind his head, straining left and straining right
+     are equally wrong, and whichever he picks he must eventually swing across.
+     I tried resolving relative to his live yaw (moves the flip to yaw = 0),
+     then remembering the side (moves it to the moment the aim comes back in
+     reach). Both measured 155° of target jump, and a peak head rate of 685°/s
+     with his face at full alpha across 30° of heading either side of 90°.
+
+     So the target is slew limited instead. Any jump becomes a sweep at 4.6
+     rad/s — a fast but deliberate head turn — and the spring smooths it
+     further. It fixes the whip wherever the discontinuity happens to be,
+     rather than relocating it. */
+  const w0 = wrapAng(want);
+  const aim = Math.abs(w0) <= 1.35 ? w0 : (w0 >= 0 ? 1.35 : -1.35);
+  const step = 4.6 * (dt || 1/60);
+  h.yawT += clamp(wrapAng(aim - h.yawT), -step, step);
   h.lookLock = .5;                  // and he stops glancing idly about
 }
 
@@ -2042,6 +2061,12 @@ function startRun(){
   hog.yawV = hog.pitchV = hog.lagV = hog.hlagV = 0;
   hog.lag = hog.hlag = 0;
   hog.act = 0; hog.actT = 0; hog.actP = 0;
+  /* His head POSITIONS too, not just the velocities. He dies stopped, so `dip`
+     is high and he respawned nose-down; and yaw is body-relative, so a death
+     with his head over his shoulder respawned him at up to 1.35 rad of neck
+     strain, springing back over the first 0.8s of the new run. */
+  hog.yaw = hog.pitch = hog.yawT = hog.pitchT = 0;
+  hog.lookT = 0; hog.lookLock = 0; hog.dip = 0;
   hog.curl = 0; hog.gait = 0; hog.walk = 0; hog.arrive = 0;
   newLeg(true);
   clearBanner();
@@ -2146,7 +2171,7 @@ function updateGame(dt){
   if (hoverT > 0){
     hoverT -= dt;
     if (hover) lookAt(hog, (hover.x - hog.x)/k, (hover.y - hogY())/k,
-                      Math.PI/2 - hog.hd);
+                      Math.PI/2 - hog.hd, dt);
   }
   updateLook(hog, dt);
 
@@ -2331,7 +2356,17 @@ function drawHog(){
 
   let a = hog.fade * (1 - hog.under);
   if (a <= .01) return;
-  if (GAME.invuln > 0 && GAME.state !== "leg") a *= .45 + .55*Math.abs(Math.sin(time*17));
+  /* Invulnerable, he PULSES rather than going translucent. Modulating his alpha
+     composited his cream face over his own dark coat — cheek luminance 224 down
+     to 130 at a = 0.45, pulsing at 2.7Hz for the full 2.4s of invulnerability,
+     of which 1.25s is after the curl has released and his head is back out at
+     full size. Same fault and same magnitude as the headVis ghosting, on a
+     longer timer. `hurt()` sets state "hurt" for 1.15s and then "walk", never
+     "leg", so the whole 2.4s ran.
+
+     It rides the aura instead, which is already an additive pass. */
+  const invulnPulse = (GAME.invuln > 0 && GAME.state !== "leg")
+                        ? .30 + .34*Math.abs(Math.sin(time*17)) : 0;
 
   const c = hog.curl, g = hog.gait*(1 - c), d = hog.dip*(1 - c);
 
@@ -2395,7 +2430,7 @@ function drawHog(){
   ctx.scale(k, k);
 
   ctx.globalCompositeOperation = "lighter";
-  ctx.globalAlpha = a * (.09 + .05*Math.sin(time*3.2) + GAME.flash*.5);
+  ctx.globalAlpha = a * (.09 + .05*Math.sin(time*3.2) + GAME.flash*.5 + invulnPulse);
   ctx.drawImage(SP_MAGIC, -80, -84, 160, 160);
   ctx.globalCompositeOperation = "source-over";
 

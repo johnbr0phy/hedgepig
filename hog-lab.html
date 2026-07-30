@@ -239,7 +239,7 @@ function updateIdle(h, dt){
    It sets only the spring TARGETS, so he still lags, overshoots and settles
    onto you rather than snapping to you.
    ────────────────────────────────────────────────────────────────────── */
-function lookAt(h, dx, dy, th){
+function lookAt(h, dx, dy, th, dt){
   const r = Math.hypot(dx, dy);
   if (r < 6) return;                // pointer on top of him: no direction to aim
   h.pitchT = clamp(Math.atan2(-dy, Math.max(7, Math.abs(dx))), -.50, .55);
@@ -256,7 +256,26 @@ function lookAt(h, dx, dy, th){
      measuring and fixing a 17-22° whip on the turn lag; this was 155°. */
   const cp   = Math.max(.35, Math.cos(h.pitchT));
   const want = Math.acos(clamp((dx/r)/cp, -1, 1)) - th;
-  h.yawT = clamp(h.yaw + wrapAng(want - h.yaw), -1.35, 1.35);
+  /* ── the aim, and why it is RATE LIMITED ──────────────────────────────
+     `w0` is the aim as a body-relative yaw, taken round the short way. His neck
+     reaches ±1.35, so past that he strains toward the nearer limit.
+
+     The discontinuity here is REAL and cannot be tie-broken away: when the
+     pointer passes directly behind his head, straining left and straining right
+     are equally wrong, and whichever he picks he must eventually swing across.
+     I tried resolving relative to his live yaw (moves the flip to yaw = 0),
+     then remembering the side (moves it to the moment the aim comes back in
+     reach). Both measured 155° of target jump, and a peak head rate of 685°/s
+     with his face at full alpha across 30° of heading either side of 90°.
+
+     So the target is slew limited instead. Any jump becomes a sweep at 4.6
+     rad/s — a fast but deliberate head turn — and the spring smooths it
+     further. It fixes the whip wherever the discontinuity happens to be,
+     rather than relocating it. */
+  const w0 = wrapAng(want);
+  const aim = Math.abs(w0) <= 1.35 ? w0 : (w0 >= 0 ? 1.35 : -1.35);
+  const step = 4.6 * (dt || 1/60);
+  h.yawT += clamp(wrapAng(aim - h.yawT), -step, step);
   h.lookLock = .5;                  // and he stops glancing idly about
 }
 
@@ -333,7 +352,7 @@ const afloat  = false;// the game puts him in a boat over water; there is none h
 // A faithful copy of the current in-game drawing, parameterised so the rig can
 // drive several at once. `t` is that stall's own clock.
 function drawHog(ctx, hog, t, K, cx, cy){
-  const c = hog.curl, g = hog.gait * (1 - c), d = hog.dip * (1 - c);
+  const c = hog.curl, g = hog.gait*(1 - c), d = hog.dip*(1 - c);
   const a = 1;
 
   const p     = hog.walk;
@@ -1480,7 +1499,7 @@ function frame(now){
     if (mouse && !paused)
       lookAt(s.hog, (mouse.x - (s.left + s.w*.5))/K,
                     (mouse.y - (s.top  + s.h*.62))/K,
-                    Math.PI/2 - s.hog.hd);
+                    Math.PI/2 - s.hog.hd, dt);
     updateIdle(s.hog, dt);
     updateLook(s.hog, dt);
     s.S.set(s.hog, dt, s.t);
