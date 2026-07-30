@@ -78,14 +78,31 @@ export function buildHog() {
   root.add(body);
   hullOutline(body, { thickness: 0.0042 });
 
-  /* The snout is not a head — it is where the one mass narrows.  Short, on
-   * purpose: past about 1.25 times this and he is an anteater. */
+  /* The snout is not a head — it is where the one mass narrows.
+   *
+   * **Short.**  v1's rule is that past about 1.25 times this he is an
+   * anteater, and the first pass here was 62 mm long against a 130 mm
+   * half-body: it added 40 % to his length and merged with the body into one
+   * long pale wedge, which is a tapir.  Every feature on his face is derived
+   * from these five numbers now rather than guessed against them — which is
+   * the lesson of the buried catchlight, learned three more times.
+   *
+   * Note the y: the snout is a **child of the body**, so this is relative to
+   * the body's own centre and not to the ground. */
+  const SNOUT = { x: A * 0.95, y: -0.013, rx: 0.038, ry: 0.028, rz: 0.030 };
   const snoutGeo = new THREE.SphereGeometry(1, 16, 12);
-  snoutGeo.scale(0.062, 0.040, 0.044);
+  snoutGeo.scale(SNOUT.rx, SNOUT.ry, SNOUT.rz);
   const snout = new THREE.Mesh(snoutGeo, creamMat);
-  snout.position.set(A * 0.92, BODY_Y - 0.006, 0);
+  snout.position.set(SNOUT.x, SNOUT.y, 0);
   snout.castShadow = true;
+  snout.userData.restY = SNOUT.y;
   body.add(snout);
+
+  /** Where the body's surface is, at a given height and distance forward. */
+  const surfaceZ = (x, y) => {
+    const t = 1 - (x / A) ** 2 - (y / B) ** 2;
+    return C * Math.sqrt(Math.max(0.02, t));
+  };
 
   /* ------------------------------ the face ------------------------------- */
   /* One group for everything that is a feature, so "looking about" can be a
@@ -104,32 +121,51 @@ export function buildHog() {
    * printed low on a large cream balloon — the mass above the eyes becomes a
    * forehead, and a hedgehog does not have one. */
   const EYE = { x: A * 0.56, y: 0.044, z: C * 0.56 };
+  const EYE_R = 0.0132;
   const eyes = [];
   const blushes = [];
   for (const s of [-1, 1]) {
-    const e = new THREE.Mesh(new THREE.SphereGeometry(0.0145, 12, 10), eyeMat);
+    const e = new THREE.Mesh(new THREE.SphereGeometry(EYE_R, 14, 11), eyeMat);
     e.position.set(EYE.x, EYE.y, EYE.z * s);
     face.add(e);
     eyes.push(e);
 
-    // a catchlight, so the eye reads as wet rather than as a bead
-    const glint = new THREE.Mesh(new THREE.SphereGeometry(0.0042, 8, 6), flat({ color: 0xfffdf4 }));
-    glint.position.set(0.008, 0.005, 0.004 * s);
+    /* A catchlight, so the eye reads as wet rather than as a bead — and it
+     * has to sit **on** the eyeball.  Placed at (0.008, 0.005, 0.004) it was
+     * 10.2 mm from the centre of a 14.5 mm sphere with a 4.2 mm radius of its
+     * own: entirely inside it, invisible, and both eyes read as flat black
+     * holes.  v1's handover is explicit that the catchlight is most of what
+     * makes an eye look alive, and this was it not being there at all. */
+    const glint = new THREE.Mesh(new THREE.SphereGeometry(0.0044, 8, 6), flat({ color: 0xfffdf4 }));
+    glint.position.set(0.55, 0.56, 0.62 * s).normalize().multiplyScalar(EYE_R * 0.96);
     e.add(glint);
     e.userData.glint = glint;
 
+    // and a cool glint opposite it, so the eye has a wet far side too
+    const wet = new THREE.Mesh(new THREE.SphereGeometry(0.0022, 6, 5), flat({ color: 0xbcd0e8 }));
+    wet.position.set(-0.2, -0.62, 0.75 * s).normalize().multiplyScalar(EYE_R * 0.96);
+    e.add(wet);
+
     /* The blush hangs off the eye, not off the body.  Off the body it lands
      * on the snout and reads as a smear. */
-    const bl = new THREE.Mesh(new THREE.CircleGeometry(0.019, 14), blushMat);
-    bl.position.set(EYE.x - 0.022, EYE.y - 0.028, EYE.z * s * 1.02);
+    /* On the surface of his cheek, which is 80 mm out at that height — not
+     * at the eye's own z of 49 mm, where the disc sat *inside* his head and
+     * was never once visible.  Same fault as the catchlight, same fix. */
+    const bx = EYE.x - 0.020;
+    const by = EYE.y - 0.026;
+    const bl = new THREE.Mesh(new THREE.CircleGeometry(0.018, 14), blushMat);
+    bl.position.set(bx, by, (surfaceZ(bx, by) + 0.001) * s);
     bl.rotation.y = s * Math.PI * 0.5;
     bl.renderOrder = 3;
     face.add(bl);
     blushes.push(bl);
   }
 
-  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.0155, 12, 10), noseMat);
-  nose.position.set(A * 1.03, -0.002, 0);
+  /* On the tip of the snout, derived from it.  Guessed independently it sat
+   * at A × 1.03, which is 48 mm *behind* the tip of the snout it belongs to
+   * — inside his face, and so he had no nose at all. */
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.0125, 12, 10), noseMat);
+  nose.position.set(SNOUT.x + SNOUT.rx * 0.82, SNOUT.y + 0.004, 0);
   face.add(nose);
 
   /* His mouth is three points on his own surface, bowed outward, so it is a
@@ -140,10 +176,10 @@ export function buildHog() {
     for (let i = 0; i <= 8; i++) {
       const t = i / 8;
       const ang = lerp(-0.55, 0.55, t);
-      const r = 0.030;
+      const r = SNOUT.rz * 0.78;
       pts.push(new THREE.Vector3(
-        A * 0.90 + Math.cos(ang) * 0.004,
-        -0.026 - Math.cos(ang * 1.6) * 0.006,
+        SNOUT.x + SNOUT.rx * 0.30 + Math.cos(ang) * 0.004,
+        SNOUT.y - SNOUT.ry * 0.62 - Math.cos(ang * 1.6) * 0.005,
         Math.sin(ang) * r
       ));
     }
@@ -163,7 +199,7 @@ export function buildHog() {
         const g = new THREE.CylinderGeometry(0.0008, 0.0004, 0.055, 3);
         g.translate(0, 0.0275, 0);
         const w = new THREE.Mesh(g, wmat);
-        w.position.set(A * 0.96, -0.002 + i * 0.008, 0.012 * s);
+        w.position.set(SNOUT.x + SNOUT.rx * 0.45, SNOUT.y + 0.004 + i * 0.007, SNOUT.rz * 0.4 * s);
         w.rotation.z = -Math.PI / 2 + 0.35;
         w.rotation.y = s * (0.5 + i * 0.28);
         w.userData.noOutline = true;
@@ -191,8 +227,27 @@ export function buildHog() {
    * few with pale tips.  The proportion is the badge's — about one in five. */
   const rng = rngKit(1808);
 
-  // eye keep-out, in model space, computed before a single quill is placed
+  /* The face keep-out, in model space, computed before a single quill is
+   * placed — and it is the **brow line**, not two circles.
+   *
+   * Two circles is what it was, and between them the coat survived and came
+   * down the middle of his forehead as a dark wedge: a widow's peak with a
+   * point on it, right between his eyes, which is the single least appealing
+   * shape you can put on an animal's face.  What has to be clear is the
+   * whole band across his brow, so the test is distance to the *segment*
+   * joining the two eyes rather than to either end of it. */
   const faceKeepOut = eyes.map((e) => e.position.clone().add(new THREE.Vector3(0, BODY_Y, 0)));
+  const browA = faceKeepOut[0];
+  const browB = faceKeepOut[1];
+  const _seg = new THREE.Vector3();
+  const _rel = new THREE.Vector3();
+  /** Distance from `p` to the brow line joining the eyes. */
+  const browDistance = (p) => {
+    _seg.subVectors(browB, browA);
+    const len2 = _seg.lengthSq() || 1;
+    const t = clamp(_rel.subVectors(p, browA).dot(_seg) / len2, 0, 1);
+    return p.distanceTo(_rel.copy(browA).addScaledVector(_seg, t));
+  };
 
   /* ---------------------------- the dark mantle ---------------------------- *
    * A second shell over the back, cut to exactly the region the needles root
@@ -232,11 +287,7 @@ export function buildHog() {
        * straight across his eye — which is worse than a quill through it,
        * because it is a hard line and it is always on the same side. */
       va.set(cen.x * A, cen.y * B + BODY_Y, cen.z * C);
-      let onFace = false;
-      for (const k of faceKeepOut) {
-        if (va.distanceTo(k) < 0.042) { onFace = true; break; }
-      }
-      if (onFace) continue;
+      if (browDistance(va) < 0.040) continue;
       for (let e = 0; e < 3; e++) {
         va.fromBufferAttribute(pos, t + e);
         keep.push(va.x, va.y, va.z);
@@ -280,17 +331,22 @@ export function buildHog() {
     const world = p.clone().add(new THREE.Vector3(0, BODY_Y, 0));
     // the face wins: no quill within a radius of an eye.  The radius shrinks
     // as it goes round the side, where a generous zone leaves a bald patch.
-    let blocked = false;
-    for (const k of faceKeepOut) {
-      const rad = 0.040 * (1 - clamp(Math.abs(world.z) / C, 0, 1) * 0.45);
-      if (world.distanceTo(k) < rad) { blocked = true; break; }
-    }
-    if (blocked) continue;
+    /* The radius shrinks as it goes round the side, where a generous zone
+     * leaves a bald patch round the one eye you can see. */
+    const rad = 0.040 * (1 - clamp(Math.abs(world.z) / C, 0, 1) * 0.45);
+    if (browDistance(world) < rad) continue;
 
     /* Rake toward the rump.  Dead radial is a sunburst; the badge's needles
      * all lie back along him.  Blended, not rotated: a fixed rotation about
      * one axis goes wrong on the flanks. */
-    const dir = nrm.clone().addScaledVector(new THREE.Vector3(-1, 0.08, 0), 0.62).normalize();
+    /* Rake, harder at the front.  A quill rooted on the brow has a normal
+     * pointing forward, and a fixed rake does not turn it far enough — so a
+     * dozen of them lay forward *over his face* like a fringe with spikes in
+     * it.  The rake grows with how far forward the root is, and anything
+     * still pointing forward after that is simply not planted. */
+    const rake = 0.62 + 1.15 * clamp(u.x, 0, 1);
+    const dir = nrm.clone().addScaledVector(new THREE.Vector3(-1, 0.10, 0), rake).normalize();
+    if (dir.x > 0.06) continue;
 
     quills.push({
       pos: world.clone().addScaledVector(nrm, -0.004),   // rooted just under the skin

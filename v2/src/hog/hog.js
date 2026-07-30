@@ -279,7 +279,11 @@ export class Hog {
     // a snuffling dip of the whole front while he stands
     const sn = Math.sin(now * 5.2) * 0.5 + Math.sin(now * 2.1) * 0.5;
     p.face.rotation.z = lerp(sn * 0.05 * this.snuffle, Math.sin(this.stride) * 0.03, g);
-    p.snout.position.y = -0.012 + Math.sin(now * 9) * 0.0016 * (1 - g * 0.5);
+    /* The snuffle rides on the snout's own resting height rather than
+     * replacing it with a number of its own.  It used to hard-code -0.012,
+     * which quietly *corrected* a constructor that had put the snout on top
+     * of his head — so the model was wrong and the animation hid it. */
+    p.snout.position.y = p.snout.userData.restY + Math.sin(now * 9) * 0.0016 * (1 - g * 0.5);
 
     // bob and roll: two out-of-phase sines, the roll at half the bob's rate
     this.bob = Math.abs(Math.sin(this.stride)) * 0.014 * g;

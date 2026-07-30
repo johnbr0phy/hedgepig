@@ -130,6 +130,46 @@ the two that went wrong again:
   own *edge* ran straight across his eye — worse than a quill through it,
   because it is a hard line and it is always on the same side.
 
+### Everything on his face must be *derived*, not guessed
+
+Four separate features were positioned by eye against numbers they did not
+share, and every one of them ended up **inside the mass it was supposed to sit
+on**:
+
+- the **catchlight** sat 10.2 mm from the centre of a 14.5 mm eyeball with a
+  4.2 mm radius of its own — entirely buried, so both eyes read as flat black
+  holes. v1's handover says plainly that the catchlight is most of what makes
+  an eye look alive; this was it not being there at all.
+- the **nose** was at `A × 1.03`, which was 48 mm behind the tip of the snout
+  it belongs to. He had no nose.
+- the **blush** was at the eye's own z of 49 mm, where his cheek is 80 mm out.
+  It was never once visible.
+- the **snout** was 62 mm long against a 130 mm half-body — 40 % added to his
+  length, merging with the body into one long pale wedge. That is a tapir.
+  v1's rule is that past about 1.25 times a short snout he is an anteater.
+
+There is now one `SNOUT` record and one `surfaceZ(x, y)` helper, and the nose,
+mouth, whiskers and blush are all placed off them. **If a feature needs a
+literal number to find his face, it is in the wrong place.**
+
+And one that hid another: the snuffle animation hard-coded the snout's resting
+height, which quietly *corrected* a constructor that had put the snout on top
+of his head. The model was wrong and the animation covered for it. The snuffle
+rides on `userData.restY` now.
+
+### The coat's edge is a brow line, not two circles
+
+The keep-out round his eyes was two separate circles, and between them the coat
+survived and came down the middle of his forehead as a dark wedge — a widow's
+peak with a point on it, right between his eyes. The test is distance to the
+*segment* joining the two eyes now, so what is cleared is the whole brow band.
+
+Related: a dozen quills at the front of the mantle lay **forward over his
+face** like a fringe with spikes in it, because a fixed rake does not turn a
+brow quill far enough — its normal points forward to begin with. The rake grows
+with how far forward the root sits, and anything still pointing forward after
+that is simply not planted.
+
 New here, and worth knowing:
 
 - The mantle's boundary is a **plane section**, which is what the badge shows: a
@@ -145,6 +185,11 @@ New here, and worth knowing:
 
 ## 5. Things that will bite the next change
 
+- **A pitched roof is `s * +angle`, not `s * -angle`.** Rotating about +x by a
+  negative angle lifts the *far* edge, so both slabs rise at the eaves and meet
+  low in the middle: a valley, not a ridge. The barn and all three town houses
+  had their roofs on upside down, against gable ends that were the right way up
+  the whole time.
 - **`heightAt` is the only answer to how high the ground is.** The terrain grid,
   the sphere under it, every prop, every blade and his feet all read it. The
   reference had a displaced sphere *and* a flat grid disagreeing by 65 mm and

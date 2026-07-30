@@ -233,7 +233,11 @@ export function buildFarm(root, ctx) {
   for (const s of [-1, 1]) {
     const slab = new THREE.Mesh(new THREE.BoxGeometry(W + 0.5, 0.1, D * 0.62), roofMat);
     slab.position.set(0, H + 0.46, (D * 0.28) * s);
-    slab.rotation.x = s * -0.62;
+    /* `+s`, not `-s`.  Rotating about +x by a *negative* angle lifts the far
+     * edge, so both slabs rose at the eaves and met low in the middle: a
+     * valley, not a ridge — a roof on upside down, against gable ends that
+     * were the right way up the whole time. */
+    slab.rotation.x = s * 0.62;
     barn.add(slab);
   }
   const gableMat = cel({ color: 0xa2553a, bands: 3, tint: 0x6b5b86 });

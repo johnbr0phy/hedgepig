@@ -351,7 +351,7 @@ export function buildTown(root, ctx) {
     for (const s of [-1, 1]) {
       const slab = new THREE.Mesh(new THREE.BoxGeometry(W + 0.34, 0.09, D * 0.66), tileMat);
       slab.position.set(0, H + 0.4, (D * 0.3) * s);
-      slab.rotation.x = s * -0.58;
+      slab.rotation.x = s * 0.58;      // ridge up, eaves down — see the barn
       house.add(slab);
     }
     for (let w = 0; w < 2; w++) {
