@@ -985,9 +985,14 @@ function drawHog3(ctx, hog, t, K, cx, cy){
     // gaze aim from updateLook is converted where it is set.
     const hy = hog.yaw + hog.lag + Math.sin(t*sniffR*.5)*(.03 + d*.075)
              + d*Math.sin(t*1.3)*.16;
-    const hp = hog.pitch + up*.62 - arch*.30            // nose to the air / stretched
+    /* CLAMPED. Nothing bounded the total: lookAt limits pitchT to [-.50,.55],
+       the spring overshoots it, and then the sniff-up action adds another .62,
+       so his head could tip back past 65° — far enough that his mouth swings
+       round to the FRONT of his skull rather than staying under his snout, and
+       the smile's bow direction stops being meaningful. */
+    const hp = clamp(hog.pitch + up*.62 - arch*.30      // nose to the air / stretched
              + sniff*(.055 + d*.115) + jitter*(.008 + d*.020)
-             - hog.hlag*.030 - d*.34 + hog.shiver*Math.sin(t*26)*.03;
+             - hog.hlag*.030 - d*.34 + hog.shiver*Math.sin(t*26)*.03, -.72, .62);
 
     const R = HD_R*rt;
     const HP = (dir, rr) => ({
@@ -1146,10 +1151,21 @@ function drawHog3(ctx, hog, t, K, cx, cy){
     if (frontVis(mC.n) > .02){
       ctx.globalAlpha = a * fa * snV * frontVis(mC.n);
       ctx.strokeStyle = "rgba(74,52,40,.78)"; ctx.lineWidth = 1.1; ctx.lineCap = "round";
+      /* The bow is built explicitly OUTWARD off his head, so it is a smile at
+         every angle. Deriving the control point by reflecting the centre point
+         through the corners' midpoint inverted it into a FROWN in 13 of 852
+         sampled states — all of them the `sniff up` idle action, which lifts
+         his nose, crossed with a hard head yaw. A quadratic's midpoint is
+         0.5*chordMid + 0.5*control, so the control that puts the curve a set
+         distance past the centre point is 2*(centre + out*d) - chordMid. */
+      const mD = headDir(0, -.66, hy, hp);
+      let moX = mD.x*ct - mD.z*st, moY = -mD.y;
+      const ml = Math.hypot(moX, moY) || 1; moX /= ml; moY /= ml;
+      const chX = (mL.X + mR.X)/2, chY = (mL.Y + mR.Y)/2;
       ctx.beginPath();
       ctx.moveTo(mL.X, mL.Y);
-      ctx.quadraticCurveTo(mC.X + (mC.X - (mL.X + mR.X)/2),
-                           mC.Y + (mC.Y - (mL.Y + mR.Y)/2), mR.X, mR.Y);
+      ctx.quadraticCurveTo(2*(mC.X + moX*.45) - chX, 2*(mC.Y + moY*.45) - chY,
+                           mR.X, mR.Y);
       ctx.stroke();
       ctx.globalAlpha = a * fa * snV;
     }
@@ -1364,7 +1380,12 @@ function drawHog3(ctx, hog, t, K, cx, cy){
   let gx = MN.x/A, gy = MN.y/B, gz = MN.z/Cc;
   const gl = Math.sqrt(gx*gx + gy*gy + gz*gz) || 1;
   gx /= gl; gy /= gl; gz /= gl;
-  const noseOn = 1 - Math.abs(ct);
+  /* Full widening across the whole band where the leftover cream goes
+     SYMMETRIC, not just exactly nose-on. A linear (1 - |ct|) ramp left a
+     shallow grin at hd = 15°: symmetry 0.88 and cream still reaching eye
+     level, which is a heading he passes through constantly. This is 1 for
+     |ct| <= 0.3 and gone by 0.55, so profile is untouched. */
+  const noseOn = clamp((.55 - Math.abs(ct))/.25, 0, 1);
   ctx.save();
   ctx.beginPath(); ctx.ellipse(0, 0, bw, B, 0, 0, TAU); ctx.clip();
   ctx.fillStyle = mgc;
