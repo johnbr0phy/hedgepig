@@ -81,14 +81,22 @@ export function buildGarden(root, ctx) {
     const bx = cx + (bed % 2 ? 3.4 : -3.4);
     const w = 6.5, d = 2.6;
 
+    /* Sixty small stones, not twenty-six large ones.  At 0.26 m each they
+     * were the length of the hedgepig and read as kerbstones dropped in a
+     * field; an edging is only an edging when the stones are smaller than the
+     * thing walking past them. */
     const edge = [];
-    for (let i = 0; i < 26; i++) {
-      const t = i / 26;
+    const NEDGE = 62;
+    for (let i = 0; i < NEDGE; i++) {
+      const t = i / NEDGE;
       const a = t * TAU;
       const ex = bx + Math.cos(a) * w * 0.5;
       const ez = bz + Math.sin(a) * d * 0.5;
-      const s = new THREE.BoxGeometry(0.26, 0.14, 0.2);
-      edge.push({ geometry: s, matrix: trs(ex, heightAt(ex, ez) + 0.05, ez, 0, a, 0) });
+      const s = new THREE.BoxGeometry(0.13, 0.075, 0.10);
+      edge.push({
+        geometry: s,
+        matrix: trs(ex, heightAt(ex, ez) + 0.028, ez, 0, a + rng.range(-0.2, 0.2), rng.range(-0.06, 0.06)),
+      });
     }
     const rim = new THREE.Mesh(bake(edge), edgeMat);
     g.add(shadowify(rim));
