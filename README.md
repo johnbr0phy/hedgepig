@@ -14,6 +14,17 @@ three cycles of different lengths (220m, 284m, 209m) so nothing ever repeats.
 - `smoke.js` — headless test harness: `node smoke.js <scenario>`
 - `HANDOVER.md` — how it works, and every mistake made building it
 
+## v2
+
+`v2/` is a second build alongside this one, not a replacement: the same
+hedgehog and the same ten places, rebuilt in three dimensions as a cel-shaded
+world on a planet 47.75 m across, with
+[Kenton-GMI/sakura-crossing](https://github.com/Kenton-GMI/sakura-crossing) as
+the baseline for how it is built and rendered. Vite and three.js, still no image
+assets. `cd v2 && npm install && npm run dev`. See `v2/README.md`.
+
+Nothing above this line changes — v1 keeps the root and keeps its URL.
+
 ## Controls
 
 | | |

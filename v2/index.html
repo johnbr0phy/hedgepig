@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>the hedgepig adventure — v2</title>
+    <style>
+      :root { color-scheme: light; }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #cfe0e8;
+        font-family: ui-rounded, "Hiragino Maru Gothic ProN", "Nunito", "Avenir Next",
+          system-ui, -apple-system, "Segoe UI", sans-serif;
+        color: #4a4258;
+        -webkit-font-smoothing: antialiased;
+      }
+      #view { display: block; width: 100vw; height: 100vh; touch-action: none; cursor: crosshair; }
+
+      #hud {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        user-select: none;
+      }
+      .panel {
+        position: absolute;
+        padding: 0.42rem 0.7rem;
+        border-radius: 0.9rem;
+        background: rgba(255, 253, 248, 0.72);
+        box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8) inset, 0 2px 10px rgba(90, 78, 120, 0.14);
+        font-size: 0.82rem;
+        letter-spacing: 0.01em;
+        backdrop-filter: blur(3px);
+      }
+      #hearts { top: 1rem; left: 1rem; font-size: 1.15rem; letter-spacing: 0.12em; }
+      #place  { top: 1rem; left: 50%; transform: translateX(-50%); text-align: center; }
+      #place b { display: block; font-size: 0.98rem; font-weight: 600; }
+      #place small { opacity: 0.62; font-size: 0.72rem; }
+      #clock  { top: 1rem; right: 1rem; text-align: right; }
+      #keys   { bottom: 1rem; left: 1rem; opacity: 0.72; font-size: 0.72rem; line-height: 1.5; }
+      #keys kbd {
+        font: inherit; font-weight: 600;
+        background: rgba(90, 78, 120, 0.1);
+        border-radius: 0.32rem; padding: 0 0.28rem;
+      }
+
+      #toast {
+        position: absolute;
+        left: 50%;
+        bottom: 22%;
+        transform: translateX(-50%) translateY(0.4rem);
+        opacity: 0;
+        transition: opacity 260ms ease, transform 260ms ease;
+        font-size: 1.02rem;
+        text-align: center;
+      }
+      #toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+      /* The title card doubles as the click that starts the audio context and
+       * takes the first frame's cost out of the opening view. */
+      #start {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-content: center;
+        gap: 0.5rem;
+        text-align: center;
+        background: radial-gradient(120% 90% at 50% 30%, #f6f2ea 0%, #dfe6e2 60%, #c9d6d8 100%);
+        transition: opacity 620ms ease;
+        cursor: pointer;
+      }
+      #start h1 { margin: 0; font-size: clamp(1.6rem, 4.6vw, 2.6rem); font-weight: 600; }
+      #start p { margin: 0; opacity: 0.66; font-size: 0.9rem; }
+      #start.gone { opacity: 0; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+
+    <div id="hud">
+      <div class="panel" id="hearts">♥ ♥ ♥</div>
+      <div class="panel" id="place"><b>the long meadow</b><small>spring · morning</small></div>
+      <div class="panel" id="clock">leg 1<br /><small>0 m walked</small></div>
+      <div class="panel" id="keys">
+        <kbd>click</kbd> call him there · <kbd>drag</kbd> look · <kbd>scroll</kbd> close in<br />
+        <kbd>space</kbd> he stops · <kbd>P</kbd> see the whole planet · <kbd>O</kbd> ink · <kbd>G</kbd> grade
+      </div>
+      <div id="toast"></div>
+    </div>
+
+    <div id="start">
+      <h1>the hedgepig adventure</h1>
+      <p>a small planet, ten places, and something to keep alive</p>
+      <p style="opacity: 0.44">click to begin</p>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
