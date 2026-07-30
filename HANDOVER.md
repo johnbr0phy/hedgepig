@@ -635,47 +635,55 @@ produced something that wasn't him. From the badge:
 - The **cheek blush** is a surprising amount of the charm. Place it off the
   **eye**, not off the head, or it lands on the snout as a smear.
 
-### The head rig
+### He has no head
 
-His features sit on a head sphere rather than painted flat on a profile. `az`
-runs round the vertical axis: 0 along the snout, +90° straight at the camera.
-Adding the head's yaw to every feature turns the whole face on the front of the
-head — the snout swings round and foreshortens, the far eye comes past it,
-whiskers fan, the mouth narrows. The body never moves. `updateLook()` drives it:
-he glances about, noses down to sniff, occasionally looks right at you.
+**There is no head sphere, and there never should be again.** The badge has ONE
+cream shape; his head is only where that shape narrows. So his features are
+placed straight onto the front of the body ellipsoid, and his whole body is that
+one cream ball — there is no dark mass under the coat either, so the only dark
+on him is the spines.
 
-The cheek ellipse is filled with **the same gradient as the chest**, so there is
-no seam. It is also what cuts the round of his head out of the mantle.
+This replaced a head sphere, and the point of the change was not tidiness. It
+**deleted a family of faults that could not be fixed while the head existed**:
 
-Rules learned the hard way here, all of them from things that shipped looking
-wrong:
+- the head sphere sat *inside* the body ellipsoid — `(20.0/26)² + (1.7/16.5)² =
+  0.60` — so the two interpenetrated, which is the one case the painter's
+  algorithm cannot sort. That is why his face drew through him, and why every
+  attempt to fix it by reordering failed.
+- a separate pale sphere reads as **a seal's head**. That is what started all
+  of this.
+- the mantle boundary left a **slab** from the front and a **grin** nose-on.
+- the crown coat landed on his **cheek** whichever way it was filtered — by
+  depth the front of it, by screen height his nape, because nose-on everything
+  on his midline projects to X = 0.
 
-- **`faceVis` must start at z = 0.** It ramped from −0.10, which drew far-side
-  features straight through his skull.
-- **An ear at azimuth near 90° projects onto the middle of his face**, beside
-  the eye — because `cos(90°) ≈ 0` puts it at the head's centre in profile. It
-  belongs at ~2.3 rad, the top-back.
-- **Ears are drawn AFTER the cheek fill.** Under it they were painted over;
-  pushed outside at `rr > 1` to escape that, they landed on the dark mantle and
-  were dark-on-dark. Either way there were simply no ears, twice.
-- **An ear must be an angled oval half-buried in the mantle.** Round and out on
-  the cream it reads as a second eye next to the real one.
-- **Quill arcs must stop at or below angle 0.** Past that they point
-  down-and-forward and rake across his face.
-- **Never alpha-fade cream over dark brown.** Fading the face out on `1-c` as he
-  curled left a translucent grey **ghost of a face** lying over the spines for
-  the whole middle of the curl. He stays opaque and is *retracted* instead —
-  scaling the head group about the body origin pulls it back and up into the
-  ball, which is what he actually does.
-- **Ears flick, they do not bob.** A constant `sin(t*6.5)*.7` on the ear's y was
-  a 3px ear sliding up and down for ever. It is the first thing you notice. A
-  flick is fast, occasional, and a **rotation**.
-- **A nose does not slide about on a muzzle that never moves** — that reads as a
-  twitching speck. The sniff is a **train of discrete pulses**
-  (`max(0,sin)²`, not a continuous buzz) fed into the head rig's pitch and yaw,
-  so snout, nose and whiskers all work as one piece. The nose itself only
-  **flares** on top of that: a wet nose working is a change of shape, not of
-  position.
+What it costs is the neck: he cannot turn his head independently, so looking
+about comes from the features shifting across his front (a damped yaw) rather
+than a head rotating.
+
+Rules that carry over, and one new one:
+
+- **The face wins; the coat works around it.** His eye positions are computed
+  *before a single quill is drawn* and the coat keeps out of a radius around
+  each. Every arrangement tried the other way round — coat down first, face
+  drawn over it — put spines on his cheek or through his eye. The radius shrinks
+  as he turns side-on, where a generous zone leaves a bald patch round the one
+  visible eye.
+- **`faceVis` vs `frontVis`.** `faceVis` is for features on the SIDES that swing
+  into view; `frontVis` is for features on the FRONT, whose normals point across
+  the view when he is side-on. Using the wrong one is invisible in code and
+  obvious on screen: it once put his nose at 40% and lost his mouth entirely in
+  profile, the commonest view there is.
+- **His mouth is three points on his own surface**, bowed outward, so it is a
+  smile at every angle. Derived any other way it inverts into a frown somewhere.
+- **The catchlights track the pointer.** A catchlight is a reflection, so it
+  belongs on the side of the eye facing what it reflects, with a cool glint
+  opposite to read as wet. His neck stops at 1.35 rad; his eyes do not stop.
+
+`hog-heads.html` is the bench where four head *mechanics* were built side by
+side — the sphere, blended authored poses, this one, and an authored wedge —
+so a direction could be chosen instead of iterated toward. It is a scratch
+tool: delete it once you are sure, or keep it if another rethink is coming.
 
 ### He watches your pointer
 
