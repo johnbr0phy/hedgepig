@@ -60,6 +60,7 @@
   <button id="pause">pause</button>
   <button id="step">step</button>
   <button id="three" class="on">3d</button>
+  <button id="sweep">heading sweep</button>
 </header>
 <div id="grid"></div>
 <script>
@@ -1163,7 +1164,10 @@ function drawHog3(ctx, hog, t, K, cx, cy){
     const mC = HP(headDir(  0, -.66, hy, hp), 1.02);
     if (frontVis(mC.n) > .02){
       ctx.globalAlpha = a * fa * snV * frontVis(mC.n);
-      ctx.strokeStyle = "rgba(74,52,40,.78)"; ctx.lineWidth = 1.1; ctx.lineCap = "round";
+      /* Stroke widths scale with the head. They did not, so as he curls and his
+         head retracts to half size the mouth line stays 1.1 wide — relatively
+         twice as heavy — and reads as a thick dark arc across a shrinking face. */
+      ctx.strokeStyle = "rgba(74,52,40,.78)"; ctx.lineWidth = 1.1*rt; ctx.lineCap = "round";
       /* The bow is built explicitly OUTWARD off his head, so it is a smile at
          every angle. Deriving the control point by reflecting the centre point
          through the corners' midpoint inverted it into a FROWN in 13 of 852
@@ -1184,7 +1188,7 @@ function drawHog3(ctx, hog, t, K, cx, cy){
     }
 
     ctx.globalAlpha = a * fa * .17;
-    ctx.strokeStyle = "rgba(246,240,228,1)"; ctx.lineWidth = .55;
+    ctx.strokeStyle = "rgba(246,240,228,1)"; ctx.lineWidth = .55*rt;
     for (let side=-1; side<=1; side+=2)
       for (let i=0;i<2;i++){
         const spread = (i - .5)*2.2 + side*1.1;
@@ -1224,7 +1228,7 @@ function drawHog3(ctx, hog, t, K, cx, cy){
         ctx.fillStyle = "rgba(255,255,255,.9)";
         ctx.beginPath(); ctx.arc(e.X + .60*sc, e.Y - .68*sc, .66*sc, 0, TAU); ctx.fill();
       }
-      ctx.strokeStyle = "rgba(74,54,42,.30)"; ctx.lineWidth = .8*sc;
+      ctx.strokeStyle = "rgba(74,54,42,.30)"; ctx.lineWidth = .8*sc*rt;
       ctx.beginPath(); ctx.arc(e.X, e.Y, 2.5*sc, -2.5, -1.0); ctx.stroke();
       ctx.globalAlpha = a * fa;
     }
@@ -1466,16 +1470,104 @@ const STALLS = [
       h.yawT = Math.sin(t*.55)*1.35; h.pitchT = Math.sin(t*.37)*.3; h.lookT = 9; } },
 ];
 
+/* ── the heading sweep ─────────────────────────────────────────────────
+   The stalls above are nearly all PROFILE views, and the game is nearly all
+   nose-on: progress means increasing wy, which means walking down the screen.
+   Almost every fault this hedgehog has had lived off-axis and the bench rig
+   could not show it — a coat that sat on top of him rather than wrapping
+   round, a mouth drawn along the wrong axis, two grey eyes, no ears, a cream
+   horseshoe that read as a grin.
+
+   So: the same hedgehog through a sweep of headings. It lives HERE, in the
+   lab, rather than in a copy of the lab, because a copy silently goes stale
+   the moment the real file moves.
+   ────────────────────────────────────────────────────────────────────── */
+const SWEEP = [
+  { tag:"hd 0", note:"walking, gaze straight ahead",
+    set:(h,dt,t)=>{ h.gait=1; h.dip=0; h.walk += dt*4; h.hd=0*Math.PI/180;
+      h.yawT=0; h.pitchT=0; h.lookT=9; h.lookLock=0; } },
+  { tag:"hd 15", note:"walking, gaze straight ahead",
+    set:(h,dt,t)=>{ h.gait=1; h.dip=0; h.walk += dt*4; h.hd=15*Math.PI/180;
+      h.yawT=0; h.pitchT=0; h.lookT=9; h.lookLock=0; } },
+  { tag:"hd 30", note:"walking, gaze straight ahead",
+    set:(h,dt,t)=>{ h.gait=1; h.dip=0; h.walk += dt*4; h.hd=30*Math.PI/180;
+      h.yawT=0; h.pitchT=0; h.lookT=9; h.lookLock=0; } },
+  { tag:"hd 60", note:"walking, gaze straight ahead",
+    set:(h,dt,t)=>{ h.gait=1; h.dip=0; h.walk += dt*4; h.hd=60*Math.PI/180;
+      h.yawT=0; h.pitchT=0; h.lookT=9; h.lookLock=0; } },
+  { tag:"hd 90", note:"walking, gaze straight ahead",
+    set:(h,dt,t)=>{ h.gait=1; h.dip=0; h.walk += dt*4; h.hd=90*Math.PI/180;
+      h.yawT=0; h.pitchT=0; h.lookT=9; h.lookLock=0; } },
+  { tag:"hd 120", note:"walking, gaze straight ahead",
+    set:(h,dt,t)=>{ h.gait=1; h.dip=0; h.walk += dt*4; h.hd=120*Math.PI/180;
+      h.yawT=0; h.pitchT=0; h.lookT=9; h.lookLock=0; } },
+  { tag:"hd 150", note:"walking, gaze straight ahead",
+    set:(h,dt,t)=>{ h.gait=1; h.dip=0; h.walk += dt*4; h.hd=150*Math.PI/180;
+      h.yawT=0; h.pitchT=0; h.lookT=9; h.lookLock=0; } },
+  { tag:"hd 180", note:"walking, gaze straight ahead",
+    set:(h,dt,t)=>{ h.gait=1; h.dip=0; h.walk += dt*4; h.hd=180*Math.PI/180;
+      h.yawT=0; h.pitchT=0; h.lookT=9; h.lookLock=0; } },
+  { tag:"hd -30", note:"walking, gaze straight ahead",
+    set:(h,dt,t)=>{ h.gait=1; h.dip=0; h.walk += dt*4; h.hd=-30*Math.PI/180;
+      h.yawT=0; h.pitchT=0; h.lookT=9; h.lookLock=0; } },
+  { tag:"hd -60", note:"walking, gaze straight ahead",
+    set:(h,dt,t)=>{ h.gait=1; h.dip=0; h.walk += dt*4; h.hd=-60*Math.PI/180;
+      h.yawT=0; h.pitchT=0; h.lookT=9; h.lookLock=0; } },
+  { tag:"hd -90", note:"walking, gaze straight ahead",
+    set:(h,dt,t)=>{ h.gait=1; h.dip=0; h.walk += dt*4; h.hd=-90*Math.PI/180;
+      h.yawT=0; h.pitchT=0; h.lookT=9; h.lookLock=0; } },
+  { tag:"hd -150", note:"walking, gaze straight ahead",
+    set:(h,dt,t)=>{ h.gait=1; h.dip=0; h.walk += dt*4; h.hd=-150*Math.PI/180;
+      h.yawT=0; h.pitchT=0; h.lookT=9; h.lookLock=0; } },
+  { tag:"hd 0 yaw 1.35", note:"head at its limit",
+    set:(h,dt,t)=>{ h.gait=0; h.dip=.3; h.hd=0*Math.PI/180;
+      h.yawT=1.35; h.pitchT=0; h.lookT=9; h.lookLock=9; } },
+  { tag:"hd 0 yaw -1.35", note:"head at its limit",
+    set:(h,dt,t)=>{ h.gait=0; h.dip=.3; h.hd=0*Math.PI/180;
+      h.yawT=-1.35; h.pitchT=0; h.lookT=9; h.lookLock=9; } },
+  { tag:"hd 90 yaw 1.35", note:"head at its limit",
+    set:(h,dt,t)=>{ h.gait=0; h.dip=.3; h.hd=90*Math.PI/180;
+      h.yawT=1.35; h.pitchT=0; h.lookT=9; h.lookLock=9; } },
+  { tag:"hd 90 yaw -1.35", note:"head at its limit",
+    set:(h,dt,t)=>{ h.gait=0; h.dip=.3; h.hd=90*Math.PI/180;
+      h.yawT=-1.35; h.pitchT=0; h.lookT=9; h.lookLock=9; } },
+  { tag:"nose-on curl 0.3", note:"curled, walking at the lens",
+    set:(h,dt,t)=>{ h.gait=0; h.hd=0; h.curl=0.3; h.yawT=0; h.pitchT=0; h.lookT=9; } },
+  { tag:"nose-on curl 0.6", note:"curled, walking at the lens",
+    set:(h,dt,t)=>{ h.gait=0; h.hd=0; h.curl=0.6; h.yawT=0; h.pitchT=0; h.lookT=9; } },
+  { tag:"nose-on curl 0.9", note:"curled, walking at the lens",
+    set:(h,dt,t)=>{ h.gait=0; h.hd=0; h.curl=0.9; h.yawT=0; h.pitchT=0; h.lookT=9; } },
+  { tag:"nose-on shake", note:"idle action, mid-hump",
+    set:(h,dt,t)=>{ h.gait=0; h.dip=.6; h.hd=0; h.act=1; h.actP=.5; h.actT=1; h.actLen=2;
+      h.yawT=0; h.pitchT=0; h.lookT=9; } },
+  { tag:"nose-on sniff up", note:"idle action, mid-hump",
+    set:(h,dt,t)=>{ h.gait=0; h.dip=.6; h.hd=0; h.act=2; h.actP=.5; h.actT=1; h.actLen=2;
+      h.yawT=0; h.pitchT=0; h.lookT=9; } },
+  { tag:"nose-on stretch", note:"idle action, mid-hump",
+    set:(h,dt,t)=>{ h.gait=0; h.dip=.6; h.hd=0; h.act=3; h.actP=.5; h.actT=1; h.actLen=2;
+      h.yawT=0; h.pitchT=0; h.lookT=9; } },
+  { tag:"nose-on shiver", note:"deep snow, walking at the lens",
+    set:(h,dt,t)=>{ h.gait=0; h.dip=.4; h.shiver=1; h.hd=0; h.yawT=0; h.lookT=9; } },
+  { tag:"hd -90 shiver", note:"shivering while facing left",
+    set:(h,dt,t)=>{ h.gait=0; h.dip=.4; h.shiver=1; h.hd=-Math.PI/2; h.yawT=0; h.lookT=9; } },
+];
+
+
 const grid = document.getElementById("grid");
-const stalls = STALLS.map(S => {
+let stalls = [];
+function buildStalls(list){
+  grid.innerHTML = "";
+  stalls = list.map(S => {
   const el = document.createElement("div");
   el.className = "stall";
   el.innerHTML = '<canvas></canvas><div class="tag">'+S.tag+
                  '</div><div class="note">'+S.note+'</div>';
   grid.appendChild(el);
   const cv = el.querySelector("canvas");
-  return { S, el, cv, ctx: cv.getContext("2d"), hog: makeHog(), t: Math.random()*4 };
-});
+    return { S, el, cv, ctx: cv.getContext("2d"), hog: makeHog(), t: Math.random()*4 };
+  });
+}
+buildStalls(STALLS);
 
 /* Every stall watches the pointer, even when it is nowhere near that stall —
    eleven of him all turning to follow you at once is the quickest way to see
@@ -1511,6 +1603,14 @@ btnPause.onclick = () => { paused = !paused; btnPause.classList.toggle("on", pau
 btnStep.onclick  = () => { stepOnce = true; };
 const btnThree = document.getElementById("three");
 btnThree.onclick = () => { use3d = !use3d; btnThree.classList.toggle("on", use3d); };
+const btnSweep = document.getElementById("sweep");
+let sweeping = false;
+btnSweep.onclick = () => {
+  sweeping = !sweeping;
+  btnSweep.classList.toggle("on", sweeping);
+  buildStalls(sweeping ? SWEEP : STALLS);
+  resize();
+};
 
 let last = performance.now();
 function frame(now){

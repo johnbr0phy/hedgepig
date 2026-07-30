@@ -2757,7 +2757,10 @@ function drawHog(){
     const mC = HP(headDir(  0, -.66, hy, hp), 1.02);
     if (frontVis(mC.n) > .02){
       ctx.globalAlpha = a * fa * snV * frontVis(mC.n);
-      ctx.strokeStyle = "rgba(74,52,40,.78)"; ctx.lineWidth = 1.1; ctx.lineCap = "round";
+      /* Stroke widths scale with the head. They did not, so as he curls and his
+         head retracts to half size the mouth line stays 1.1 wide — relatively
+         twice as heavy — and reads as a thick dark arc across a shrinking face. */
+      ctx.strokeStyle = "rgba(74,52,40,.78)"; ctx.lineWidth = 1.1*rt; ctx.lineCap = "round";
       /* The bow is built explicitly OUTWARD off his head, so it is a smile at
          every angle. Deriving the control point by reflecting the centre point
          through the corners' midpoint inverted it into a FROWN in 13 of 852
@@ -2778,7 +2781,7 @@ function drawHog(){
     }
 
     ctx.globalAlpha = a * fa * .17;
-    ctx.strokeStyle = "rgba(246,240,228,1)"; ctx.lineWidth = .55;
+    ctx.strokeStyle = "rgba(246,240,228,1)"; ctx.lineWidth = .55*rt;
     for (let side=-1; side<=1; side+=2)
       for (let i=0;i<2;i++){
         const spread = (i - .5)*2.2 + side*1.1;
@@ -2818,7 +2821,7 @@ function drawHog(){
         ctx.fillStyle = "rgba(255,255,255,.9)";
         ctx.beginPath(); ctx.arc(e.X + .60*sc, e.Y - .68*sc, .66*sc, 0, TAU); ctx.fill();
       }
-      ctx.strokeStyle = "rgba(74,54,42,.30)"; ctx.lineWidth = .8*sc;
+      ctx.strokeStyle = "rgba(74,54,42,.30)"; ctx.lineWidth = .8*sc*rt;
       ctx.beginPath(); ctx.arc(e.X, e.Y, 2.5*sc, -2.5, -1.0); ctx.stroke();
       ctx.globalAlpha = a * fa;
     }

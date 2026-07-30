@@ -473,6 +473,15 @@ The **3d** button toggles between the current 3D renderer (`drawHog3`) and the
 last 2D one (`drawHog`), which is kept only for comparison. Delete `drawHog`
 once you are sure.
 
+The **heading sweep** button swaps the eleven stalls for the same hedgehog at
+two dozen headings and states. **Use it.** The stalls are nearly all profile
+views and the game is nearly all nose-on, and almost every fault this hedgehog
+has had lived off-axis where the bench rig could not show it: a coat that sat on
+top of him rather than wrapping round, a mouth drawn along the wrong axis, two
+grey eyes, no ears, a cream horseshoe that read as a grin. The sweep lives
+inside `hog-lab.html` rather than in a copy of it, because a copy of the lab
+goes stale the moment the lab moves and you have no way of knowing.
+
 Two things about looking at it in a browser, both of which wasted a cycle:
 
 - **Cache-bust the URL.** Reloading `hog-lab.html` served the previous render and
