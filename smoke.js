@@ -124,6 +124,89 @@ const HOOK = `
 ;globalThis.__moving = () => hog.gait;
 
 `;
+/* ── the sync check ───────────────────────────────────────────────────────
+   `node smoke.js sync` proves that hog-lab.html and index.html still share
+   the hedgehog, rather than my believing they do.
+
+   They had silently diverged on the HEAD RIG: the lab had a body-relative
+   gaze and a trailing head lag, the game still had the camera-relative gaze
+   the lab's own comment calls a bug, an inverted lag, and its ears 0.37 rad
+   out of place. The cause is that I hand-ported with string replaces, and a
+   replace whose pattern has already drifted does nothing at all and says
+   nothing about it. So this compares them mechanically instead.
+   ────────────────────────────────────────────────────────────────────────── */
+if (process.argv[2] === "sync"){
+  const lab = fs.readFileSync(__dirname + "/hog-lab.html", "utf8");
+  const gme = fs.readFileSync(__dirname + "/index.html", "utf8");
+  const fnOf = (src, name) => {
+    const i = src.indexOf("function " + name + "(");
+    if (i < 0) return null;
+    let k = src.indexOf("{", i), depth = 0;
+    for (;; k++){
+      if (src[k] === "{") depth++;
+      else if (src[k] === "}" && --depth === 0) break;
+    }
+    return src.slice(i, k + 1);
+  };
+  const lineOf = (src, key) => (src.split("\n").find(l => l.startsWith(key)) || null);
+
+  const problems = [];
+  // functions that must be character-identical
+  for (const name of ["lookAt","updateLook","updateIdle","hRot","headDir","facePt"]){
+    const a = fnOf(lab, name), b = fnOf(gme, name);
+    if (a === null || b === null){ problems.push(name + ": missing from " + (a ? "index.html" : "hog-lab.html")); continue; }
+    if (a !== b) problems.push(name + "(): DIVERGED");
+  }
+  // constants that must match
+  for (const key of ["const AZ_EYE","const RR_EYE","const AZ_EAR","const RR_EAR",
+                     "const SNOUT_R","const HEAD_K","const PITCH_K","const LAG_S",
+                     "const HL_K","const BODY","const HD_R","const HD_C",
+                     "const GROUND","const MN","const MK0","const QSHADE","const L3",
+                     "const faceVis","const frontVis"]){
+    const a = lineOf(lab, key), b = lineOf(gme, key);
+    if (a !== b) problems.push(key + ": \n      lab  " + a + "\n      game " + b);
+  }
+  // and the drawing body, after the differences that are DECLARED
+  const bodyOf = (src, name) => {
+    const f = fnOf(src, name);
+    return f.slice(f.indexOf("{") + 1).replace(/\s+/g, " ");
+  };
+  // everything before `const p = hog.walk` is the declared preamble: the lab
+  // sets a = 1 and takes cx/cy/K, the game resolves afloat/k/sy/alpha and
+  // culls. Compare from there on.
+  const after = x => { const i = x.indexOf("const p = hog.walk"); return i < 0 ? x : x.slice(i); };
+  let A = after(bodyOf(lab, "drawHog3")), B = after(bodyOf(gme, "drawHog"));
+  // declared: t vs time, K vs k, the stall origin vs his world position
+  A = A.replace(/\bt\*/g, "time*").replace(/\bK\b/g, "k")
+       .replace(/cx \+ shiv, cy \+ bob/g, "hog.x + shiv, sy + bob");
+  // the game-only preamble, boat, and flash term are stripped from both sides
+  const strip = x => x
+    .replace(/if \(afloat\)\{[\s\S]*?ctx\.translate\(0, -9\); \} else \{ /g, "")
+    .replace(/ctx\.globalAlpha = a; \} \/\* ── the coat/g, "ctx.globalAlpha = a; /* ── the coat")
+    .replace(/ \+ GAME\.flash\*\.5/g, "")
+    .replace(/if \(afloat\)\{ ctx\.save\(\); ctx\.scale\(boatS, 1\);[\s\S]*?ctx\.restore\(\); \} /g, "")
+    .replace(/&& !afloat/g, "").replace(/\|\| afloat/g, "")
+    .replace(/\s+/g, " ").replace(/ \)/g, ")").replace(/\( /g, "(").trim();
+  A = strip(A); B = strip(B);
+  if (A !== B){
+    // find where they first differ, for a useful message
+    let i = 0; while (i < A.length && i < B.length && A[i] === B[i]) i++;
+    problems.push("the drawing body diverges at char " + i + ":\n      lab  ..." +
+                  A.slice(Math.max(0,i-70), i+90) + "\n      game ..." +
+                  B.slice(Math.max(0,i-70), i+90));
+  }
+
+  console.log("scenario: sync");
+  if (problems.length){
+    console.log("  !! THE LAB AND THE GAME HAVE DIVERGED (" + problems.length + ")");
+    problems.forEach(p => console.log("     - " + p));
+    process.exitCode = 1;
+  } else {
+    console.log("  the shared hedgehog is identical in both files");
+  }
+  return;
+}
+
 /* ── the lab ──────────────────────────────────────────────────────────────
    `node smoke.js lab` runs hog-lab.html under the same mocks and drives its
    rAF loop for a few hundred frames.
@@ -204,12 +287,21 @@ const tick = globalThis.__tick, peek = globalThis.__peek;
 
 // The camera is player-controlled now, so scenarios must scroll to keep up
 // exactly as a player would. Pass follow=false to deliberately abandon him.
+/* Count them. The ops/frame report used to divide by a hardcoded 3650 whatever
+   the scenario actually ran, which is between 1340 frames (`goal`, `back`) and
+   6140 (`abandon`) — so it understated `back` by 63% and overstated `abandon`
+   by 68%. Worse, it read as a measurement: I published a hedgehog cost of 232
+   fills a frame off the back of it, measured on `idle`, which runs 2180 frames.
+   The real figure was 441. §4 of the handover already records the harness
+   lying with confidence twice; this was the third. */
+let nFrames = 0;
 function frames(n, fn, follow){
   for (let i=0;i<n;i++){
     nowMs += 1000/60;
     if (fn) fn(i);
     if (follow !== false) globalThis.__follow();
     tick(nowMs);
+    nFrames++;
   }
 }
 
@@ -305,10 +397,10 @@ console.log("  hits:", globalThis.__hits.n, JSON.stringify(globalThis.__hits.kin
             " gait:", globalThis.__moving().toFixed(2));
 if (scen === "idle" && dist > 1){ console.log("  !! HE MOVED WITHOUT BEING CALLED"); process.exitCode = 1; }
 if (scen === "back" && dist > -100){ console.log("  !! HE DID NOT WALK BACKWARDS"); process.exitCode = 1; }
-console.log("  ops/frame: fill", (ops.fill/3650).toFixed(0),
-            " stroke", (ops.stroke/3650).toFixed(0),
-            " save", (ops.save/3650).toFixed(0),
-            " path", (ops.path/3650).toFixed(0));
+console.log("  ops/frame over", nFrames, "frames: fill", (ops.fill/nFrames).toFixed(0),
+            " stroke", (ops.stroke/nFrames).toFixed(0),
+            " save", (ops.save/nFrames).toFixed(0),
+            " path", (ops.path/nFrames).toFixed(0));
 if (bad.length){
   console.log("  !! NON-FINITE / DEGENERATE:", bad.length, "distinct");
   bad.slice(0,12).forEach(b => console.log("     ", b));

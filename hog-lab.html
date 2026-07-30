@@ -186,6 +186,42 @@ const PITCH_K = 54, PITCH_D = 10;
 const LAG_S = .088, LG_K = 90, LG_D = 12;   // turn lag: 22° behind at full turn rate
 const HL_K = 120, HL_D = 13, HL_F = .14;
 
+/* ── idle variety ──────────────────────────────────────────────────────
+   Standing still he only ever snuffled, which after a few seconds reads as
+   a loop. He now breaks it with one of three things, on a slow timer:
+
+     1  a SHAKE — the whole body buzzes and the coat fluffs out, the way a
+        hedgehog shakes off wet or dust. Short and sharp.
+     2  a SNIFF UP — nose lifted high off the ground, holding, testing the
+        air rather than the earth.
+     3  a STRETCH — a long slow arch, head down and haunches up.
+
+   `act` is which one, `actT` counts it down, and `actP` is 0..1 through it
+   so the drawing can shape it. It only fires while he is standing still, and
+   any of it is abandoned the moment he sets off — improvement #9.
+   ────────────────────────────────────────────────────────────────────── */
+const IDLE_ACTS = 3;
+function updateIdle(h, dt){
+  if (h.gait > .12 || h.curl > .2){          // moving or hurt: no idling
+    h.actT = 0; h.act = 0; h.actP = 0;
+    h.idleT = lerp(2.5, 6, Math.random());
+    return;
+  }
+  if (h.actT > 0){
+    h.actT -= dt;
+    h.actP = clamp(1 - h.actT/h.actLen, 0, 1);
+    if (h.actT <= 0){ h.act = 0; h.actP = 0; h.idleT = lerp(3.5, 9, Math.random()); }
+    return;
+  }
+  h.idleT -= dt;
+  if (h.idleT <= 0){
+    h.act = 1 + ((Math.random()*IDLE_ACTS)|0);
+    h.actLen = h.act === 1 ? .55 : h.act === 2 ? 1.7 : 2.1;
+    h.actT = h.actLen;
+    if (h.act === 1) h.flick = 1;            // a shake rattles his ears too
+  }
+}
+
 /* ── he watches your pointer ───────────────────────────────────────────
    Given where the pointer is relative to him, in his own units, this is the
    head yaw that puts his snout on it. The snout's screen-x component is
@@ -201,9 +237,23 @@ const HL_K = 120, HL_D = 13, HL_F = .14;
    onto you rather than snapping to you.
    ────────────────────────────────────────────────────────────────────── */
 function lookAt(h, dx, dy, th){
-  const r = Math.hypot(dx, dy) || 1;
-  h.yawT   = clamp(wrapAng(Math.acos(clamp(dx/r, -1, 1)) - th), -1.35, 1.35);
+  const r = Math.hypot(dx, dy);
+  if (r < 6) return;                // pointer on top of him: no direction to aim
   h.pitchT = clamp(Math.atan2(-dy, Math.max(7, Math.abs(dx))), -.50, .55);
+  /* The projected snout is (cos(pitch)*cos(hy + th), sin(pitch)), so the yaw
+     solves cos(hy + th) = (dx/r)/cos(pitch). Dropping the cos(pitch) aimed him
+     12° too steep for a pointer up and to the side.
+
+     Then: resolve the answer relative to where his head ALREADY is before
+     clamping. acos returns [0, PI], so for any th < 0 — that is, any heading
+     past 90° — the top of `want`'s range crosses +PI and wrapAng threw it to
+     -PI. Both ends clamp to the same physical strain, but the target jumped
+     2.7 rad between adjacent frames, and the spring took his head through it
+     at 665°/s while his face was still 94% opaque. The handover records
+     measuring and fixing a 17-22° whip on the turn lag; this was 155°. */
+  const cp   = Math.max(.35, Math.cos(h.pitchT));
+  const want = Math.acos(clamp((dx/r)/cp, -1, 1)) - th;
+  h.yawT = clamp(h.yaw + wrapAng(want - h.yaw), -1.35, 1.35);
   h.lookLock = .5;                  // and he stops glancing idly about
 }
 
@@ -267,7 +317,8 @@ function makeHog(){
     dir:1, walk:0, gait:0, dip:0, curl:0, arrive:0, shiver:0,
     blink:0, blinkT:2.4, hd:Math.PI/2, x:0,   // 90° = profile, facing right
     yaw:0, pitch:0, yawT:0, pitchT:0, lookT:0,
-    yawV:0, pitchV:0, hlag:0, hlagV:0, lag:0, lagV:0, turn:0, acc:0, spdPrev:0, flick:0, earT:1.2, lookLock:0
+    yawV:0, pitchV:0, hlag:0, hlagV:0, lag:0, lagV:0, turn:0, acc:0, spdPrev:0, flick:0, earT:1.2, lookLock:0,
+  act:0, actT:0, actLen:1, actP:0, idleT:3
   };
 }
 
@@ -592,9 +643,11 @@ function drawHog(ctx, hog, t, K, cx, cy){
   if (hog.shiver > .35){
     ctx.globalAlpha = a * hog.shiver * (.35 + .3*Math.sin(t*11));
     ctx.strokeStyle = "rgba(198,226,246,1)"; ctx.lineWidth = 1.5;
+    ctx.save(); ctx.scale(faceSgn, 1);        // off his BACK, whichever way he faces
     for (let i=0;i<2;i++){
       ctx.beginPath(); ctx.arc(-6, -6, 30 + i*7, -2.5, -1.6); ctx.stroke();
     }
+    ctx.restore();
   }
   ctx.restore();
   ctx.globalAlpha = 1;
@@ -655,7 +708,9 @@ const QUILLS = (() => {
       // a tone offset per quill. Without it every quill at the same angle to
       // the light is the same flat value, and the coat reads as a field of
       // identical shards rather than as separate needles.
-      tn: ((Math.sin(i*31.7)*.5 + .5)*2.6 - 1.3)|0,
+      // Math.round, NOT |0: truncation toward zero maps all of (-1,1) to 0,
+      // so 77% of quills got no offset and the coat stayed flat
+      tn: Math.round((Math.sin(i*31.7)*.5 + .5)*2.6 - 1.3),
       // thinning priority: the radical inverse of i, which is equidistributed
       // and — unlike anything built on phi — uncorrelated with the golden-angle
       // ordering these are generated in
@@ -728,10 +783,20 @@ function drawHog3(ctx, hog, t, K, cx, cy){
   const a = 1;
 
   const p    = hog.walk;
+  /* the three idle actions. `shake` buzzes him and fluffs the coat, `up` lifts
+     his nose off the ground, `arch` stretches him out long and low. Each is a
+     hump over the action so it eases in and out rather than snapping. */
+  const hump  = Math.sin(Math.PI*hog.actP);
+  const shake = hog.act === 1 ? hump : 0;
+  const up    = hog.act === 2 ? hump : 0;
+  const arch  = hog.act === 3 ? hump : 0;
+
   const bob  = Math.sin(p*2)*2.1*g + Math.sin(t*2.1)*0.8*(1-g);
-  const lean = Math.sin(p*2 + .7)*.05*g - hog.arrive*.06;
+  const lean = Math.sin(p*2 + .7)*.05*g - hog.arrive*.06
+             + shake*Math.sin(t*38)*.055 - arch*.12;
   const sqz  = 1 + Math.sin(p*2 + 1.3)*.055*g;
-  const shiv = hog.shiver * (Math.sin(t*34)*1.5 + Math.sin(t*23.3)*.9);
+  const shiv = hog.shiver * (Math.sin(t*34)*1.5 + Math.sin(t*23.3)*.9)
+             + shake * Math.sin(t*46)*2.2;                 // the shake
 
   const sniffR = 6.5 + d*4.5;
   const sniff  = Math.pow(Math.max(0, Math.sin(t*sniffR)), 2);
@@ -744,13 +809,32 @@ function drawHog3(ctx, hog, t, K, cx, cy){
   //    hog.hd is his heading: 0 walks toward the lens, +90° walks right.
   const th = Math.PI/2 - hog.hd;
   const ct = Math.cos(th), st = Math.sin(th);
-  const PX = q => q.x*ct - q.z*st;            // screen x
-  const PD = q => q.x*st + q.z*ct;            // depth, + is toward the lens
+
+  /* His boat and his shiver arcs are flat 2D art from before he was geometry,
+     drawn in raw screen coordinates. They used to be mirrored for free by
+     ctx.scale(hog.dir*k, k); without that they no longer follow him at all — at
+     hd = -PI/2 he sailed backwards with the wake streaming off his prow, and the
+     "two little arcs off his back" were drawn across his face, for a whole
+     season, since hog.shiver follows snowCover. `faceSgn` mirrors them and
+     `boatS` foreshortens the hull as he turns, which is as close to 3D as flat
+     art is going to get.
+
+     boatS is floored at .34 in magnitude because cos(th) passes through zero
+     nose-on, and §4 is explicit: never let an animation parameter reach a scale
+     factor unguarded. A frog once scaled to zero height that way. */
+  const faceSgn = ct >= 0 ? 1 : -1;
+  const boatS   = faceSgn * Math.max(.34, Math.abs(ct));
 
   // body axes: he rounds up into a ball as he curls, and breathes
   const A = lerp(BODY.a, 21.5, c), B = lerp(BODY.b, 21.5, c)*sqz,
         Cc = lerp(BODY.c, 21.5, c);
   const MK = lerp(MK0, 1.01, c);              // curled, the coat closes over him
+  /* His projected half-width. An ellipsoid under a rotation about the vertical
+     axis projects to an axis-aligned ellipse EXACTLY, half-width
+     sqrt(a²cos²θ + c²sin²θ), so this is not an approximation. It runs 26 in
+     profile down to 19.5 nose-on, which is why the ground shadow has to use it
+     rather than a constant. */
+  const bw = Math.sqrt(A*A*ct*ct + Cc*Cc*st*st);
 
   ctx.save();
   ctx.translate(cx + shiv, cy + bob);
@@ -763,7 +847,11 @@ function drawHog3(ctx, hog, t, K, cx, cy){
   ctx.globalCompositeOperation = "source-over";
 
   ctx.globalAlpha = a*.32; ctx.fillStyle = "#02100a";
-  ctx.beginPath(); ctx.ellipse(0, -GROUND - 1.5, 27 + c*4, 6.5, 0, 0, TAU); ctx.fill();
+  // tracks his projected half-width: fixed at 27 it overhung him by 15px a
+  // side nose-on, where bw falls to 19.5, and grew as he turned
+  ctx.beginPath();
+  ctx.ellipse(0, -GROUND - 1.5, bw + 1.5 + c*2, 6.5, 0, 0, TAU);
+  ctx.fill();
   ctx.globalAlpha = a;
 
   /* ── the coat. One pass over the quills, projected and depth-sorted. The
@@ -809,7 +897,8 @@ function drawHog3(ctx, hog, t, K, cx, cy){
     let dx = gx - .58 + stir, dy = gy - .16, dz = gz;
     const dl = Math.sqrt(dx*dx + dy*dy + dz*dz) || 1;
     dx /= dl; dy /= dl; dz /= dl;
-    const len = lerp(12.6, 6.0, (n.x + 1)/2) * Q.lf * (1 + c*.16) * (1 + rip*.05*g);
+    const len = lerp(12.6, 6.0, (n.x + 1)/2) * Q.lf * (1 + c*.16) * (1 + rip*.05*g)
+              * (1 + shake*.16 - arch*.06);        // fluffed / flattened
     const tx = px + dx*len, ty = py + dy*len, tz = pz + dz*len;
 
     const bX = px*ct - pz*st, bD = px*st + pz*ct;
@@ -842,13 +931,32 @@ function drawHog3(ctx, hog, t, K, cx, cy){
      nose-on, gone by the time he has his back to you. The features already
      hide themselves individually on their own normals; this is the mass they
      sit on. Before it, you could see his whole face straight through him. */
+  /* ── how hidden his head is, and how ─────────────────────────────────────
+     `hide` runs 0 (full view) to 1 (gone), and takes the worse of two causes:
+     he is curling up, or he has turned his head away past the point where his
+     own body covers it.
+
+     It is spent on RETRACTION, not on alpha. Both causes used to fade the face
+     group's globalAlpha, which composited cream over his own dark coat — so
+     over the 42° of heading between hd 103° and 124°, and again for ~150ms on
+     the way out of every thorn hit, you could see his quills through his cheek
+     and the grass through the rest of his head. Measured: cheek luminance fell
+     227 → 134 → 79 across that band while it should have stayed 227 or gone.
+     It is the exact fault §"the head rig" of the handover already records —
+     "never alpha-fade cream over dark brown, it only gives grey" — and I had
+     fixed it once for the curl and then reintroduced it with headVis.
+
+     So the head shrinks back into his body instead, and the alpha only catches
+     the last tenth, by which point it is a quarter of its size. */
   const headVis = clamp((st + .55)/.40, 0, 1);
-  const fa = clamp((1 - c*1.85)*1.7, 0, 1) * headVis;
+  const hide = clamp(Math.max(c*1.85, 1 - headVis), 0, 1);
+  const fa   = clamp((1 - hide)*9, 0, 1);
+  const rt0  = 1 - hide*.86;
 
   function drawFace(){
     if (fa <= .02) return;
     ctx.globalAlpha = a * fa;
-    const rt = 1 - c*.85;                       // he pulls his head in as he curls
+    const rt = rt0;                             // retracted, see `hide` above
     const hc = { x: HD_C.x*rt + hog.hlag, y: HD_C.y*rt - d*3.4, z: HD_C.z };
     const hcX = hc.x*ct - hc.z*st;
 
@@ -856,7 +964,8 @@ function drawHog3(ctx, hog, t, K, cx, cy){
     // gaze aim from updateLook is converted where it is set.
     const hy = hog.yaw + hog.lag + Math.sin(t*sniffR*.5)*(.03 + d*.075)
              + d*Math.sin(t*1.3)*.16;
-    const hp = hog.pitch + sniff*(.055 + d*.115) + jitter*(.008 + d*.020)
+    const hp = hog.pitch + up*.62 - arch*.30            // nose to the air / stretched
+             + sniff*(.055 + d*.115) + jitter*(.008 + d*.020)
              - hog.hlag*.030 - d*.34 + hog.shiver*Math.sin(t*26)*.03;
 
     const R = HD_R*rt;
@@ -999,18 +1108,26 @@ function drawHog3(ctx, hog, t, K, cx, cy){
           pitched his head to sniff or turned, and stuck out into nothing. Now
           it cannot leave his face, and it narrows and fades round the side of
           its own accord. */
-    const mo = HP(headDir(0, -.62, hy, hp), .98);
-    const mv = frontVis(mo.n);
-    if (mv > .02){
-      const ax = slen > .001 ? mdx/slen : 1, ay = slen > .001 ? mdy/slen : 0;
-      const cxp = -ay, cyp = ax;                       // across the snout
-      const mow = 2.4*fore + 1.15;
-      const bowX = (mo.X - hcX)*.17, bowY = (mo.Y + hc.y)*.17;   // outward, off the head
-      ctx.globalAlpha = a * fa * snV * mv;
+    /* His mouth is three real points on the head sphere: a corner either side
+       and the middle below them. Its width runs ACROSS his head, which is +-z
+       in model space, so it projects to nearly nothing in profile and to its
+       full width nose-on — and the projection does that for free.
+
+       It used to be one point with a line struck perpendicular to the SCREEN
+       snout axis, scaled by how side-on he was. That is inverted: it came out
+       7 units long and near-vertical in profile — a 20px worm hanging off his
+       snout at full scale — and 2.3 units, correctly horizontal, only nose-on.
+       It survived because face-on is the one stall that shows it right. */
+    const mL = HP(headDir(-.46, -.52, hy, hp), .99);
+    const mR = HP(headDir( .46, -.52, hy, hp), .99);
+    const mC = HP(headDir(  0, -.66, hy, hp), 1.02);
+    if (frontVis(mC.n) > .02){
+      ctx.globalAlpha = a * fa * snV * frontVis(mC.n);
       ctx.strokeStyle = "rgba(74,52,40,.78)"; ctx.lineWidth = 1.1; ctx.lineCap = "round";
       ctx.beginPath();
-      ctx.moveTo(mo.X - cxp*mow, mo.Y - cyp*mow);
-      ctx.quadraticCurveTo(mo.X + bowX, mo.Y + bowY, mo.X + cxp*mow, mo.Y + cyp*mow);
+      ctx.moveTo(mL.X, mL.Y);
+      ctx.quadraticCurveTo(mC.X + (mC.X - (mL.X + mR.X)/2),
+                           mC.Y + (mC.Y - (mL.Y + mR.Y)/2), mR.X, mR.Y);
       ctx.stroke();
       ctx.globalAlpha = a * fa * snV;
     }
@@ -1032,12 +1149,24 @@ function drawHog3(ctx, hog, t, K, cx, cy){
 
     // eyes. Both are real points on the sphere, so the far one comes past the
     // snout of its own accord as he turns.
+    /* Which eye is the far one depends on `th`, not on the loop index. Keyed
+       off `side` — as this was — his pupil only ever went properly black when
+       he happened to be walking RIGHT: facing left it measured lum 52 against
+       a paint value of 13, lighter than his own darkest quill, and nose-on
+       both eyes came out mid-grey and did not even match each other. He read
+       half-asleep in every view but one.
+
+       And faceVis was being used as ALPHA on an opaque mark, so the pupil
+       could not reach full black unless e.n >= .26 — near profile only. It is
+       a hide/show test now: the foreshortening lives in `sc`, and the pupil
+       stays opaque until it goes round the edge. */
     for (const side of [-1, 1]){
       const e = HP(headDir(side*AZ_EYE, EL_EYE, hy, hp), RR_EYE);
-      const v = faceVis(e.n) * (side < 0 ? .82 : 1);
-      if (v <= .02) continue;
-      const sc = (.74 + .26*Math.max(0, e.n)) * (side < 0 ? .94 : 1);
-      ctx.globalAlpha = a * fa * v;
+      const far = e.n < 0;
+      if (e.n < -.06) continue;                  // round the back of his head
+      const v = clamp((e.n + .06)/.10, 0, 1);    // a short edge fade, no more
+      const sc = (.80 + .20*Math.max(0, e.n)) * (far ? .94 : 1);
+      ctx.globalAlpha = a * fa * v * (far ? .90 : 1);
       ctx.fillStyle = "#120c0b";
       ctx.beginPath(); ctx.ellipse(e.X, e.Y, 1.78*sc, 2.0*sc*eyeH, 0, 0, TAU); ctx.fill();
       if (eyeH > .35){
@@ -1170,10 +1299,7 @@ function drawHog3(ctx, hog, t, K, cx, cy){
     ctx.beginPath(); ctx.ellipse(L.fX + .8, L.fY, 3.0, 2.4, 0, 0, TAU); ctx.fill();
   }
 
-  /* ── his body. An ellipsoid under a rotation about the vertical axis
-        projects to an axis-aligned ellipse exactly, so this is one fill and
-        no approximation: the half-width is sqrt(a²cos²θ + c²sin²θ). */
-  const bw = Math.sqrt(A*A*ct*ct + Cc*Cc*st*st);
+  // ── his body: one fill, and no approximation. See bw above.
   ctx.fillStyle = bgc;
   ctx.beginPath(); ctx.ellipse(0, 0, bw, B, 0, 0, TAU); ctx.fill();
 
@@ -1193,11 +1319,28 @@ function drawHog3(ctx, hog, t, K, cx, cy){
   // CLIPPED to his body. Offset back-and-up, the mass reaches ~3px past the
   // top of his silhouette, and what you saw was a smooth brown crescent
   // hanging behind his head with no coat on it.
+  /* The mass is WIDENED by how nose-on he is, and only then. In profile the
+     offset is mostly backwards, so the cream it leaves over is his chest, off
+     to one side, which is what it should be. Nose-on the offset goes purely
+     vertical and the leftover becomes LEFT-RIGHT SYMMETRIC and sits directly
+     under his face: a cream horseshoe 36 units across — nearly twice his head —
+     with tips rising 3.7 units ABOVE eye level. It read as an enormous open
+     grin with his actual mouth lost inside it. A third mass, which is the
+     thing the two-masses rule exists to prevent.
+
+     Widening it everywhere would fix that and eat his profile chest (4.8 units
+     of it left instead of 8.8). Scaling the widening by (1 - |ct|) fixes only
+     the view that is broken. And nose-on is not an edge case: progress means
+     increasing wy, which means walking DOWN the screen, which means hd near 0.
+     Nose-on is his normal travelling attitude — the lab's stalls are mostly
+     profile, and the game is mostly not. */
+  const noseOn = 1 - Math.abs(ct);
   ctx.save();
   ctx.beginPath(); ctx.ellipse(0, 0, bw, B, 0, 0, TAU); ctx.clip();
   ctx.fillStyle = mgc;
   ctx.beginPath();
-  ctx.ellipse(-MN.x*off*ct + MN.z*off*st, MN.y*off, bw*.94, B*.94, 0, 0, TAU);
+  ctx.ellipse(-MN.x*off*ct + MN.z*off*st, MN.y*off,
+              bw*(.94 + .18*noseOn), B*(.94 + .08*noseOn), 0, 0, TAU);
   ctx.fill();
   ctx.restore();
 
@@ -1212,9 +1355,11 @@ function drawHog3(ctx, hog, t, K, cx, cy){
   if (hog.shiver > .35){
     ctx.globalAlpha = a * hog.shiver * (.35 + .3*Math.sin(t*11));
     ctx.strokeStyle = "rgba(198,226,246,1)"; ctx.lineWidth = 1.5;
+    ctx.save(); ctx.scale(faceSgn, 1);        // off his BACK, whichever way he faces
     for (let i=0;i<2;i++){
       ctx.beginPath(); ctx.arc(-6, -6, 30 + i*7, -2.5, -1.6); ctx.stroke();
     }
+    ctx.restore();
   }
   ctx.restore();
   ctx.globalAlpha = 1;
@@ -1326,6 +1471,7 @@ function frame(now){
       lookAt(s.hog, (mouse.x - (s.left + s.w*.5))/K,
                     (mouse.y - (s.top  + s.h*.62))/K,
                     Math.PI/2 - s.hog.hd);
+    updateIdle(s.hog, dt);
     updateLook(s.hog, dt);
     s.S.set(s.hog, dt, s.t);
     // feed the head spring what the body just did. Set AFTER the stall has run,
