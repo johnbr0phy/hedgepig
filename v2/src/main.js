@@ -95,7 +95,7 @@ const weather = createWeather(scene);
 const climate = createClimate({ scene, sun, fill, bounce, hemi, sky, grass: world.grass, pipeline });
 const game = createGame({ world, hog, hud, climate });
 
-chase.onCall = (x, z) => game.call(x, z);
+chase.onCall = (x, z, roll) => game.call(x, z, roll);
 
 /* ------------------------------- the frame ------------------------------- */
 function resize() {

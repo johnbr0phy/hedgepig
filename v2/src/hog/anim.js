@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { clamp, lerp, damp, mulberry32, TAU } from '../core/util.js';
+import { BALL_R } from './hog.js';
 
 /* ------------------------------------------------------------------ *
  * How he moves.
@@ -90,6 +91,10 @@ export function createAnimator(parts, seed = 4242) {
    */
   function update(s, dt, now) {
     const moving = s.gait;
+    /* Curled is curled: being hurt and being rolled use the same tuck, so
+     * nothing has to decide between them.  `ball` is voluntary, `curl` is
+     * not, and the visuals do not care which. */
+    const ball = Math.max(s.curl || 0, s.ball || 0);
 
     /* ---------------------------- the cycle ---------------------------- *
      * Advanced by **ground covered**, never by time.  This one line is why
@@ -129,7 +134,7 @@ export function createAnimator(parts, seed = 4242) {
       _q.setFromUnitVectors(_from, _dir);
       L.obj.quaternion.copy(_q);
       L.obj.position.copy(L.rest);
-      L.obj.visible = s.curl < 0.6;
+      L.obj.visible = ball < 0.55;
     }
 
     /* ------------------------------ the body ---------------------------- *
@@ -145,17 +150,29 @@ export function createAnimator(parts, seed = 4242) {
     const crouch = 0.006 * moving;
 
     const p = parts;
+    /* Curling makes him **round**, which an ellipsoid is not.  He is 26 cm
+     * long and 17.6 cm wide, so tucking has to squash the length and swell
+     * the height until he is a sphere of `BALL_R` — otherwise the roll is an
+     * egg going end over end, which is funny once. */
+    const bx = lerp(1, BALL_R / 0.13, ball);
+    const by = lerp(1, BALL_R / 0.079, ball);
+    const bz = lerp(1, BALL_R / 0.088, ball);
+
     p.body.position.set(
       Math.sin(now * 34) * 0.0016 * s.shiver,
-      0.083 + state.bob - crouch + s.curl * 0.014,
+      0.083 + state.bob - crouch + ball * (BALL_R - 0.083),
       state.sway
     );
-    p.body.scale.setScalar(1 + s.curl * 0.10);
-    for (const coat of p.coats) coat.scale.setScalar(1 + s.curl * 0.16);
+    p.body.scale.set(bx, by, bz);
+    for (const coat of p.coats) {
+      coat.scale.set(bx, by, bz);
+      coat.position.y = ball * (BALL_R - 0.083);
+    }
+    p.ears.forEach((ear) => { ear.visible = ball < 0.5; });
 
     /* ------------------------------ the face ---------------------------- */
-    p.setLook(s.lookYaw * (1 - s.curl));
-    p.face.visible = s.curl < 0.75;
+    p.setLook(s.lookYaw * (1 - ball));
+    p.face.visible = ball < 0.7;
     p.face.position.y = 0.083 + state.bob - crouch;
     p.face.position.z = state.sway;
 
@@ -205,7 +222,7 @@ export function createAnimator(parts, seed = 4242) {
       ear.rotation.x = (i === 0 ? flick : flick * 0.25) * 0.9;
     });
 
-    p.shadow.scale.setScalar((1 - s.curl * 0.12) * (1 + moving * 0.06));
+    p.shadow.scale.setScalar((1 - ball * 0.22) * (1 + moving * 0.06));
     p.shadow.material.opacity = 0.32 - moving * 0.06;
 
     return state;

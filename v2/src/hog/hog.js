@@ -50,6 +50,12 @@ import { clamp, lerp, damp, wrapAng, rngKit, TAU } from '../core/util.js';
  */
 export const HOG_SPD = 0.85;
 
+/**
+ * The radius of the ball he curls into — his own half-width, because that is
+ * what a hedgehog curls to.  Everything about the roll is derived from it.
+ */
+export const BALL_R = 0.088;
+
 const _v = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
@@ -86,6 +92,12 @@ export class Hog {
     /** The one live target, or null.  v1 called this the crumb. */
     this.target = null;
     this.arrived = true;
+
+    /* Rolling: tucked into a ball and going twice as fast.  `ball` is how
+     * far into the tuck he is, `spin` is how far the ball has turned. */
+    this.rolling = false;
+    this.ball = 0;
+    this.spin = 0;
 
     this.stride = 0;
     this.bob = 0;
@@ -129,15 +141,17 @@ export class Hog {
    * Call him.  This is the whole interface: a place, and he goes there.
    * Replaces any previous call outright — one live target, always.
    */
-  callTo(x, z) {
+  callTo(x, z, roll = false) {
     this.target = { x, z };
     this.arrived = false;
     this.lookLock = 0;
+    if (roll) this.rolling = true;
   }
 
   stop() {
     this.target = null;
     this.arrived = true;
+    this.rolling = false;
   }
 
   /** A thorn or a car. Curls him up, knocks him back, and sends him off it. */
@@ -211,7 +225,12 @@ export class Hog {
         if (this.repel > 0) aim = lerp(aim, this.repelHd, clamp(this.repel / 1.3, 0, 1) * 0.8);
 
         const turn = wrapAng(aim - this.hd);
-        const rate = (3.2 - this.shiver * 1.4) * (0.35 + 0.65 * this.gait);
+        /* **Rolling costs him his steering.**  Twice the speed for less than
+         * half the turn rate, so the double tap is a decision — commit to a
+         * line and take it — rather than a free speed button.  A ball with
+         * the agility of a walk would make walking pointless. */
+        const rate = (3.2 - this.shiver * 1.4) * (0.35 + 0.65 * this.gait)
+          * (1 - 0.58 * this.ball);
         this.hd = wrapAng(this.hd + clamp(turn, -rate * dt, rate * dt));
 
         // he sets off in roughly the right direction before committing to speed
@@ -220,7 +239,7 @@ export class Hog {
 
         /* Clamp the step to what is left, or the easing overshoots the
          * target and he jitters on the spot for as long as you watch him. */
-        const step = Math.min(this.speed * this.gait * dt, dist);
+        const step = Math.min(this.speed * this.rollSpeed() * this.gait * dt, dist);
         this.tryStep(step, dt);
       }
     } else {
@@ -228,17 +247,35 @@ export class Hog {
       this.idle(dt);
     }
 
+    /* The tuck.  It eases rather than snapping, so you see him gather
+     * himself — and it eases back out when he arrives, which is most of what
+     * makes the arrival read as a stop rather than a freeze. */
+    this.ball = damp(this.ball, this.rolling && this.hurt <= 0 ? 1 : 0, 7, dt);
+
+    const before = { x: this.x, z: this.z };
     this.y = heightAt(this.x, this.z);
-    this.stride += this.gait * this.speed * dt * 7.2;
-    this.walked += this.gait * this.speed * dt;
+    const ground = this.gait * this.speed * this.rollSpeed() * dt;
+    this.stride += ground * 7.2 / this.speed;
+    this.walked += ground;
+
+    /* **The ball does not skid.**  Its spin is the ground it has covered
+     * divided by its own radius, which is the same rule that keeps his feet
+     * from sliding when he walks — and it is just as visible when it is
+     * wrong: a ball turning at any other rate reads as a beachball being
+     * dragged. */
+    this.spin += ground / BALL_R;
 
     this.animate(dt, now);
     this.seat();
   }
 
+  /** Twice the speed, once he is properly tucked. */
+  rollSpeed() { return 1 + this.ball; }
+
   arrive() {
     this.target = null;
     this.arrived = true;
+    this.rolling = false;
     // he stops, and then he snuffles about where he was called to
     this._idleTimer = 0.6;
   }
@@ -332,6 +369,18 @@ export class Hog {
     // heading, then the slope under him, then his lean and roll
     _rot.makeRotationY(-this.hd);
     _m.multiply(_rot);
+
+    /* Rolling turns him about the middle of the ball, not about his feet —
+     * hence the lift up to the centre, the spin, and the drop back.  Rotating
+     * about the origin would swing him round his own toes like a hammer. */
+    if (this.ball > 0.001) {
+      _rot.makeTranslation(0, BALL_R * this.ball, 0);
+      _m.multiply(_rot);
+      _rot.makeRotationZ(-this.spin * this.ball);
+      _m.multiply(_rot);
+      _rot.makeTranslation(0, -BALL_R * this.ball, 0);
+      _m.multiply(_rot);
+    }
     _rot.makeRotationZ(
       -Math.atan(_slope.nx * Math.cos(this.hd) + _slope.nz * Math.sin(this.hd)) - this.lean * 0.25
     );

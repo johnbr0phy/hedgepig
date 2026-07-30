@@ -336,8 +336,12 @@ export function createGame({ world, hog, hud, climate }) {
   }
 
   /* -------------------------------- the call ------------------------------- */
-  function call(x, z) {
-    sow(x, z);                      // first line, always — see above
+  function call(x, z, roll = false) {
+    /* Sown on **every** call, before any early return, because whatever is
+     * sown is the thing he then walks to.  The one exception is the second
+     * tap of a double: the first already sowed here, and two flowers in one
+     * spot is not a reward, it is a stutter. */
+    if (!roll) sow(x, z);
     if (!walkableAt(x, z)) {
       /* Called into the water: he goes as close as he can, which is what a
        * hedgehog would do and is far better than nothing happening. */
@@ -346,10 +350,10 @@ export function createGame({ world, hog, hud, climate }) {
       const out = offsetFrom(CENTRE[LAKE],
         Math.cos(Math.atan2(b.north, b.east)) * (shore.d + 0.6),
         Math.sin(Math.atan2(b.north, b.east)) * (shore.d + 0.6));
-      hog.callTo(out.x, out.z);
+      hog.callTo(out.x, out.z, roll);
       return;
     }
-    hog.callTo(x, z);
+    hog.callTo(x, z, roll);
   }
 
   /* ------------------------------- the hazards ----------------------------- */

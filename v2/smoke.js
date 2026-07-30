@@ -17,7 +17,7 @@
  * Scenarios
  *   plan terrain planet clock      pure geometry and arithmetic, no world
  *   open                           there is no edge to the world
- *   gait face                      how he walks, and that his face stays on
+ *   gait roll face                 how he walks, how he rolls, and his face
  *   walk idle back water boat      the loop: he goes, he stops, he refuses
  *   road roadmiss abandon          the hazards, and v1's invincibility bug
  *   burrow grass nan               progression, the meadow, and finite maths
@@ -62,6 +62,7 @@ const { Hog, HOG_SPD } = await import('./src/hog/hog.js');
 const { wrapAng } = await import('./src/core/util.js');
 const { buildHog, HOG_BODY } = await import('./src/hog/model.js');
 const { createAnimator, STRIDE, STANCE } = await import('./src/hog/anim.js');
+const { BALL_R } = await import('./src/hog/hog.js');
 const { createGame } = await import('./src/game/game.js');
 const { CULVERT_Z } = await import('./src/world/places/road.js');
 
@@ -418,6 +419,87 @@ function sGait() {
     `worst ${worstDown} — a hedgehog has no suspension phase`);
 }
 
+function sRoll() {
+  const { hog, game, step, put } = makeWorld();
+  const c = plan.CENTRE[plan.MEADOW];
+  const to = plan.offsetFrom(c, 9, 0);
+
+  /** Frames taken to cover the same ground, called the two different ways. */
+  const timeTo = (roll) => {
+    put(c.x, c.z);
+    hog.hd = plan.bearing(c.x, c.z, to.x, to.z).angle;
+    hog.speed = HOG_SPD;
+    game.call(to.x, to.z, roll);
+    let n = 0;
+    for (; n < 2000; n++) {
+      hog.update(1 / 60, n / 60);
+      game.update(1 / 60);
+      if (plan.distance(hog.x, hog.z, to.x, to.z) < 0.12) break;
+    }
+    return n;
+  };
+
+  const walked = timeTo(false);
+  const rolled = timeTo(true);
+  const ratio = walked / rolled;
+  ok(ratio > 1.6 && ratio < 2.1, 'a double tap gets him there about twice as fast',
+    `${walked} frames walking against ${rolled} rolling — ${f(ratio)}×`);
+
+  /* **The ball does not skid.**  Its turning, times its radius, must equal
+   * the ground it actually covered — measured off his real positions, not
+   * off the same counter that drives the spin, or the test proves nothing.
+   * Same rule as the feet, and just as visible when it is wrong. */
+  put(c.x, c.z);
+  hog.hd = plan.bearing(c.x, c.z, to.x, to.z).angle;
+  hog.speed = HOG_SPD;
+  game.call(to.x, to.z, true);
+  step(40);                        // let the tuck finish easing in
+  const spin0 = hog.spin;
+  let px = hog.x, pz = hog.z, ground = 0;
+  for (let i = 0; i < 200; i++) {
+    hog.update(1 / 60, i / 60);
+    game.update(1 / 60);
+    ground += plan.distance(px, pz, hog.x, hog.z);
+    px = hog.x; pz = hog.z;
+  }
+  const rolledBy = (hog.spin - spin0) * BALL_R;
+  ok(Math.abs(rolledBy - ground) < 0.01, 'and it rolls exactly as far as it travels',
+    `${f(rolledBy, 3)} m of turning against ${f(ground, 3)} m of ground`);
+
+  ok(hog.ball > 0.9, 'he is properly tucked while he does it', `ball ${f(hog.ball)}`);
+
+  /* It has to cost something, or the double tap is just a faster walk.
+   * Measured: how far round has he turned, a third of a second after being
+   * called through ninety degrees? */
+  /* Driven straight at the hedgehog, with no game loop around him.  Run
+   * through `game.update` this measured nothing at all: a bramble happened
+   * to be near the meadow's centre, he was bitten in both cases, and a
+   * hedgehog who has just been hurt does not steer — so both answers came
+   * back as the same idle glance. */
+  const turnIn = (roll) => {
+    const h = new Hog(makeWorld().world, { model: false });
+    h.x = c.x; h.z = c.z; h.y = terrain.heightAt(c.x, c.z);
+    h.speed = HOG_SPD;
+    const side = plan.offsetFrom(c, 0, 9);
+    h.hd = plan.bearing(c.x, c.z, side.x, side.z).angle + Math.PI / 2;
+    const from = h.hd;
+    h.callTo(side.x, side.z, roll);
+    for (let i = 0; i < 20; i++) h.update(1 / 60, i / 60);
+    return Math.abs(wrapAng(h.hd - from));
+  };
+  const turnWalk = turnIn(false);
+  const turnRoll = turnIn(true);
+  ok(turnRoll < turnWalk * 0.75, 'and rolling costs him a good part of his steering',
+    `${f(turnRoll, 2)} rad against ${f(turnWalk, 2)} in the same third of a second`);
+
+  // arriving puts him back on his feet
+  put(c.x, c.z);
+  game.call(plan.offsetFrom(c, 1.2, 0).x, plan.offsetFrom(c, 1.2, 0).z, true);
+  step(400);
+  ok(!hog.rolling && hog.ball < 0.1, 'and he uncurls when he gets there',
+    `ball ${f(hog.ball)}`);
+}
+
 function sFace() {
   const parts = buildHog();
   const { A, B, C } = HOG_BODY;
@@ -764,7 +846,7 @@ function sNan() {
 /* ================================== run =================================== */
 const SCENARIOS = {
   plan: sPlan, terrain: sTerrain, planet: sPlanet, clock: sClock,
-  open: sOpen, gait: sGait, face: sFace, walk: sWalk, idle: sIdle, back: sBack, water: sWater, boat: sBoat,
+  open: sOpen, gait: sGait, roll: sRoll, face: sFace, walk: sWalk, idle: sIdle, back: sBack, water: sWater, boat: sBoat,
   road: sRoad, roadmiss: sRoadmiss, abandon: sAbandon,
   burrow: sBurrow, grass: sGrass, nan: sNan,
 };

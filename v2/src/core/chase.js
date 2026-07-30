@@ -57,6 +57,7 @@ export class Chase {
     this.onCall = null;          // set by main: (x, z, hit) => void
 
     this._drag = null;
+    this._lastTap = null;
     this._pointers = new Map();
     this._pinch = 0;
 
@@ -106,11 +107,22 @@ export class Chase {
       this._pointers.delete(e.pointerId);
       if (this._pointers.size < 2) this._pinch = 0;
       if (this._drag && this._drag.id === e.pointerId) {
-        const quick = performance.now() - this._drag.t < 700;
+        const now = performance.now();
+        const quick = now - this._drag.t < 700;
         /* A tap is a call; a drag is not.  The threshold is generous because
          * a finger never holds still, and calling him somewhere you did not
          * mean is worse than missing a call. */
-        if (this._drag.moved < 9 && quick) this.callAt(this._drag.x, this._drag.y);
+        if (this._drag.moved < 9 && quick) {
+          /* **Two taps mean roll.**  Near enough to the last one, soon enough
+           * after it.  The first tap has already sent him walking, so the
+           * second is an *upgrade* rather than a fresh call — which is why it
+           * feels immediate: he sets off, then tucks and goes. */
+          const t = this._lastTap;
+          const dbl = t && now - t.at < 340 &&
+            Math.hypot(this._drag.x - t.x, this._drag.y - t.y) < 44;
+          this.callAt(this._drag.x, this._drag.y, !!dbl);
+          this._lastTap = dbl ? null : { at: now, x: this._drag.x, y: this._drag.y };
+        }
         this._drag = null;
       }
     };
@@ -149,10 +161,10 @@ export class Chase {
     return { x: _flat.x, z: _flat.z, point: hits[0].point, object: hits[0].object };
   }
 
-  callAt(clientX, clientY) {
+  callAt(clientX, clientY, roll = false) {
     const spot = this.pick(clientX, clientY);
     if (!spot) return;
-    this.onCall?.(spot.x, spot.z, spot);
+    this.onCall?.(spot.x, spot.z, roll);
   }
 
   /** Turn his features toward the pointer, in screen space, as v1 did. */
