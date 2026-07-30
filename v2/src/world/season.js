@@ -30,7 +30,23 @@ export const YEAR = 204;
 /* Phase 0 is noon, not midnight — that is what `nightAt` below assumes, and
  * getting it the other way round lights the world at 40 % night while the
  * readout says "morning".  Which is exactly what happened. */
-const HOURS = ['noon', 'afternoon', 'evening', 'dusk', 'deep night', 'before dawn', 'dawn', 'morning'];
+export const HOURS = ['noon', 'afternoon', 'evening', 'dusk', 'deep night', 'before dawn', 'dawn', 'morning'];
+
+/**
+ * How dark it is at day-phase `dp`. v1's `nightAt`, unchanged: flat dark
+ * through the small hours and quick at the edges.
+ */
+export const nightAt = (dp) => clamp((-Math.cos(dp * TAU) - 0.22) / 0.78, 0, 1);
+
+/**
+ * How high the sun is at day-phase `dp`: +1 overhead, -1 under our feet.
+ *
+ * Exported next to `nightAt` on purpose, and the harness asserts they agree.
+ * Written as `-cos` once — the exact opposite of this — which lit the world at
+ * 40 % night while the readout said "morning", and read as a moody palette
+ * rather than as a bug for an embarrassingly long time.
+ */
+export const sunAltAt = (dp) => Math.cos(dp * TAU);
 
 const _a = new THREE.Color();
 const _b = new THREE.Color();
@@ -117,16 +133,12 @@ export function createClimate({
     state.wind = 0.10 + 0.14 * w[2] + 0.10 * w[3] + 0.05 * w[0];
 
     /* --- the day --- */
-    // v1's nightAt: flat dark through the small hours, quick at the edges
-    state.night = clamp((-Math.cos(dp * TAU) - 0.22) / 0.78, 0, 1);
+    state.night = nightAt(dp);
     const n = state.night;
     state.hour = HOURS[Math.floor(dp * 8) % 8];
 
     /* --- where the light comes from --- */
-    /* `+cos`, and it must agree with `nightAt` above: phase 0 is noon and
-     * the sun is overhead; phase 0.5 is the middle of the night and it is
-     * under our feet. */
-    const alt = Math.cos(dp * TAU);                  // +1 noon, -1 midnight
+    const alt = sunAltAt(dp);                        // +1 noon, -1 midnight
     const az = dp * TAU;
     // never let the key light lie flat on the ground: at dawn and dusk it
     // grazes, which is what we want, but a light at 0° elevation gives every

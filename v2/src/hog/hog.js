@@ -3,7 +3,7 @@ import { buildHog, HOG_LEN } from './model.js';
 import { basisAt, positionAt, R } from '../world/planet.js';
 import { heightAt, slopeAt, walkableAt } from '../world/terrain.js';
 import { BAND, wrapDelta, CIRC } from '../world/plan.js';
-import { clamp, lerp, damp, wrapAng, TAU } from '../core/util.js';
+import { clamp, lerp, damp, wrapAng, rngKit, TAU } from '../core/util.js';
 
 /* ------------------------------------------------------------------ *
  * The hedgepig, walking.
@@ -42,13 +42,21 @@ const _rot = new THREE.Matrix4();
 const _slope = { nx: 0, nz: 0 };
 
 export class Hog {
-  constructor(scene, world) {
+  /**
+   * `model: false` gives a hedgepig with no geometry — the walk, the gait,
+   * the heading and the collision, and nothing to draw.  That is what the
+   * smoke harness runs, so the thing under test is this class rather than a
+   * copy of its arithmetic living in the test.
+   */
+  constructor(world, { scene = null, model = true, seed = 8821 } = {}) {
     this.world = world;
-    const parts = buildHog();
+    const parts = model ? buildHog() : null;
     this.parts = parts;
-    this.root = parts.root;
-    this.root.matrixAutoUpdate = false;
-    scene.add(this.root);
+    this.root = parts ? parts.root : null;
+    if (this.root) {
+      this.root.matrixAutoUpdate = false;
+      scene?.add(this.root);
+    }
 
     /* flat coordinates — x along the walk, z across the field */
     this.x = 3;
@@ -82,6 +90,12 @@ export class Hog {
     this.blocked = 0;            // how long he has been unable to move
 
     this._idleTimer = 2;
+    /* His own seeded stream, not `Math.random`.  Everything else in this
+     * world is deterministic on purpose — v1's meadow is the same meadow on
+     * every load — and his idle glancing was the one thing that was not,
+     * which made the harness flaky in a way that looked like a real bug
+     * three runs out of four. */
+    this.rng = rngKit(seed);
   }
 
   /** World position of his feet. */
@@ -109,20 +123,33 @@ export class Hog {
     this.arrived = true;
   }
 
-  /** A thorn or a car. Curls him up, knocks him back, and sets him veering. */
+  /** A thorn or a car. Curls him up, knocks him back, and sends him off it. */
   hit(fromX, fromZ) {
     if (this.curl > 0.2 || this.under) return false;
     this.curl = 1;
     this.hurt = 1.2;
-    this.stop();
     const dx = wrapDelta(this.x, fromX);
     const dz = this.z - fromZ;
     const away = Math.atan2(dz, dx);
     this.repelHd = away;
     this.repel = 1.3;
-    // a shove backwards, so the hit reads as contact and not as a state change
+    // a shove backwards, so the hit reads as contact and not a state change
     this.x += Math.cos(away) * 0.10;
     this.z += Math.sin(away) * 0.10;
+
+    /* **He backs off, rather than simply stopping.**  Stopping cancels the
+     * call, which is right — being hurt should cost you the errand — but it
+     * left him standing *inside* the bramble that had just bitten him, and
+     * the next thing that happened was that it bit him again, and again,
+     * every time the invulnerability ran out.  Three hearts gone without
+     * moving.  v1 never saw this because there, `repel` steered him while he
+     * kept walking; here it only steers toward a target, and he had none.
+     * So the hit gives him one: a metre, directly away. */
+    this.target = {
+      x: this.x + Math.cos(away) * 1.0,
+      z: clamp(this.z + Math.sin(away) * 1.0, -BAND, BAND),
+    };
+    this.arrived = false;
     return true;
   }
 
@@ -229,10 +256,10 @@ export class Hog {
     this._idleTimer -= dt;
     this.snuffle = damp(this.snuffle, 1, 2, dt);
     if (this._idleTimer <= 0) {
-      this._idleTimer = 1.6 + Math.random() * 3.2;
+      this._idleTimer = this.rng.range(1.6, 4.8);
       if (this.lookLock <= 0) {
         // a small glance, never a turn: turning is for being called
-        this.hd = wrapAng(this.hd + (Math.random() - 0.5) * 1.1);
+        this.hd = wrapAng(this.hd + this.rng.range(-0.55, 0.55));
       }
     }
   }
@@ -241,6 +268,7 @@ export class Hog {
 
   animate(dt, now) {
     const p = this.parts;
+    if (!p) return;                       // headless: nothing to animate
     const g = this.gait;
 
     if (this.lookLock > 0) this.lookLock -= dt;
@@ -288,6 +316,7 @@ export class Hog {
    * is the only place that knows the ground is round.
    */
   seat() {
+    if (!this.root) return;               // headless: nothing to seat
     const b = basisAt(this.x, this.z);
     _m.makeBasis(b.east, b.up, b.north);
     _m.setPosition(positionAt(this.x, this.y + this.bob, this.z, _v));

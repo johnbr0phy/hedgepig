@@ -188,10 +188,10 @@ across 250 instanced chunks.
 
 ## 7. Not done
 
-- **No smoke harness.** v1's `smoke.js` was worth more than any feature and there
-  is no equivalent here yet. `plan.js` and `terrain.js` are pure and import
-  nothing but `util.js`, so they can be tested under Node today; everything
-  above them needs a WebGL stub.
+- **Nothing measures frame rate.** Every frame observed so far has been a
+  background-tab frame, so the cost of 100 k grass tufts and 2 876 meshes is
+  genuinely unknown. The harness covers correctness and says nothing at all
+  about speed.
 - **No sound.**
 - The orbit view's far side is bare — 4-band toon shading over an icosphere,
   with nothing on it. It is a thing you look at once.

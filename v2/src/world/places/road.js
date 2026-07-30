@@ -22,9 +22,13 @@ import { rock, fenceRun, flowerClump, scatter, log } from '../props.js';
  *   verge, and while he is under it he is immune, invisible, and leaves no
  *   prints.
  *
- * The balance is v1's too: strolling over the tarmac costs a hit about five
- * times in six, and the culvert is safe six times in six.  A road you can
- * amble across makes the tunnel pointless.
+ * The balance is v1's target, not quite v1's number: the culvert is safe
+ * twelve times in twelve, and strolling over the tarmac costs a heart about
+ * **two crossings in three** against v1's five in six.  Getting the last of
+ * the way there needs traffic that would look ridiculous on a country lane —
+ * v1 could be harsher for free because its cars were longer than its whole
+ * visible field and could not be dodged in x at all.  `node smoke.js
+ * roadmiss` measures it; `road` proves the tunnel.
  * ------------------------------------------------------------------ */
 
 /** Where the tunnel is. Deterministic, so it is learnable. */
@@ -34,10 +38,17 @@ function car(seed) {
   const rng = rngKit(seed * 7717);
   const g = new THREE.Group();
   /* One parametric maker, as the reference did with its whole motor fleet:
-   * six numbers and every car on the road is a different car. */
-  const L = rng.range(1.5, 2.3);
-  const W = rng.range(0.72, 0.86);
-  const H = rng.range(0.44, 0.58);
+   * six numbers and every car on the road is a different car — at the size
+   * cars actually are.
+   *
+   * They were 2 m long and 0.8 m wide at first, which is a large dog, and it
+   * did not look wrong next to a 26 cm hedgehog because *everything* is small
+   * next to a 26 cm hedgehog.  What gave it away was the harness: crossing
+   * the open tarmac cost a heart 2 times in 6, against v1's tuned 5 in 6.  A
+   * lane you can be across in half a second is not a road. */
+  const L = rng.range(3.4, 4.4);
+  const W = rng.range(1.55, 1.80);
+  const H = rng.range(1.15, 1.45);
   const cabF = rng.range(0.18, 0.34);
   const body = rng.pick([0xd8654f, 0x4f7fa8, 0xe0c05c, 0xe6e2d8, 0x5d7a55, 0x8f6aa0]);
 
@@ -46,43 +57,43 @@ function car(seed) {
   const tyre = cel({ color: 0x2c2a30, bands: 2, tint: 0x4a4058 });
 
   const hull = new THREE.Mesh(new THREE.BoxGeometry(W, H, L), paint);
-  hull.position.y = H / 2 + 0.13;
+  hull.position.y = H / 2 + 0.30;
   g.add(hull);
 
   const cab = new THREE.Mesh(new THREE.BoxGeometry(W * 0.9, H * 0.62, L * (0.5 - cabF * 0.4)), paint);
-  cab.position.set(0, H + 0.13 + H * 0.28, -L * cabF * 0.5);
+  cab.position.set(0, H + 0.30 + H * 0.28, -L * cabF * 0.5);
   g.add(cab);
 
   for (const s of [-1, 1]) {
     const win = new THREE.Mesh(new THREE.PlaneGeometry(L * (0.44 - cabF * 0.3), H * 0.42), glassM);
-    win.position.set((W * 0.451) * s, H + 0.13 + H * 0.3, -L * cabF * 0.5);
+    win.position.set((W * 0.451) * s, H + 0.30 + H * 0.3, -L * cabF * 0.5);
     win.rotation.y = Math.PI / 2 * s;
     g.add(win);
   }
   const screen = new THREE.Mesh(new THREE.PlaneGeometry(W * 0.82, H * 0.44), glassM);
-  screen.position.set(0, H + 0.13 + H * 0.3, -L * cabF * 0.5 + L * (0.25 - cabF * 0.2));
+  screen.position.set(0, H + 0.30 + H * 0.3, -L * cabF * 0.5 + L * (0.25 - cabF * 0.2));
   screen.rotation.x = -0.28;
   g.add(screen);
 
-  const wheelGeo = new THREE.CylinderGeometry(0.14, 0.14, 0.1, 10);
+  const wheelGeo = new THREE.CylinderGeometry(0.30, 0.30, 0.20, 10);
   wheelGeo.rotateZ(Math.PI / 2);
   for (const sx of [-1, 1]) {
     for (const sz of [-1, 1]) {
       const w = new THREE.Mesh(wheelGeo, tyre);
-      w.position.set(W * 0.46 * sx, 0.14, L * 0.32 * sz);
+      w.position.set(W * 0.46 * sx, 0.30, L * 0.32 * sz);
       g.add(w);
     }
   }
 
   const lampM = flat({ color: 0xfff2c8, cache: false, role: 'headlamp' });
   for (const s of [-1, 1]) {
-    const lamp = new THREE.Mesh(new THREE.CircleGeometry(0.055, 8), lampM);
+    const lamp = new THREE.Mesh(new THREE.CircleGeometry(0.10, 8), lampM);
     lamp.position.set(W * 0.28 * s, H * 0.62, L * 0.5 + 0.005);
     g.add(lamp);
   }
   const tailM = flat({ color: 0x8a2f28, cache: false });
   for (const s of [-1, 1]) {
-    const t = new THREE.Mesh(new THREE.CircleGeometry(0.04, 8), tailM);
+    const t = new THREE.Mesh(new THREE.CircleGeometry(0.07, 8), tailM);
     t.position.set(W * 0.28 * s, H * 0.62, -L * 0.5 - 0.005);
     t.rotation.y = Math.PI;
     g.add(t);
@@ -231,7 +242,7 @@ export function buildRoad(root, ctx) {
   ctx.post.push((scene) => {
     const cars = [];
     const LANES = [lerp(ra, rb, 0.27), lerp(ra, rb, 0.73)];
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 10; i++) {
       const obj = car(i + 1);
       obj.matrixAutoUpdate = false;
       obj.visible = false;
@@ -261,15 +272,28 @@ export function buildRoad(root, ctx) {
           c.live = true;
           c.z = c.dir > 0 ? -30 : 30;
           c.speed = rng.range(3.4, 5.6);
+          /* Wander within the lane.  Pinned to the lane's centreline, two
+           * 1.7 m cars sweep 3.4 m of a 9.6 m carriageway and the other
+           * 6.2 m is a safe corridor you can stroll up — which is exactly
+           * what the harness found: the open road cost a heart 2 crossings
+           * in 6 against v1's 5 in 6, and this lifted it to about 8 in 12.  v1's cars were longer than its whole
+           * visible field, so they could not be dodged in x at all and only
+           * the timing mattered.  This is the same idea in the width
+           * available: over a minute of traffic the whole road gets swept. */
+          c.x = LANES[c.lane] + rng.range(-0.85, 0.85);
           c.obj.visible = true;
         }
         c.z += c.dir * c.speed * dt;
         if ((c.dir > 0 && c.z > 30) || (c.dir < 0 && c.z < -30)) {
           c.live = false;
           c.obj.visible = false;
-          // v1's traffic gap: 0.7 to 2.3 seconds, which is what makes the
-          // tarmac cost a hit five times in six
-          c.wait = rng.range(0.7, 2.3);
+          /* v1's traffic gap, and v1's reason for it: this number is what
+           * makes the open tarmac cost a heart about five times in six,
+           * which is what makes the culvert worth finding.  Ten cars on
+           * 0.5–1.6 s gaps is heavy for a country lane and it is the right
+           * amount of heavy — measure it with `node smoke.js roadmiss`
+           * before touching it, and `road` after. */
+          c.wait = rng.range(0.5, 1.6);
           continue;
         }
         const y = heightAt(c.x, c.z) + 0.02;

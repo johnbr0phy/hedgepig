@@ -19,7 +19,7 @@ import { CIRC, wrapDelta } from './plan.js';
  * seated on the surface themselves, every frame.
  * ------------------------------------------------------------------ */
 
-export function buildWorld(scene, { places = null } = {}) {
+export function buildWorld(scene, { places = null, grass: withGrass = true } = {}) {
   const root = new THREE.Group();
   root.name = 'world';
 
@@ -27,7 +27,13 @@ export function buildWorld(scene, { places = null } = {}) {
   const ground = buildGround(root);
   const water = buildWater(root);
   const built = places ? places(root) : { blockers: [], interactables: [], update: null, pickables: [] };
-  const grass = buildGrass(root);
+  /* Skippable, and only for the harness: the meadow is a hundred thousand
+   * instances and about a second of build time, and no assertion about the
+   * walk or the hazards depends on a single blade of it. */
+  const grass = withGrass ? buildGrass(root) : {
+    group: null, chunks: [], blades: 0,
+    setSeason() {}, setWind() {}, update() {},
+  };
 
   const stats = bakeToPlanet(root);
   scene.add(root);

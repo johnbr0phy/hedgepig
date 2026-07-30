@@ -87,7 +87,7 @@ scene.add(hemi);
 /* --------------------------------- world --------------------------------- */
 const sky = buildSky(scene, 260);
 const world = buildWorld(scene, { places: buildPlaces });
-const hog = new Hog(scene, world);
+const hog = new Hog(world, { scene });
 const chase = new Chase(camera, canvas, hog, world);
 const pipeline = new Pipeline(renderer, scene, camera);
 const hud = createHud();

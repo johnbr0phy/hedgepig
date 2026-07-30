@@ -1,4 +1,4 @@
-import { TAU, clamp, sstep, lerp, noise2 } from '../core/util.js';
+import { TAU, clamp, sstep, lerp } from '../core/util.js';
 import {
   CIRC, BAND, LAKE, ROAD, TOWN, MIRE, FARM, HENS,
   wrapDelta, bandEdges, lakeAt, roadAt, townAt, placeAmt, placeCentre, ORDER,
@@ -65,24 +65,53 @@ function reliefMask(x, z) {
   return m;
 }
 
-/** The gentle unevenness *inside* the field, so it is not a billiard table. */
+/**
+ * The gentle unevenness *inside* the field, so it is not a billiard table.
+ *
+ * **Every term is periodic in longitude and vanishes at the poles**, which is
+ * why they are all `sin(integer × la) · cos(odd × ph)` — **with a phase
+ * offset on the longitude and never on the latitude.**  Two of them had one
+ * on the latitude at first, `cos(5·ph + 1.1)`, which is a cosine that is
+ * emphatically *not* zero at 90°, and it put 74 mm of relief onto the pole
+ * where every longitude in the world has to agree on one height.
+ *
+ * The octave before that was value noise, which is neither periodic nor
+ * polar: it left an 80 mm step at the seam where one lap meets the next, a
+ * ridge running pole to pole through the butterfly garden that nobody would
+ * have found by looking, because it is exactly the size of a molehill.
+ * `smoke.js terrain` measures both.
+ */
 function ripple(x, z) {
   const la = x * K, ph = z * K;
   return (
     0.115 * Math.sin(11 * la + 1.4) * Math.cos(3 * ph) +
-    0.062 * Math.sin(23 * la - 0.6) * Math.cos(5 * ph + 1.1) +
-    0.085 * (noise2(x * 0.13, z * 0.13, 991) - 0.5)
+    0.062 * Math.sin(23 * la - 0.6) * Math.cos(5 * ph) +
+    0.041 * Math.sin(37 * la + 2.7) * Math.cos(ph) +
+    0.028 * Math.sin(53 * la - 1.2) * Math.cos(3 * ph)
   );
 }
 
-/** Dig the lake: a dish across the band, full width, pole to pole. */
-function basin(x) {
+/**
+ * Dig the lake: a dish across the band, right across the field and a good way
+ * beyond it — but **closed off before the poles**.
+ *
+ * It was pole to pole at first, which is what "full width" suggests and what
+ * makes it an unavoidable wall.  It is unavoidable long before then: the
+ * walkable field ends at ±13 m and the graded ground at ±34 m.  Carried all
+ * the way out, the basin tore the planet open: every longitude meets at the
+ * pole, so a trench 1.55 m deep that exists at some longitudes and not others
+ * cannot close, and the ground there was 1.7 m of gash.  It shuts between 34
+ * and 46 m of latitude, where there is no water drawn and nothing to see.
+ */
+function basin(x, z) {
   const l = lakeAt(x);
   if (l <= 0) return 0;
+  const polar = sstep(46, 34, Math.abs(z));
+  if (polar <= 0) return 0;
   // smoothstep the dish so the shore rises out of the ground rather than
   // meeting it at a lip — the shoreline is then wherever the bed crosses
   // WATER_Y, which is a contour and not a piece of authored geometry
-  return -LAKE_DEPTH * sstep(0, 1, l) ** 0.85;
+  return -LAKE_DEPTH * sstep(0, 1, l) ** 0.85 * polar;
 }
 
 /** The mire is a shallow dish; the farmyard and hen run are graded flat. */
@@ -99,7 +128,7 @@ export function heightAt(x, z) {
   // hold the field's own unevenness back from tarmac and paving too
   const hard = Math.max(roadAt(x), townAt(x));
   h += ripple(x, z) * (1 - hard * 0.92);
-  h += basin(x);
+  h += basin(x, z);
   h += dishes(x, z);
   return h;
 }

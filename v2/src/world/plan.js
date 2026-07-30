@@ -125,7 +125,10 @@ export function placeAmt(x, kind) {
  * this world's metres.
  */
 const BANDS = {
-  [LAKE]: { a: 0.17, z: 0.85, edge: 2.8 },
+  /* A 5.2 m ramp into the water, not 2.8.  The bank drops 1.55 m either way,
+   * so the short version was a 31° slope right where he has to stand to get
+   * into the boat — walkable by the letter of `walkableAt` and horrible. */
+  [LAKE]: { a: 0.17, z: 0.85, edge: 5.2 },
   /* The tarmac is narrower than its place — 9.6 m of it, which at his pace
    * is seven seconds in the open.  v1's was 2 288 px, about ten metres, and
    * the whole balance of the culvert was tuned against that number: wider

@@ -98,5 +98,12 @@ src/
 └── game/game.js         hearts, legs, the burrow, hazards, sowing
 ```
 
+`smoke.js` is the headless harness: `node smoke.js` runs all fourteen
+scenarios, or name one — `node smoke.js roadmiss` measures how dangerous the
+open tarmac is, `node smoke.js terrain` checks the ground closes at the seam
+and agrees with itself at the poles. It drives the real modules, not a copy of
+them; three.js runs in Node as long as nobody asks it for a WebGL context.
+
 `HANDOVER.md` is the one to read before changing anything. As with v1, most of
-it is mistakes and what they cost.
+it is mistakes and what they cost — and eleven of them are in there now,
+because writing the harness found five more.
