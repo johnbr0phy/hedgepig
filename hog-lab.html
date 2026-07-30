@@ -711,12 +711,16 @@ const GROUND = -20.5;
 // OUTSIDE it; the cream face-chest-belly is the part inside. This single
 // constant replaces the hand-tuned diagonal path of the 2D version.
 const MN = { x:.821, y:-.571, z:0 };
-const MK0 = .30;                             // 0 = half of him, higher = more coat
+const MK0 = .42;                             // 0 = half of him, higher = more coat.
+                                             // At .30 the coat sat on TOP of him and
+                                             // left a long low cream flank — a pale
+                                             // weasel in a spiny cape. It has to come
+                                             // down the sides, as it does in the badge.
 
 // A golden-angle spiral over the sphere: even, deterministic, and it never
 // tiles — which §5 of the handover asks of anything procedural.
 const QUILLS = (() => {
-  const out = [], N = 500, ga = Math.PI*(3 - Math.sqrt(5));
+  const out = [], N = 430, ga = Math.PI*(3 - Math.sqrt(5));
   for (let i=0;i<N;i++){
     const ny = 1 - (i/(N-1))*2, rr = Math.sqrt(Math.max(0, 1 - ny*ny));
     const th = ga*i;
@@ -894,10 +898,18 @@ function drawHog3(ctx, hog, t, K, cx, cy){
      wedges of him bald. Measured over 24 regions of the sphere at quality .5:
      golden gave a retention spread of sd 0.497 with regions at 0.00, i.e.
      completely bare; bit-reversal gives sd 0.034, worst region 0.43. */
+  /* The coat's edge is FEATHERED. Quills root a little way past the mantle
+     boundary and get shorter as they go, so the coat breaks up into tips over
+     the cream instead of ending at the dark mass's clean elliptical arc. That
+     hard edge was what read as broken from the front — a smooth pale slab with
+     a spiny cape laid on it — and in the badge the boundary is ragged, spines
+     overlapping the fur. */
+  const FRINGE = .20;
   for (let i=0;i<QUILLS.length;i++){
     if (quality < .995 && QUILLS[i].pri >= quality) continue;
     const Q = QUILLS[i];
-    if (Q.d > MK) continue;
+    if (Q.d > MK + FRINGE) continue;
+    const over = Q.d > MK ? (Q.d - MK)/FRINGE : 0;   // 0 in the coat, 1 at the fringe's edge
     const n = Q.n;
     const px = A*n.x, py = B*n.y, pz = Cc*n.z;             // root, on the surface
     // the true outward normal of an ellipsoid is the gradient, not the radius
@@ -919,7 +931,8 @@ function drawHog3(ctx, hog, t, K, cx, cy){
     const dl = Math.sqrt(dx*dx + dy*dy + dz*dz) || 1;
     dx /= dl; dy /= dl; dz /= dl;
     const len = lerp(12.6, 6.0, (n.x + 1)/2) * Q.lf * (1 + c*.16) * (1 + rip*.05*g)
-              * (1 + shake*.16 - arch*.06);        // fluffed / flattened
+              * (1 + shake*.16 - arch*.06)         // fluffed / flattened
+              * (1 - over*over*.72);               // and short out on the fringe
     const tx = px + dx*len, ty = py + dy*len, tz = pz + dz*len;
 
     const bX = px*ct - pz*st, bD = px*st + pz*ct;
@@ -1349,7 +1362,7 @@ function drawHog3(ctx, hog, t, K, cx, cy){
         every angle for one fill: back-and-up in profile, straight up when he
         is nose-on, over all of him from behind. The ragged quill roots hide
         the seam, which is what they do on the animal too. */
-  const off = 7.6 * (1 - c*.75);
+  const off = 6.0 * (1 - c*.75);   // less lift, so the dark reaches down his flank
   const mgc = ctx.createLinearGradient(0, -B, 0, B*.6);
   mgc.addColorStop(0, C.mantleHi);
   mgc.addColorStop(1, C.mantleLo);
