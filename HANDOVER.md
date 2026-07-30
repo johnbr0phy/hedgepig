@@ -517,6 +517,30 @@ Things worth knowing before touching it:
   you. Everything hung off the snout (muzzle, nose, mouth, whiskers) has the
   same gate one level down, or his nose sits on the back of his head as he walks
   away. The `walking away` stall exists for this.
+- **The dark mass must be CLIPPED to the body.** Offset back-and-up by 7.6 it
+  overhangs the top of his silhouette by about 3px, and what you see is a
+  smooth brown crescent hanging behind his head with no coat on it.
+- **There are two visibility ramps, and using the wrong one is invisible in code
+  and obvious on screen.** `faceVis` is for features on the SIDES of his head —
+  an eye, an ear — which swing into view as they turn toward the lens.
+  `frontVis` is for features on the FRONT of his face — the snout, and the mouth
+  under it — whose normals point straight across the view when he is side-on,
+  depth 0. Gating those on `faceVis` put his nose at 40% and lost his mouth
+  entirely **in profile, the commonest view there is**. Front features hide only
+  once they have turned away.
+- **His mouth belongs on the head sphere, not in screen space.** As a horizontal
+  arc hung off the nose at a fixed offset down the frame, it slid off the side of
+  his muzzle every time he pitched his head to sniff and stuck out into nothing.
+  It is now a point on the sphere with the line lying *across* the projected
+  snout axis, bowing outward off the head, so it cannot leave his face and it
+  narrows round the side of its own accord.
+- **An ear reads as an ear by poking out of the head's OUTLINE.** Sitting whole
+  on the cream it is just a second eye beside the real one — which it became
+  again the moment the head was made bigger. `RR_EAR` is 1.5 and the ears are
+  drawn **before** the head sphere, so the sphere buries all but the tip.
+- **The crown coat goes down before the head too.** Drawn after the face, as the
+  2D hood was, the front of it lands on his cheek and reads as debris stuck to
+  it. Behind the sphere, only the tips show, as a fringe.
 - **Do not pick quill properties off the loop index.** A regular pick over a
   golden-angle spiral *is* phyllotaxis, and it drew a literal pinecone. Hash them.
 - **Band every quill that is long enough on screen to show a band**, and only

@@ -1384,12 +1384,23 @@ function facePt(az, el, yaw, pitch, rr){
 // start at z = 0: anything on the far hemisphere is behind the head, and a ramp
 // that reaches into negative z draws it straight through his skull.
 const faceVis = z => clamp(z/.26, 0, 1);
+/* faceVis is for features on the SIDES of his head — an eye, an ear — which
+   come into view as they swing round toward the lens. Features on the FRONT of
+   his face (the snout, and the mouth under it) are a different case: side-on
+   their normals point straight across the view, depth 0, and they are perfectly
+   visible. Gating those on faceVis put his nose at 40% and lost his mouth
+   entirely in profile, which is the commonest view there is. They hide only
+   once they have turned AWAY. */
+const frontVis = z => clamp((z + .55)/.40, 0, 1);
 
 const AZ_EYE = 1.30, EL_EYE = .52;      // well above and behind the muzzle, on the cream
 const RR_EYE = .80;
 const AZ_EAR = 2.32, EL_EAR = .72;      // top-BACK of the head. Near 90° it projects
                                         // onto the middle of his face beside the eye.
-const RR_EAR = 1.00;                    // ON the head: the ears are drawn AFTER the cheek fill
+const RR_EAR = 1.50;                    // OUTSIDE the head, and drawn BEFORE it, so the
+                                        // sphere buries all but the tip. An ear reads as an
+                                        // ear by poking out of the head's outline; sitting
+                                        // whole on the cream it is just a second eye.
 const SNOUT_R = 1.12;                   // SHORT. Past about 1.25 he reads as an anteater.
 
 /* ═══ the hedgepig in three dimensions ═════════════════════════════════════
@@ -1419,9 +1430,9 @@ const SNOUT_R = 1.12;                   // SHORT. Past about 1.25 he reads as an
    so screen y = -y. Ground is y = -20.5.
    ═════════════════════════════════════════════════════════════════════════ */
 const BODY = { a:26, b:16.5, c:19.5 };       // semi-axes: fore-aft, up, across
-const HD_R = 8.4;                            // head sphere radius. Bigger than
+const HD_R = 9.4;                            // head sphere radius. Bigger than
                                              // this and nose-on he is all head.
-const HD_C = { x:20.4, y:-1.6, z:0 };        // where the head sits on him
+const HD_C = { x:20.0, y:-1.7, z:0 };        // where the head sits on him
 const GROUND = -20.5;
 
 // The mantle boundary is a plane cutting forward-and-down. Quills root
@@ -2352,8 +2363,6 @@ function drawHog(){
       });
     }
     crown.sort((u, v) => u.D - v.D);
-    let hsplit = 0;
-    while (hsplit < crown.length && crown[hsplit].D <= hc.x*st + hc.z*ct) hsplit++;
     function crownQuills(from, to){
       for (let i=from;i<to;i++){
         const q = crown[i];
@@ -2369,13 +2378,13 @@ function drawHog(){
         ctx.closePath(); ctx.fill();
       }
     }
-    crownQuills(0, hsplit);                     // the nape, behind his head
+    /* ALL of the crown coat goes down before his head, so the cream of his
+       face covers the roots and only the tips show as a fringe round the top
+       of his head. Drawn after the face — as the 2D hood was — they landed on
+       his cheek and read as debris stuck to it, not as spines. */
+    crownQuills(0, crown.length);
 
-    // a sphere projects to a circle, whatever the rotation
-    ctx.fillStyle = bgc;
-    ctx.beginPath(); ctx.arc(hcX, -hc.y, R, 0, TAU); ctx.fill();
-
-    // ears, behind the muzzle but over the head, at the coat's edge
+    // ears, BEFORE the head sphere so it buries all but the tip
     for (const side of [-1, 1]){
       const e = HP(headDir(side*AZ_EAR, EL_EAR, hy, hp), 1.0);
       const v = faceVis(e.n) * (side < 0 ? .8 : 1);
@@ -2384,10 +2393,15 @@ function drawHog(){
       ctx.globalAlpha = a * fa * v;
       ctx.fillStyle = side < 0 ? "#3a2a1e" : C.ear;
       ctx.beginPath();
-      ctx.ellipse(e.X, e.Y, 1.75*sc*earSq, 2.6*sc, -.34 + earTilt*side, 0, TAU);
+      ctx.ellipse(e.X, e.Y, 2.30*sc*earSq, 2.95*sc, -.34 + earTilt*side, 0, TAU);
       ctx.fill();
     }
     ctx.globalAlpha = a * fa;
+
+    // a sphere projects to a circle, whatever the rotation
+    ctx.fillStyle = bgc;
+    ctx.beginPath(); ctx.arc(hcX, -hc.y, R, 0, TAU); ctx.fill();
+
 
     // the muzzle: a short cone along his snout, drawn as the projected axis.
     // When the snout points away it is behind his own head, so everything hung
@@ -2395,7 +2409,7 @@ function drawHog(){
     // nose sat on the back of his head as he walked away.
     const tipD = headDir(0, -.16, hy, hp);
     const snD = tipD.x*st + tipD.z*ct;
-    const snV = clamp((snD + .12)/.30, 0, 1);
+    const snV = frontVis(snD);
     const tip = HP(tipD, SNOUT_R), bse = HP(tipD, .26);
     const mdx = tip.X - bse.X, mdy = tip.Y - bse.Y;
     const slen = Math.hypot(mdx, mdy);
@@ -2431,12 +2445,29 @@ function drawHog(){
     // mouth, and whiskers. Both narrow as his snout turns toward the lens,
     // which now falls out of the projection instead of being faked.
     const fore = Math.abs(tipD.x*ct - tipD.z*st);       // how side-on the snout is
-    ctx.strokeStyle = "rgba(74,52,40,.80)"; ctx.lineWidth = 1.15; ctx.lineCap = "round";
-    const mw = 3.1*fore + 1.4;
-    ctx.beginPath();
-    ctx.moveTo(nX - mw, nY + nr*1.5);
-    ctx.quadraticCurveTo(nX, nY + nr*2.4, nX + mw, nY + nr*1.5);
-    ctx.stroke();
+
+    /* ── his mouth. It is a point ON the head sphere, and the line lies ACROSS
+          the projected snout axis, bowing outward away from his head. Drawn in
+          screen space — a horizontal arc hung off the nose at a fixed offset
+          down the frame — it slid off the side of his muzzle every time he
+          pitched his head to sniff or turned, and stuck out into nothing. Now
+          it cannot leave his face, and it narrows and fades round the side of
+          its own accord. */
+    const mo = HP(headDir(0, -.62, hy, hp), .98);
+    const mv = frontVis(mo.n);
+    if (mv > .02){
+      const ax = slen > .001 ? mdx/slen : 1, ay = slen > .001 ? mdy/slen : 0;
+      const cxp = -ay, cyp = ax;                       // across the snout
+      const mow = 2.4*fore + 1.15;
+      const bowX = (mo.X - hcX)*.17, bowY = (mo.Y + hc.y)*.17;   // outward, off the head
+      ctx.globalAlpha = a * fa * snV * mv;
+      ctx.strokeStyle = "rgba(74,52,40,.78)"; ctx.lineWidth = 1.1; ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(mo.X - cxp*mow, mo.Y - cyp*mow);
+      ctx.quadraticCurveTo(mo.X + bowX, mo.Y + bowY, mo.X + cxp*mow, mo.Y + cyp*mow);
+      ctx.stroke();
+      ctx.globalAlpha = a * fa * snV;
+    }
 
     ctx.globalAlpha = a * fa * .17;
     ctx.strokeStyle = "rgba(246,240,228,1)"; ctx.lineWidth = .55;
@@ -2471,8 +2502,6 @@ function drawHog(){
       ctx.beginPath(); ctx.arc(e.X, e.Y, 2.5*sc, -2.5, -1.0); ctx.stroke();
       ctx.globalAlpha = a * fa;
     }
-    ctx.globalAlpha = a * fa;
-    crownQuills(hsplit, crown.length);          // and the spines over his brow
     ctx.globalAlpha = a;
   }
 
@@ -2562,10 +2591,16 @@ function drawHog(){
   const mgc = ctx.createLinearGradient(0, -B, 0, B*.6);
   mgc.addColorStop(0, C.mantleHi);
   mgc.addColorStop(1, C.mantleLo);
+  // CLIPPED to his body. Offset back-and-up, the mass reaches ~3px past the
+  // top of his silhouette, and what you saw was a smooth brown crescent
+  // hanging behind his head with no coat on it.
+  ctx.save();
+  ctx.beginPath(); ctx.ellipse(0, 0, bw, B, 0, 0, TAU); ctx.clip();
   ctx.fillStyle = mgc;
   ctx.beginPath();
   ctx.ellipse(-MN.x*off*ct + MN.z*off*st, MN.y*off, bw*.94, B*.94, 0, 0, TAU);
   ctx.fill();
+  ctx.restore();
 
   /* The near half of the coat goes down BEFORE his face. Drawn after it, any
      quill on this side that happened to overlap his head was painted straight
