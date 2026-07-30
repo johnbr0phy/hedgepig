@@ -555,9 +555,21 @@ Things worth knowing before touching it:
   coat goes down before the face.** The depth sort will happily paint legs
   across his belly and quills across his eye if you let it — both are the old
   faults of §10, reintroduced by giving a sort the chance to make them.
-- **He costs about 250 fills a frame more than the 2D version** (~1880 vs ~1630
-  in `walk`). `quality < .72` halves his coat, so the adaptive scaler thins
-  *him* before it thins the grass — the meadow is the thing you are looking at.
+- **He costs 232 fills a frame, measured** — not inferred from scenario totals,
+  which is how I first got this wrong. Drive `quality` to a fixed value, run
+  `smoke.js idle` with and then without `drawHog()`, and difference the two.
+  Across versions, on that method:
+
+  | version | his fills/frame |
+  |---|---|
+  | the original 2D hedgehog (`c552a08`) | 35 |
+  | 2D, rebuilt against the badge (`d734ad3`) | 75 |
+  | 3D, `quality` 1.0 | 232 |
+  | 3D, `quality` 0.42 (the floor) | 125 |
+
+  So he is six times the old one, and roughly a quarter of an `idle` frame. He
+  is also the only thing on screen you are actually watching, and he gives half
+  of it back under load — but do not add to him casually.
 
 `hog.dir` no longer draws anything. It is still maintained because the snuffle
 motes, the breath and the nose's grass field all need to know which way he
