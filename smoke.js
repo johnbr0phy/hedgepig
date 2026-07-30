@@ -7,6 +7,7 @@ const HTML = fs.readFileSync(__dirname + "/index.html", "utf8");
 const SRC  = HTML.match(/<script>([\s\S]*)<\/script>/)[1];
 
 const W = 430, H = 900;
+const LAB_ONLY = process.argv[2] === "lab";
 let bad = [], ops = { fill:0, stroke:0, save:0, path:0, drawImage:0 };
 const seen = new Set();
 
@@ -123,6 +124,75 @@ const HOOK = `
 ;globalThis.__moving = () => hog.gait;
 
 `;
+/* ── the lab ──────────────────────────────────────────────────────────────
+   `node smoke.js lab` runs hog-lab.html under the same mocks and drives its
+   rAF loop for a few hundred frames.
+
+   This exists because the lab went COMPLETELY BLANK — a bare ReferenceError
+   in drawHog3 on the first frame — and nothing said a word. The harness only
+   ever loaded index.html, and a syntax check with `new Function` cannot catch
+   a name that is merely missing at runtime. The lab is where the animation is
+   actually judged, so it silently drawing nothing is about the worst failure
+   available.
+   ────────────────────────────────────────────────────────────────────────── */
+if (LAB_ONLY){
+  const LAB = fs.readFileSync(__dirname + "/hog-lab.html", "utf8");
+  const LSRC = LAB.match(/<script>([\s\S]*)<\/script>/)[1];
+  // the lab drives itself off rAF, so capture the callback and pump it
+  let rafCb = null;
+  global.requestAnimationFrame = cb => { rafCb = cb; return 0; };
+  global.window.requestAnimationFrame = global.requestAnimationFrame;
+  // its stalls measure themselves off getBoundingClientRect
+  const origEl = global.document.createElement;
+  const rect = { left:0, top:0, width:320, height:280, right:320, bottom:280 };
+  for (const k of Object.keys(els)) els[k].getBoundingClientRect = () => rect;
+  global.document.createElement = tag => {
+    const e = origEl(tag);
+    e.getBoundingClientRect = () => rect;
+    e.querySelector = () => e;
+    e.innerHTML = "";
+    return e;
+  };
+  global.document.getElementById = id => { const e = el(id);
+    e.getBoundingClientRect = () => rect; e.querySelector = () => e;
+    if (id === "spd" || id === "scl") e.value = "100";
+    return e; };
+
+  let thrown = null;
+  try {
+    eval(LSRC);
+    for (let i=0;i<400;i++){
+      if (!rafCb){ thrown = "the lab never asked for a frame"; break; }
+      const cb = rafCb; rafCb = null;
+      nowMs += 1000/60;
+      cb(nowMs);
+    }
+  } catch (e){ thrown = e.stack || String(e); }
+
+  console.log("scenario: lab");
+  if (thrown){
+    console.log("  !! THE LAB THREW\n     " + String(thrown).split("\n").slice(0,4).join("\n     "));
+    process.exitCode = 1;
+  } else {
+    console.log("  400 frames, no exception");
+    console.log("  ops/frame: fill", (ops.fill/400).toFixed(0),
+                " stroke", (ops.stroke/400).toFixed(0),
+                " path", (ops.path/400).toFixed(0));
+    if (ops.fill < 400*11*20){
+      console.log("  !! DREW ALMOST NOTHING — eleven stalls should be hundreds of fills each");
+      process.exitCode = 1;
+    }
+    if (bad.length){
+      console.log("  !! NON-FINITE / DEGENERATE:", bad.length, "distinct");
+      bad.slice(0,12).forEach(b => console.log("     ", b));
+      process.exitCode = 1;
+    } else {
+      console.log("  no non-finite coordinates");
+    }
+  }
+  return;
+}
+
 const patched = SRC.replace(/\n\}\)\(\);\s*$/, HOOK + "\n})();\n");
 if (patched === SRC) throw new Error("could not find IIFE tail to hook");
 

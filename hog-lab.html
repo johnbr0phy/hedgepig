@@ -273,6 +273,9 @@ function makeHog(){
 
 let showBones = false;
 const quality = 1;    // the game's adaptive scaler; here he is always full detail
+const afloat  = false;// the game puts him in a boat over water; there is none here.
+                      // Both of these exist so the drawing code can be IDENTICAL in
+                      // the two files and ported as whole blocks.
 
 // A faithful copy of the current in-game drawing, parameterised so the rig can
 // drive several at once. `t` is that stall's own clock.
@@ -639,7 +642,7 @@ const MK0 = .30;                             // 0 = half of him, higher = more c
 // A golden-angle spiral over the sphere: even, deterministic, and it never
 // tiles — which §5 of the handover asks of anything procedural.
 const QUILLS = (() => {
-  const out = [], N = 340, ga = Math.PI*(3 - Math.sqrt(5));
+  const out = [], N = 430, ga = Math.PI*(3 - Math.sqrt(5));
   for (let i=0;i<N;i++){
     const ny = 1 - (i/(N-1))*2, rr = Math.sqrt(Math.max(0, 1 - ny*ny));
     const th = ga*i;
@@ -851,9 +854,6 @@ function drawHog3(ctx, hog, t, K, cx, cy){
       });
     }
     crown.sort((u, v) => u.D - v.D);
-    // above his eyeline only. Below it they are debris stuck to his cheek,
-    // which is exactly what the old 2D hood did when drawn here.
-    const brow = crown.filter(q => q.bY < -hc.y - R*.30);
     function crownQuills(list, from, to){
       for (let i=from;i<to;i++){
         const q = list[i];
@@ -869,10 +869,16 @@ function drawHog3(ctx, hog, t, K, cx, cy){
         ctx.closePath(); ctx.fill();
       }
     }
-    /* ALL of the crown coat goes down before his head, so the cream of his
-       face covers the roots and only the tips show as a fringe round the top
-       of his head. Drawn after the face — as the 2D hood was — they landed on
-       his cheek and read as debris stuck to it, not as spines. */
+    /* ALL of the crown coat goes down before the head sphere, with NO pass
+       over the face. Only what lies outside the head's own outline can then
+       show, which is a spiky fringe round his crown and nothing on his face.
+
+       There is no filter that makes an overlay pass safe. Filtered by depth,
+       the front of the crown lands on his cheek and reads as debris stuck to
+       it. Filtered by screen height instead, his NAPE gets through — because
+       nose-on everything on his sagittal plane projects to X = 0, so the back
+       of his head lands in the middle of his face. Which is exactly what "I
+       can see the spines on his head through his head" was. */
     crownQuills(crown, 0, crown.length);
 
     // ears, BEFORE the head sphere so it buries all but the tip
@@ -993,8 +999,6 @@ function drawHog3(ctx, hog, t, K, cx, cy){
       ctx.beginPath(); ctx.arc(e.X, e.Y, 2.5*sc, -2.5, -1.0); ctx.stroke();
       ctx.globalAlpha = a * fa;
     }
-
-    crownQuills(brow, 0, brow.length);        // and the spines over his brow
     ctx.globalAlpha = a;
   }
 
@@ -1005,12 +1009,19 @@ function drawHog3(ctx, hog, t, K, cx, cy){
     for (let i=from;i<to;i++){
       const q = qs[i];
       let vx = q.tX - q.bX, vy = q.tY - q.bY;
-      let vl = Math.hypot(vx, vy);
-      // a quill aimed at the lens foreshortens to nothing; keep a stub, or it
-      // degenerates and vanishes instead of reading as a cut-off spine
-      if (vl < 2.2){ const k = 2.2/(vl || 1); vx *= k; vy *= k; vl = 2.2; }
-      const nx = -vy/vl*2.00, ny = vx/vl*2.00;      // half-width at the root
+      const vl = Math.hypot(vx, vy);
       ctx.fillStyle = QCOL[q.pale ? 2 : 0][q.s];
+      if (vl < 3.2){
+        /* Aimed at the lens a quill is not a sliver, it is a DOT of its own
+           cross-section. Drawn as a degenerate triangle it left a bare brown
+           gap wherever many of them pointed at you at once — which nose-on is
+           his entire rear coat, right in the middle of him. */
+        ctx.beginPath();
+        ctx.ellipse(q.bX + vx*.5, q.bY + vy*.5, 2.5, 2.1, 0, 0, TAU);
+        ctx.fill();
+        continue;
+      }
+      const nx = -vy/vl*2.00, ny = vx/vl*2.00;      // half-width at the root
       ctx.beginPath();
       ctx.moveTo(q.bX + nx, q.bY + ny);
       ctx.lineTo(q.bX + vx, q.bY + vy);
@@ -1037,29 +1048,75 @@ function drawHog3(ctx, hog, t, K, cx, cy){
 
   // ── legs, sorted the same way. Depth does the near/far pairing now, so
   //    there is no draw-order rule to get wrong and no colour trick needed.
+  /* ── legs, jointed, with the feet PLANTED ───────────────────────────────
+     Each leg has a stance and a swing. During the stance the foot stays put
+     and travels backward under him at the rate he is going forward, so the
+     body passes over a planted foot; during the swing it lifts and comes
+     through. Before this the foot was a cosine offset about the hip, which
+     means it slid along the ground the whole time — §10's "straight stubs
+     whose feet slide", improvement #2.
+
+     All of it is driven by hog.walk, which advances with DISTANCE rather than
+     time, so it cannot moonwalk however fast or slow he is going.
+
+     A FULLY planted foot is not reachable, and here is the arithmetic so that
+     nobody tries to reach it by guessing. hog.walk advances .062 per world px,
+     so one leg cycle is 2pi/.062 = 101 world px = 44 model units of travel, of
+     which the stance is 62% = 27 units. To stay put the foot would have to
+     travel all 27 of those backwards — on a leg 10 units long. STR would have
+     to be 13.6 and the swing arc 27 units, nearly his whole body length.
+
+     I tried STR = 7.2, which cuts the slide from 0.68 of his speed to 0.47 —
+     and it looked WORSE, because a 14.4-unit arc reaches a foot almost under
+     his own nose. Chasing a number that cannot be reached made him worse, so
+     STR is 5.0: a 10-unit arc, about one leg length, and a slide of 0.62.
+
+     The stance/swing shape is still worth having over the cosine it replaced,
+     because the foot now dwells through the stance and snaps through the
+     swing rather than sliding sinusoidally the whole way round.
+
+     The real culprit is the stride RATE. 101px per cycle is a ~20cm stride at
+     the field's ~500px/m, far too long for him. Halving it would plant the
+     feet properly, but the body bob is locked to twice the leg rate and is
+     already 5.9Hz at full pelt, so halving the stride doubles that to 11.8Hz
+     and he buzzes. Fixing this properly means re-timing the whole gait, and
+     probably slowing him down; it is not a tweak to STR.
+
+     Diagonal trot: the far pair leads the near pair by half a stride. And the
+     knee breaks backward on his front legs and forward on his hind ones,
+     which is the zig-zag every quadruped has and reads as a joint even at
+     four pixels.  */
   const legs = [];
-  if (c < .82){
+  if (c < .82 && !afloat){
     const up = 1 - c/.82;
-    for (const [lx, lz, ph] of [[11.5,  Cc*.52, p], [-11.5,  Cc*.52, p + Math.PI],
-                                [11.5, -Cc*.52, p + Math.PI], [-11.5, -Cc*.52, p]]){
-      const sw = Math.max(0, Math.sin(ph));
-      const hipY = -(-B*.62), footY = -(GROUND + sw*3.2*g)*up + (1 - up)*-B*.5;
-      const fx = lx + Math.cos(ph)*3.4*g;
+    const STR = 5.0, DUTY = .62;              // stride, and the share on the ground
+    const tuck = y => lerp(B*.35, y, up);     // curled, they retract up into him
+    for (const [lx, lz, ph, front] of [
+           [ 11.5,  Cc*.52, p,           1], [-11.5,  Cc*.52, p + Math.PI, 0],
+           [ 11.5, -Cc*.52, p + Math.PI, 1], [-11.5, -Cc*.52, p,           0]]){
+      let u = (ph/TAU) % 1; if (u < 0) u += 1;
+      let off, lift;
+      if (u < DUTY){ off = STR*(1 - 2*(u/DUTY)); lift = 0; }        // planted
+      else { const w = (u - DUTY)/(1 - DUTY);                        // swinging
+             off = STR*(-1 + 2*w); lift = Math.sin(Math.PI*w)*3.4; }
+      const fx = lx + off*g, lf = lift*g;
+      const hipS  = tuck(B*.62);                       // screen y = -(model up)
+      const footS = tuck(-GROUND - lf);
+      const kneeX = (lx + fx)*.5 + (front ? -1.9 : 2.1)*g - lf*.16;
       legs.push({ D: lx*st + lz*ct,
-                  hX: lx*ct - lz*st, hY: hipY,
-                  fX: fx*ct - lz*st, fY: footY });
+                  hX: lx*ct - lz*st,    hY: hipS,
+                  kX: kneeX*ct - lz*st, kY: (hipS + footS)*.5,
+                  fX: fx*ct - lz*st,    fY: footS });
     }
   }
-  /* All four legs go down BEFORE the body, so only the part below his belly
-     ever shows. Sorting them against the body instead painted the near pair
-     across his chest — the "legs through his body" fault of §10, which the
-     depth sort reintroduced the moment it was given the chance. */
   legs.sort((u, v) => u.D - v.D);
   for (const L of legs){
     const near = L.D > 0;
     ctx.strokeStyle = near ? C.limb : "#a5895f";
-    ctx.lineWidth = 4.6; ctx.lineCap = "round";
-    ctx.beginPath(); ctx.moveTo(L.hX, L.hY); ctx.lineTo(L.fX, L.fY - 1); ctx.stroke();
+    ctx.lineWidth = 4.4; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(L.hX, L.hY); ctx.lineTo(L.kX, L.kY); ctx.lineTo(L.fX, L.fY - 1);
+    ctx.stroke();
     ctx.fillStyle = near ? C.paw : "#7a6046";
     ctx.beginPath(); ctx.ellipse(L.fX + .8, L.fY, 3.0, 2.4, 0, 0, TAU); ctx.fill();
   }
