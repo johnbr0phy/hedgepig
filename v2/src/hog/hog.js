@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { buildHog, HOG_LEN } from './model.js';
-import { basisAt, positionAt, R } from '../world/planet.js';
+import { createAnimator } from './anim.js';
+import { basisAt, positionAt } from '../world/planet.js';
 import { heightAt, slopeAt, walkableAt } from '../world/terrain.js';
-import { BAND, wrapDelta, CIRC } from '../world/plan.js';
+import { R, distance, bearing, dirAt, flatOf } from '../world/plan.js';
 import { clamp, lerp, damp, wrapAng, rngKit, TAU } from '../core/util.js';
 
 /* ------------------------------------------------------------------ *
@@ -32,14 +33,29 @@ import { clamp, lerp, damp, wrapAng, rngKit, TAU } from '../core/util.js';
  * never goes through it.
  * ------------------------------------------------------------------ */
 
-/** v1's HOG_SPD0, converted off its 220 px/m meter: 1.36 m/s. */
-export const HOG_SPD = 1.36;
+/**
+ * How fast he goes.
+ *
+ * v1's `HOG_SPD0` was 300 px/s, which off its 220 px/m distance meter is
+ * 1.36 m/s.  But v1's handover also records that the meter and the *visual*
+ * scale of that world disagreed by more than two to one — "the visual scale
+ * implied by the grass is closer to 500 px/m... these disagree and it doesn't
+ * matter".  Against the scale you could actually see, he was doing 0.6 m/s.
+ *
+ * It matters here, because a real gait has a cadence: at 1.36 m/s a 26 cm
+ * animal with a 13 cm stride takes ten and a half strides a second, which is
+ * five frames a cycle and reads as a strobe however correct it is.  0.85 m/s
+ * is six and a half — a brisk scurry you can actually see the legs in — and
+ * it is much closer to what v1 looked like than v1's own number was.
+ */
+export const HOG_SPD = 0.85;
 
 const _v = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _rot = new THREE.Matrix4();
 const _slope = { nx: 0, nz: 0 };
+const _pole = new THREE.Vector3();
 
 export class Hog {
   /**
@@ -96,6 +112,7 @@ export class Hog {
      * which made the harness flaky in a way that looked like a real bug
      * three runs out of four. */
     this.rng = rngKit(seed);
+    this.anim = parts ? createAnimator(parts, seed) : null;
   }
 
   /** World position of his feet. */
@@ -128,13 +145,12 @@ export class Hog {
     if (this.curl > 0.2 || this.under) return false;
     this.curl = 1;
     this.hurt = 1.2;
-    const dx = wrapDelta(this.x, fromX);
-    const dz = this.z - fromZ;
-    const away = Math.atan2(dz, dx);
+    const away = bearing(fromX, fromZ, this.x, this.z).angle;
+    const cs = Math.max(0.08, Math.cos(this.z / R));
     this.repelHd = away;
     this.repel = 1.3;
     // a shove backwards, so the hit reads as contact and not a state change
-    this.x += Math.cos(away) * 0.10;
+    this.x += (Math.cos(away) * 0.10) / cs;
     this.z += Math.sin(away) * 0.10;
 
     /* **He backs off, rather than simply stopping.**  Stopping cancels the
@@ -146,8 +162,8 @@ export class Hog {
      * kept walking; here it only steers toward a target, and he had none.
      * So the hit gives him one: a metre, directly away. */
     this.target = {
-      x: this.x + Math.cos(away) * 1.0,
-      z: clamp(this.z + Math.sin(away) * 1.0, -BAND, BAND),
+      x: this.x + Math.cos(away) / cs,
+      z: this.z + Math.sin(away),
     };
     this.arrived = false;
     return true;
@@ -179,15 +195,18 @@ export class Hog {
       // the boat has him; it drives his position and heading
       this.gait = damp(this.gait, 0, 8, dt);
     } else if (this.target && this.hurt <= 0) {
-      const dx = wrapDelta(this.target.x, this.x);
-      const dz = this.target.z - this.z;
-      const dist = Math.hypot(dx, dz);
+      /* **Great-circle, not flat.**  With content spread over the whole
+       * planet, `hypot(Δx, Δz)` is wrong by a factor of `cos(latitude)` in
+       * x — at the top of the world it says he is a hundred metres from
+       * something he is standing next to.  Distance and bearing both come
+       * off the sphere now. */
+      const dist = distance(this.x, this.z, this.target.x, this.target.z);
 
       if (dist < 0.05) {
         this.arrive();
       } else {
         want = 1;
-        let aim = Math.atan2(dz, dx);
+        let aim = bearing(this.x, this.z, this.target.x, this.target.z).angle;
         // after a hit he veers off rather than walking straight back into it
         if (this.repel > 0) aim = lerp(aim, this.repelHd, clamp(this.repel / 1.3, 0, 1) * 0.8);
 
@@ -202,7 +221,7 @@ export class Hog {
         /* Clamp the step to what is left, or the easing overshoots the
          * target and he jitters on the spot for as long as you watch him. */
         const step = Math.min(this.speed * this.gait * dt, dist);
-        this.tryMove(Math.cos(this.hd) * step, Math.sin(this.hd) * step, dt);
+        this.tryStep(step, dt);
       }
     } else {
       this.gait = damp(this.gait, 0, 5, dt);
@@ -225,21 +244,37 @@ export class Hog {
   }
 
   /**
-   * Move, or refuse to.  Water, the far edge of the field and anything the
-   * game has blocked (the tarmac, until he has found the culvert) all stop
-   * him rather than being survived — v1's rule that a full-width hazard has
-   * to have a way through it, not a way to die in it.
+   * Take one step along his heading, or refuse to.
+   *
+   * `step` is metres **of ground**, so the longitude it costs depends on how
+   * far north he is: a metre of longitude at 60° is half a metre of walking.
+   * Without that division he speeds up as he goes north and crawls at the
+   * equator, and on a world with no edges he will visit both.
+   *
+   * Water and anything the game has blocked stop him rather than being
+   * survived — v1's rule that a hazard has to have a way through it, not a
+   * way to die in it.
    */
-  tryMove(dx, dz, dt) {
-    const nx = this.x + dx;
-    const nz = clamp(this.z + dz, -BAND, BAND);
-    const ok = this.canStand(nx, nz);
-    if (ok) {
-      this.x = nx;
-      this.z = nz;
-      this.blocked = 0;
-      return true;
+  tryStep(step, dt) {
+    const cs = Math.max(0.08, Math.cos(this.z / R));
+    const dx = (Math.cos(this.hd) * step) / cs;
+    const dz = Math.sin(this.hd) * step;
+    let nx = this.x + dx;
+    let nz = this.z + dz;
+
+    /* **Over the top.**  Integrated in flat coordinates, a walk due north
+     * runs `z` straight past the pole at 75 m and into numbers that no
+     * longer mean anything — the harness caught him 122 m from the equator
+     * on a planet whose poles are at 75.  Pushing the step back through the
+     * sphere puts him where he actually is, and crossing a pole flips his
+     * heading by π because east and north have both reversed under him. */
+    if (Math.abs(nz) > R * Math.PI / 2) {
+      const f = flatOf(dirAt(nx, nz, _pole));
+      nx = f.x; nz = f.z;
+      this.hd = wrapAng(this.hd + Math.PI);
     }
+
+    if (this.canStand(nx, nz)) { this.x = nx; this.z = nz; this.blocked = 0; return true; }
     // slide along whichever axis is still free, so a wall does not trap him
     if (this.canStand(nx, this.z)) { this.x = nx; this.blocked = 0; return true; }
     if (this.canStand(this.x, nz)) { this.z = nz; this.blocked = 0; return true; }
@@ -270,54 +305,17 @@ export class Hog {
 
   /* ----------------------------- the animation ----------------------------- */
 
+  /**
+   * Everything about *how he looks while doing it* lives in `anim.js`.  What
+   * stays here is the one piece that is behaviour rather than animation: how
+   * far his features have swung toward whatever he is looking at.
+   */
   animate(dt, now) {
-    const p = this.parts;
-    if (!p) return;                       // headless: nothing to animate
-    const g = this.gait;
-
     if (this.lookLock > 0) this.lookLock -= dt;
     else this.lookYawTarget = damp(this.lookYawTarget, 0, 1.2, dt);
     this.lookYaw = damp(this.lookYaw, this.lookYawTarget, 6, dt);
-    // an ellipsoid-preserving slide across his front — see `setLook`
-    p.setLook(this.lookYaw * (1 - this.curl));
 
-    // a snuffling dip of the whole front while he stands
-    const sn = Math.sin(now * 5.2) * 0.5 + Math.sin(now * 2.1) * 0.5;
-    p.face.rotation.z = lerp(sn * 0.05 * this.snuffle, Math.sin(this.stride) * 0.03, g);
-    /* The snuffle rides on the snout's own resting height rather than
-     * replacing it with a number of its own.  It used to hard-code -0.012,
-     * which quietly *corrected* a constructor that had put the snout on top
-     * of his head — so the model was wrong and the animation hid it. */
-    p.snout.position.y = p.snout.userData.restY + Math.sin(now * 9) * 0.0016 * (1 - g * 0.5);
-
-    // bob and roll: two out-of-phase sines, the roll at half the bob's rate
-    this.bob = Math.abs(Math.sin(this.stride)) * 0.014 * g;
-    this.roll = Math.sin(this.stride * 0.5) * 0.07 * g;
-    this.lean = damp(this.lean, g * 0.10, 5, dt);
-
-    for (const leg of p.legs) {
-      const ph = this.stride + leg.userData.phase;
-      const swing = Math.sin(ph) * 0.55 * g;
-      const lift = Math.max(0, Math.sin(ph)) * 0.016 * g;
-      leg.rotation.z = swing;
-      leg.position.y = leg.userData.y ?? (leg.userData.y = leg.position.y);
-      leg.position.y += lift;
-      leg.visible = this.curl < 0.6;
-    }
-
-    // curling: he tucks his front under and the coat closes over it
-    const c = this.curl;
-    p.face.visible = c < 0.75;
-    p.body.scale.setScalar(1 + c * 0.10);
-    p.body.position.y = 0.083 + c * 0.012;
-    for (const coat of p.coats) coat.scale.setScalar(1 + c * 0.16);
-
-    // shivering, from `season.js` by way of the world
-    if (this.shiver > 0.01) {
-      p.body.position.x = Math.sin(now * 34) * 0.0016 * this.shiver;
-    }
-
-    p.shadow.scale.setScalar(1 - c * 0.12);
+    this.anim?.update(this, dt, now);
   }
 
   /**

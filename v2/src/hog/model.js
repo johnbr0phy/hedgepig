@@ -215,6 +215,7 @@ export function buildHog() {
   /* Ears: small, low, and at the mantle's front edge — on the badge they are
    * barely more than two notches in the coat line. */
   const earMat = cel({ color: PAL.hogCreamShade, bands: 'soft', tint: 0x8f7a9a, flat: false });
+  const ears = [];
   for (const s of [-1, 1]) {
     const g = new THREE.SphereGeometry(0.0135, 10, 8);
     g.scale(0.5, 1, 0.9);
@@ -224,6 +225,7 @@ export function buildHog() {
     ear.position.set(A * 0.30, BODY_Y + 0.030, C * 0.72 * s);
     ear.rotation.z = -0.3;
     root.add(ear);
+    ears.push(ear);
   }
 
   /* -------------------------------- the coat ------------------------------- */
@@ -479,7 +481,7 @@ export function buildHog() {
   }
 
   return {
-    root, body, face, snout, nose, eyes, blushes, legs, shadow, setLook, lookParts,
+    root, body, face, snout, nose, eyes, ears, blushes, legs, shadow, setLook, lookParts,
     coats: [coatDark, coatPale, coatMid],
     materials: { cream: creamMat, quill: coatDark.material },
     quillCount: quills.length,

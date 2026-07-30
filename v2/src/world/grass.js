@@ -2,89 +2,95 @@ import * as THREE from 'three';
 import { cel } from '../core/toon.js';
 import { PAL } from '../core/palette.js';
 import { bladeTex } from '../core/textures.js';
-import { rngKit, clamp, lerp, TAU } from '../core/util.js';
-import { CIRC, PLACE_LEN, BAND, placeProp, hardAt } from './plan.js';
+import { mulberry32, clamp, lerp, TAU } from '../core/util.js';
+import { R, CIRC, placeProp, hardAt, distance } from './plan.js';
 import { heightAt, waterDepthAt } from './terrain.js';
+import { positionAt, basisAt } from './planet.js';
 
 /* ------------------------------------------------------------------ *
- * The grass.
+ * The meadow.
  *
- * v1's single most important idea was that **the camera looks across a flat
- * field from within the grass** — about 0.78 m of ground across a phone
- * screen — and that everything followed from it.  That idea does not
- * survive into three dimensions unchanged, because here the camera really
- * can move and depth really is depth.  What survives is the *scale*: he is
- * 26 cm long and 16 cm tall, and the grass reaches 33 cm, so he walks with
- * his back at the height of the stems and the camera has to look down into
- * the field to find him.  The first pass had blades at 0.55 m — true to a
- * real meadow, and it produced a green wall with a hedgehog somewhere
- * behind it.
+ * The world has no walls now, so the grass has to cover a whole sphere —
+ * 28 650 m², against the 7 800 m² of the old walkable band.  At the density
+ * this wants that is close to a million tufts, which cannot be built up
+ * front and should not be: you can only ever see twenty-two metres of it.
  *
- * Three decisions carry the whole thing:
+ * So it **streams**.  A fixed pool of instanced patches is dealt out to the
+ * cells nearest him and rebuilt as he walks, a couple of cells a frame so
+ * that nothing hitches.  Each cell's contents are a pure function of its own
+ * coordinates, so a patch you walk away from and come back to is the same
+ * patch, blade for blade.
  *
- *  - **Chunks, not one field.**  250 instanced patches, each culled by
- *    distance in `update()`.  Instanced meshes take their bound from the
- *    source blade rather than the instance cloud, so three.js would either
- *    cull the entire meadow at once or none of it; doing it by hand is both
- *    cheaper and correct.
- *  - **Season is two uniforms, not a rebuild.**  v1's `SEA_LEN` and
- *    `SEA_DEN` become a length scale in the vertex shader and a live
- *    `instanceCount`, so the field lengthens into summer and thins into
- *    winter without touching a buffer.
- *  - **Wind is in the shader.**  Two sines phased off the instance's own
- *    position, weighted by height up the blade, so a gust crosses the field
- *    rather than every blade moving as one.
+ * The cells are **equal-area** — latitude rows, each holding as many columns
+ * as its own circumference will take.  A plain lat/long grid would put
+ * hundreds of slivers at the poles and enormous cells at the equator.
+ *
+ * Two things happen in the vertex shader, and between them they are most of
+ * what makes it read as grass rather than as scenery:
+ *
+ *  - **wind**, two sines phased off each tuft's own position, so a gust
+ *    crosses the field instead of every blade moving as one;
+ *  - **him**, pushing it aside as he goes.  v1 fed his bulk and his nose
+ *    into the blade solver every frame, and it is half of why that hedgehog
+ *    felt like he was *in* the field rather than on top of it.
  * ------------------------------------------------------------------ */
 
-const CHUNK_X = PLACE_LEN / 5;      // 6 m
-const CHUNK_Z = 5.6;
-const ROWS = Math.ceil((BAND + 1.5) * 2 / CHUNK_Z);
-const COLS = Math.round(CIRC / CHUNK_X);
+/** Target cell size, in metres of arc. */
+const CELL = 5.0;
+/** How far grass is drawn. The fog closes well inside this. */
+const VIEW = 21;
+/** Tufts per square metre before the place's own weighting. */
+const DENSITY = 26;
+/** Per-patch capacity, and how many patches stay alive at once. */
+const CAP = 900;
+const POOL = 108;
+/** Cells rebuilt per frame — the whole point of streaming is not to hitch. */
+const BUILD_BUDGET = 2;
 
-/** Tufts per square metre at full density. */
-const DENSITY = 20;
-/** What a dry tuft multiplies the season's green by: bleached, toward straw. */
-const _DRY = new THREE.Color(1.55, 1.32, 0.72);
-/** How far a chunk can be before it stops being drawn. */
-const VIEW = 22;
+/* ----------------------------- the cell grid ----------------------------- */
 
-/** One tuft: three crossed cards, bent forward, base at the origin. */
+const ROWS = Math.max(4, Math.round((Math.PI * R) / CELL));
+const ROW_H = (Math.PI * R) / ROWS;
+const COLS = [];
+const ROW_Z = [];
+for (let r = 0; r < ROWS; r++) {
+  const lat = -Math.PI / 2 + ((r + 0.5) * Math.PI) / ROWS;
+  ROW_Z.push(lat * R);
+  COLS.push(Math.max(1, Math.round((CIRC * Math.cos(lat)) / CELL)));
+}
+
+const cellKey = (r, c) => r * 4096 + c;
+const cellCentre = (r, c) => ({ x: ((c + 0.5) / COLS[r]) * CIRC, z: ROW_Z[r] });
+
+/** One tuft: four crossed cards, bent forward, base at the origin. */
 function tuftGeometry() {
   const cards = [];
-  for (let i = 0; i < 3; i++) {
-    const g = new THREE.PlaneGeometry(0.030, 1, 1, 3);
-    // bend: move the top forward so a blade arcs instead of standing rigid
+  for (let i = 0; i < 4; i++) {
+    const g = new THREE.PlaneGeometry(0.028, 1, 1, 3);
     const pos = g.attributes.position;
     for (let v = 0; v < pos.count; v++) {
-      const y = pos.getY(v) + 0.5;              // 0 at base, 1 at tip
+      const y = pos.getY(v) + 0.5;                 // 0 at the base, 1 at the tip
       pos.setY(v, y);
-      pos.setZ(v, pos.getZ(v) + y * y * 0.16);
-      pos.setX(v, pos.getX(v) * (1 - y * 0.35));
+      pos.setZ(v, pos.getZ(v) + y * y * 0.18);     // an arc, not a spike
+      pos.setX(v, pos.getX(v) * (1 - y * 0.42));   // tapering to a point
     }
-    g.rotateY((i / 3) * Math.PI + 0.4);
-    g.translate(0, 0, 0);
+    g.rotateY((i / 4) * Math.PI + 0.35);
     cards.push(g);
   }
-  const all = new THREE.BufferGeometry();
-  const parts = cards.map((c) => c.attributes.position.array.length / 3);
-  // simple manual merge: same attribute set on every card
-  const total = parts.reduce((a, b) => a + b, 0);
+  const total = cards.reduce((a, c) => a + c.attributes.position.count, 0);
   const P = new Float32Array(total * 3);
   const N = new Float32Array(total * 3);
   const U = new Float32Array(total * 2);
   const I = [];
   let off = 0;
   for (const c of cards) {
-    const cp = c.attributes.position.array;
-    const cn = c.attributes.normal.array;
-    const cu = c.attributes.uv.array;
-    P.set(cp, off * 3);
-    N.set(cn, off * 3);
-    U.set(cu, off * 2);
-    const ci = c.index.array;
-    for (let k = 0; k < ci.length; k++) I.push(ci[k] + off);
-    off += cp.length / 3;
+    P.set(c.attributes.position.array, off * 3);
+    N.set(c.attributes.normal.array, off * 3);
+    U.set(c.attributes.uv.array, off * 2);
+    for (const k of c.index.array) I.push(k + off);
+    off += c.attributes.position.count;
   }
+  const all = new THREE.BufferGeometry();
   all.setAttribute('position', new THREE.BufferAttribute(P, 3));
   all.setAttribute('normal', new THREE.BufferAttribute(N, 3));
   all.setAttribute('uv', new THREE.BufferAttribute(U, 2));
@@ -93,39 +99,58 @@ function tuftGeometry() {
   return all;
 }
 
-/** Bolt wind and a season-driven length scale onto a cel material. */
-function windPatch(mat, uniforms) {
+/** Wind, a season length scale, and him — bolted onto a cel material. */
+function windPatch(mat, u) {
   const prev = mat.onBeforeCompile;
   mat.onBeforeCompile = (shader) => {
     prev?.(shader);
-    shader.uniforms.uTime = uniforms.time;
-    shader.uniforms.uWind = uniforms.wind;
-    shader.uniforms.uLen = uniforms.len;
+    Object.assign(shader.uniforms, {
+      uTime: u.time, uWind: u.wind, uLen: u.len, uHog: u.hog, uHogR: u.hogR,
+    });
     shader.vertexShader = `
       uniform float uTime;
       uniform float uWind;
       uniform float uLen;
+      uniform vec3  uHog;
+      uniform float uHogR;
     ` + shader.vertexShader.replace(
       '#include <begin_vertex>',
       /* glsl */ `
         #include <begin_vertex>
-        #ifdef USE_INSTANCING
-          vec3 iSeed = vec3( instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2] );
-        #else
-          vec3 iSeed = vec3( 0.0 );
-        #endif
+        /* Instances are placed in world space, so column three of the
+         * instance matrix is the tuft's own position on the planet — which
+         * is both the phase seed for the wind and what we measure him
+         * against. */
+        vec3 root = vec3( instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2] );
+
         transformed.y *= uLen;
-        float ph = iSeed.x * 0.9 + iSeed.z * 0.7 + iSeed.y * 0.3;
+        float up = position.y * position.y;          // the root never moves
+
+        float ph = root.x * 0.9 + root.z * 0.7 + root.y * 0.3;
         float gust = sin( uTime * 1.15 + ph ) * 0.6 + sin( uTime * 2.7 + ph * 1.7 ) * 0.4;
-        // weight by height up the blade: the root does not move
-        float w = position.y * position.y;
-        transformed.x += gust * uWind * w * 0.30;
-        transformed.z += gust * uWind * w * 0.14;
+        transformed.x += gust * uWind * up * 0.30;
+        transformed.z += gust * uWind * up * 0.14;
+
+        /* He pushes it aside.  Measured in world space and then brought back
+         * into the tuft's own frame, because every blade on a sphere stands
+         * in a different direction. */
+        vec3 away = root - uHog;
+        float d = length( away );
+        if ( d < uHogR ) {
+          float k = 1.0 - d / uHogR;
+          k = k * k * ( 3.0 - 2.0 * k );
+          vec3 dir = normalize( away + vec3( 1e-5 ) );
+          vec3 ex = normalize( vec3( instanceMatrix[0][0], instanceMatrix[0][1], instanceMatrix[0][2] ) );
+          vec3 ez = normalize( vec3( instanceMatrix[2][0], instanceMatrix[2][1], instanceMatrix[2][2] ) );
+          transformed.x += dot( dir, ex ) * k * up * 0.45;
+          transformed.z += dot( dir, ez ) * k * up * 0.45;
+          transformed.y -= k * up * 0.30 * transformed.y;      // and flattens it
+        }
       `
     );
   };
   const hex = mat.userData.shadowTint ? mat.userData.shadowTint.value.getHexString() : '0';
-  mat.customProgramCacheKey = () => 'grassWind_' + hex;
+  mat.customProgramCacheKey = () => 'grassWindPush_' + hex;
   return mat;
 }
 
@@ -137,7 +162,10 @@ export function buildGrass(parent) {
     time: { value: 0 },
     wind: { value: 0.16 },
     len: { value: 1 },
+    hog: { value: new THREE.Vector3(1e6, 1e6, 1e6) },
+    hogR: { value: 0.34 },
   };
+  let seasonDen = 1;
 
   const mat = cel({
     color: PAL.bramble,
@@ -152,112 +180,178 @@ export function buildGrass(parent) {
   windPatch(mat, uniforms);
 
   const geo = tuftGeometry();
-  const rng = rngKit(4242);
-  const chunks = [];
 
-  const m = new THREE.Matrix4();
-  const q = new THREE.Quaternion();
-  const up = new THREE.Vector3(0, 1, 0);
-  const pos = new THREE.Vector3();
-  const scl = new THREE.Vector3();
-  const col = new THREE.Color();
-  const base = new THREE.Color();
+  const patches = [];
+  for (let i = 0; i < POOL; i++) {
+    const im = new THREE.InstancedMesh(geo, mat, CAP);
+    im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(CAP * 3), 3);
+    im.count = 0;
+    im.frustumCulled = false;
+    im.castShadow = false;
+    im.receiveShadow = true;
+    im.visible = false;
+    im.userData.key = -1;
+    im.userData.full = 0;
+    group.add(im);
+    patches.push(im);
+  }
+  parent.add(group);
 
-  for (let cx = 0; cx < COLS; cx++) {
-    for (let cz = 0; cz < ROWS; cz++) {
-      const x0 = cx * CHUNK_X;
-      const z0 = -(BAND + 1.5) + cz * CHUNK_Z;
+  const _m = new THREE.Matrix4();
+  const _q = new THREE.Quaternion();
+  const _spin = new THREE.Quaternion();
+  const _up = new THREE.Vector3(0, 1, 0);
+  const _p = new THREE.Vector3();
+  const _s = new THREE.Vector3();
+  const _fm = new THREE.Matrix4();
+  const _col = new THREE.Color();
+  const _dry = new THREE.Color(1.55, 1.32, 0.72);
 
-      // how many tufts this chunk could hold, sampled at its middle
-      const midX = x0 + CHUNK_X / 2;
-      const dens = placeProp(midX, 'dens');
-      const max = Math.round(CHUNK_X * CHUNK_Z * DENSITY * clamp(dens + 0.12, 0, 1.2));
-      if (max < 4) continue;
+  /** How many of a patch's tufts are drawn, given the season. */
+  const trim = (im) => {
+    im.count = clamp(Math.round(im.userData.full * seasonDen), im.userData.full ? 1 : 0, im.userData.full);
+    im.visible = im.count > 0;
+  };
 
-      const list = [];
-      for (let i = 0; i < max; i++) {
-        const x = x0 + rng.next() * CHUNK_X;
-        const z = z0 + rng.next() * CHUNK_Z;
-        // nothing grows on tarmac, paving or under water
-        if (hardAt(x) > 0.45 || waterDepthAt(x, z) > 0) continue;
-        const y = heightAt(x, z);
-        const lenScale = placeProp(x, 'len');
-        const dry = placeProp(x, 'dry');
-        const h = rng.range(0.10, 0.30) * lerp(0.7, 1.15, lenScale);
+  /** Fill one patch with the tufts belonging to cell (r, c). */
+  function fill(im, r, c) {
+    const rng = mulberry32((cellKey(r, c) * 2654435761) >>> 0);
+    const cols = COLS[r];
+    const x0 = (c / cols) * CIRC;
+    const dx = CIRC / cols;
+    const z0 = ROW_Z[r] - ROW_H / 2;
+    const lat = ROW_Z[r] / R;
+    const area = dx * Math.max(0.02, Math.cos(lat)) * ROW_H;
 
-        pos.set(x, y - 0.01, z);
-        q.setFromAxisAngle(up, rng.range(0, TAU));
-        scl.set(rng.range(0.8, 1.25), h, rng.range(0.8, 1.25));
-        m.compose(pos, q, scl);
+    const want = Math.min(CAP, Math.round(area * DENSITY * 1.35));
+    let k = 0;
+    for (let i = 0; i < want && k < CAP; i++) {
+      const x = x0 + rng() * dx;
+      const z = z0 + rng() * ROW_H;
+      if (hardAt(x, z) > 0.45) continue;
+      if (waterDepthAt(x, z) > 0) continue;
 
-        /* Instance colour is a **multiplier around white**, not a colour.
-         * The material carries the season's green and this only says how
-         * this tuft differs from it — lighter, darker, or bleached toward
-         * straw where the place is dry.  Put an absolute green here as well
-         * and the two multiply into something nearly black. */
-        base.setRGB(1, 1, 1).lerp(_DRY, dry * rng.range(0.3, 0.9));
-        col.copy(base).multiplyScalar(rng.range(0.78, 1.22));
-        list.push({ m: m.clone(), c: col.clone() });
+      // thin by place: the meadow is thick, the farmyard is scratched bare
+      const dens = placeProp(x, z, 'dens');
+      if (rng() > clamp(dens, 0, 1.3) / 1.3) continue;
+
+      const y = heightAt(x, z) - 0.01;
+      const lenScale = placeProp(x, z, 'len');
+      const dry = placeProp(x, z, 'dry');
+      const h = (0.10 + rng() * 0.22) * lerp(0.7, 1.15, lenScale);
+
+      const b = basisAt(x, z);
+      _fm.makeBasis(b.east, b.up, b.north);
+      _q.setFromRotationMatrix(_fm);
+      _spin.setFromAxisAngle(_up, rng() * TAU);
+      _q.multiply(_spin);
+      positionAt(x, y, z, _p);
+      _s.set(0.8 + rng() * 0.5, h, 0.8 + rng() * 0.5);
+      _m.compose(_p, _q, _s);
+      im.setMatrixAt(k, _m);
+
+      /* Instance colour is a **multiplier around white**, not a colour: the
+       * material carries the season's green and this only says how this tuft
+       * differs from it.  An absolute green here would multiply with that one
+       * into something very nearly black. */
+      _col.setRGB(1, 1, 1).lerp(_dry, dry * (0.3 + rng() * 0.6));
+      _col.multiplyScalar(0.78 + rng() * 0.44);
+      im.setColorAt(k, _col);
+      k++;
+    }
+    im.userData.full = k;
+    im.userData.key = cellKey(r, c);
+    im.instanceMatrix.needsUpdate = true;
+    im.instanceColor.needsUpdate = true;
+    trim(im);
+  }
+
+  /* ----------------------------- the streaming ----------------------------- */
+  const live = new Map();
+  let queue = [];
+  let lastX = 1e9, lastZ = 1e9;
+  let blades = 0;
+
+  function reseat(px, pz) {
+    const wanted = [];
+    for (let r = 0; r < ROWS; r++) {
+      if (Math.abs(ROW_Z[r] - pz) > VIEW + CELL) continue;
+      for (let c = 0; c < COLS[r]; c++) {
+        const q = cellCentre(r, c);
+        const d = distance(px, pz, q.x, q.z);
+        if (d > VIEW + CELL * 0.75) continue;
+        wanted.push({ r, c, key: cellKey(r, c), d });
       }
-      if (!list.length) continue;
+    }
+    const keep = new Set(wanted.map((w) => w.key));
+    for (const [key, im] of [...live]) {
+      if (!keep.has(key)) {
+        im.visible = false;
+        im.count = 0;
+        im.userData.key = -1;
+        im.userData.full = 0;
+        live.delete(key);
+      }
+    }
+    // nearest first, so what appears next to him appears first
+    queue = wanted.filter((w) => !live.has(w.key)).sort((a, b) => a.d - b.d);
+  }
 
-      const im = new THREE.InstancedMesh(geo, mat, list.length);
-      im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(list.length * 3), 3);
-      list.forEach((it, i) => {
-        im.setMatrixAt(i, it.m);
-        im.setColorAt(i, it.c);
-      });
-      im.instanceMatrix.needsUpdate = true;
-      im.instanceColor.needsUpdate = true;
-      im.castShadow = false;
-      im.receiveShadow = true;
-      im.userData.maxCount = list.length;
-      im.userData.cx = midX;
-      im.userData.cz = z0 + CHUNK_Z / 2;
-      im.frustumCulled = false;
-      group.add(im);
-      chunks.push(im);
+  function service(budget) {
+    let done = 0;
+    while (queue.length && done < budget) {
+      const w = queue.shift();
+      if (live.has(w.key)) continue;
+      const im = patches.find((m) => m.userData.key === -1);
+      if (!im) break;                    // pool exhausted; it catches up next frame
+      fill(im, w.r, w.c);
+      live.set(w.key, im);
+      done++;
+    }
+    if (done) {
+      blades = 0;
+      for (const im of live.values()) blades += im.count;
     }
   }
 
-  parent.add(group);
-
-  let blades = chunks.reduce((a, c) => a + c.userData.maxCount, 0);
+  const _hogWorld = new THREE.Vector3();
 
   return {
     group,
-    chunks,
     material: mat,
     uniforms,
-    blades,
+    cells: { ROWS, CELL, POOL, CAP, VIEW },
+    get chunks() { return [...live.values()]; },
+    get blades() { return blades; },
+    get liveCells() { return live.size; },
+    get pending() { return queue.length; },
 
     /** Season: `len` lengthens the blade, `den` thins the field. */
     setSeason(len, den) {
       uniforms.len.value = len;
-      for (const c of chunks) {
-        /* Clamped to what was actually allocated.  Summer's density weight
-         * is 1.06 — v1's `SEA_DEN`, where it multiplied a spawn count — and
-         * setting `count` past the length of the instance buffer does not
-         * draw 6 % more grass, it draws **no grass at all**.  The field
-         * simply was not there in summer and nothing was logged. */
-        const max = c.userData.maxCount;
-        c.count = clamp(Math.floor(max * den), 1, max);
-      }
+      seasonDen = clamp(den, 0.05, 1);
+      for (const im of live.values()) trim(im);
     },
 
     setWind(w) { uniforms.wind.value = w; },
 
-    /**
-     * Distance culling, done by hand.  Everything past `VIEW` is switched
-     * off; the fog closes at 24 m, so nothing switches off in sight.
-     */
-    update(dt, hogX, hogZ) {
+    /** Fill everything in view at once — for a screenshot, or for a test. */
+    prime(x, z) {
+      reseat(x, z);
+      service(queue.length + 1);
+      lastX = x; lastZ = z;
+    },
+
+    update(dt, hogX, hogZ, hogY = 0) {
       uniforms.time.value += dt;
-      for (const c of chunks) {
-        const dx = Math.abs(((c.userData.cx - hogX + CIRC * 1.5) % CIRC) - CIRC / 2);
-        const dz = c.userData.cz - hogZ;
-        c.visible = dx * dx + dz * dz < VIEW * VIEW;
+      positionAt(hogX, hogY + 0.05, hogZ, _hogWorld);
+      uniforms.hog.value.copy(_hogWorld);
+
+      if (distance(hogX, hogZ, lastX, lastZ) > CELL * 0.35) {
+        reseat(hogX, hogZ);
+        lastX = hogX; lastZ = hogZ;
       }
+      service(BUILD_BUDGET);
     },
   };
 }

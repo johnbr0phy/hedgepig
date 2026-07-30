@@ -16,7 +16,8 @@
  *
  * Scenarios
  *   plan terrain planet clock      pure geometry and arithmetic, no world
- *   face                           his features stay on his face
+ *   open                           there is no edge to the world
+ *   gait face                      how he walks, and that his face stays on
  *   walk idle back water boat      the loop: he goes, he stops, he refuses
  *   road roadmiss abandon          the hazards, and v1's invincibility bug
  *   burrow grass nan               progression, the meadow, and finite maths
@@ -58,7 +59,9 @@ const { buildWorld } = await import('./src/world/index.js');
 const { buildPlaces } = await import('./src/world/places/index.js');
 const { buildGrass } = await import('./src/world/grass.js');
 const { Hog, HOG_SPD } = await import('./src/hog/hog.js');
+const { wrapAng } = await import('./src/core/util.js');
 const { buildHog, HOG_BODY } = await import('./src/hog/model.js');
+const { createAnimator, STRIDE, STANCE } = await import('./src/hog/anim.js');
 const { createGame } = await import('./src/game/game.js');
 const { CULVERT_Z } = await import('./src/world/places/road.js');
 
@@ -115,88 +118,93 @@ function makeWorld({ grass = false } = {}) {
     hog.hurt = 0; hog.curl = 0; hog.under = false; hog.afloat = null;
     hog.target = null; hog.gait = 0; hog.walked = 0;
   };
-  cached = { grass, scene, world, hog, game, hud, climate, step, put, ms: Date.now() - t0 };
+  const centre = (kind) => plan.CENTRE[kind];
+  cached = { grass, scene, world, hog, game, hud, climate, step, put, centre, ms: Date.now() - t0 };
   return cached;
 }
 
 /* ================================ scenarios =============================== */
 
 function sPlan() {
-  const { CIRC, PLACE_LEN, COUNT, ORDER, LAKE, ROAD, TOWN } = plan;
-  ok(CIRC === PLACE_LEN * COUNT, 'the round is the places laid end to end',
-    `${COUNT} × ${PLACE_LEN} m = ${CIRC} m`);
-  ok(Math.abs(2 * Math.PI * planet.R - CIRC) < 1e-9,
-    'the radius is derived from the round, not chosen', `R = ${f(planet.R, 3)} m`);
-  ok(plan.placeIndexAt(0).i === plan.placeIndexAt(CIRC).i,
-    'the ring closes: one lap lands on the place it left');
+  const { CIRC, COUNT, ORDER, CENTRE, CENTRES, R, arcBetween, LAKE, ROAD, TOWN } = plan;
+  ok(CENTRES.length === COUNT, 'ten places, one per vertex of the antiprism', `${COUNT}`);
+
+  /* The whole point of the layout: every place is exactly as far from its
+   * neighbours as every other, so no place is a backwater and there is no
+   * seam.  **Four** neighbours, not five — an icosahedron's ring vertex has
+   * five, but one of those is a pole, and the poles are the two vertices
+   * this layout leaves out. */
+  const spacing = [];
+  for (const a of CENTRES) {
+    const ds = CENTRES.filter((b) => b !== a)
+      .map((b) => arcBetween(a.dir, b.dir)).sort((p, q) => p - q);
+    spacing.push(...ds.slice(0, 4));
+  }
+  const lo = Math.min(...spacing), hi = Math.max(...spacing);
+  ok(hi - lo < 1e-6, 'every place is the same distance from all four neighbours',
+    `${f(lo, 2)} m apart, to a millimetre`);
+
+  /* v1's ordering rule: consecutive places must actually be adjacent, or the
+   * walk stops being a walk. */
+  let worstStep = 0;
+  for (let i = 0; i < COUNT; i++) {
+    const a = CENTRE[ORDER[i]], b = CENTRE[ORDER[(i + 1) % COUNT]];
+    worstStep = Math.max(worstStep, arcBetween(a.dir, b.dir));
+  }
+  ok(Math.abs(worstStep - lo) < 1e-6,
+    "and v1's order steps between neighbours the whole way round, and closes",
+    `every step ${f(worstStep, 2)} m`);
 
   // the crossfade must always account for exactly one place's worth
-  let worstSum = 1, worstX = 0;
-  for (let x = 0; x < CIRC; x += 0.37) {
+  let worstSum = 1;
+  for (let i = 0; i < 4000; i++) {
+    const z = R * Math.asin(-1 + (2 * i) / 4000);
+    const x = (i * 137.5) % CIRC;
     let sum = 0;
-    for (const kind of ORDER) sum += plan.placeAmt(x, kind);
-    if (Math.abs(sum - 1) > Math.abs(worstSum - 1)) { worstSum = sum; worstX = x; }
+    for (const kind of ORDER) sum += plan.placeAmt(x, z, kind);
+    if (Math.abs(sum - 1) > Math.abs(worstSum - 1)) worstSum = sum;
   }
   ok(Math.abs(worstSum - 1) < 1e-9, 'the place blend always sums to one',
-    `worst ${f(worstSum, 6)} at x = ${f(worstX)}`);
+    `worst ${f(worstSum, 6)} over 4 000 samples`);
 
-  // a blend is only ever between neighbours on the ring
-  let neighbourly = true;
-  for (let x = 0; x < CIRC; x += 0.23) {
-    const m = plan.placeAt(x);
-    if (m.t === 0) continue;
-    const ia = ORDER.indexOf(m.a), ib = ORDER.indexOf(m.b);
-    if ((ia + 1) % COUNT !== ib) { neighbourly = false; break; }
+  /* Every square metre belongs to somewhere.  In the banded world this was
+   * trivially true along the equator and meaningless everywhere else. */
+  let unclaimed = 0;
+  for (let i = 0; i < 3000; i++) {
+    const z = R * Math.asin(-1 + (2 * i) / 3000);
+    const x = (i * 61.8) % CIRC;
+    const m = plan.placeAt(x, z);
+    if (m.a === undefined || m.arcA > 60) unclaimed++;
   }
-  ok(neighbourly, 'places only ever blend into their own neighbour');
+  ok(unclaimed === 0, 'and every point on the planet belongs to a place');
 
-  // bands belong to their own place and nowhere else
-  for (const [kind, name] of [[LAKE, 'the lake'], [ROAD, 'the road'], [TOWN, 'the town']]) {
-    let stray = 0, inside = 0;
-    for (let x = 0; x < CIRC; x += 0.1) {
-      const v = plan.bandAt(x, kind);
-      if (v <= 0) continue;
-      if (ORDER[plan.placeIndexAt(x).i] === kind) inside++; else stray++;
-    }
-    ok(stray === 0 && inside > 0, `${name}'s band stays inside ${name}`,
-      `${inside} samples in, ${stray} out`);
-  }
+  // the two hard surfaces stay where they belong
+  const [lc, tc] = [CENTRE[LAKE], CENTRE[TOWN]];
+  ok(plan.lakeAt(lc.x, lc.z) > 0.99 && plan.lakeAt(0, 0) === 0,
+    'the lake is a disc round its own centre');
+  ok(Math.abs(plan.roadOffset(CENTRE[ROAD].x, CENTRE[ROAD].z)) < 1e-6 &&
+     Math.abs(plan.roadOffset(tc.x, tc.z)) < 1e-6,
+    'and the road runs through the roadside and the town, as a great circle');
 
-  // the seam: wrapping must be continuous through it
   const d = plan.wrapDelta(1, CIRC - 1);
   ok(Math.abs(d - 2) < 1e-9, 'longitudes wrap the short way across the seam', `Δ = ${f(d, 6)} m`);
 }
 
 function sTerrain() {
-  const { CIRC, BAND } = plan;
+  const { CIRC, R } = plan;
   const { heightAt } = terrain;
 
-  // periodic in x, or the ring has a cliff at the seam
-  let worst = 0;
-  for (let z = -30; z <= 30; z += 3.1) {
-    for (let x = 0; x < CIRC; x += 7.3) {
-      worst = Math.max(worst, Math.abs(heightAt(x, z) - heightAt(x + CIRC, z)));
-    }
+  /* The relief is a function of the surface direction now, so being smooth
+   * everywhere is a property of the *form* rather than something to be
+   * tuned.  Both bugs the harness found in the banded version — a seam ridge
+   * at one lap, and relief left sitting on a pole — cannot be expressed. */
+  let seam = 0;
+  for (let i = 0; i < 400; i++) {
+    const z = R * Math.asin(-1 + (2 * i) / 400);
+    seam = Math.max(seam, Math.abs(heightAt(0.0, z) - heightAt(CIRC, z)));
   }
-  ok(worst < 1e-9, 'the ground is periodic round the planet', `worst seam step ${f(worst, 9)} m`);
+  ok(seam < 1e-9, 'the ground closes on itself at one lap', `worst ${f(seam, 9)} m`);
 
-  // no cliffs: he walks at 1.36 m/s and cannot climb
-  /* Only where he can actually stand.  Swept over the whole band it fails on
-   * the lake bed, which is 0.83 m/m of slope by design and which he can no
-   * more walk down than he can swim. */
-  let steep = 0, steepAt = null;
-  for (let z = -BAND; z <= BAND; z += 0.9) {
-    for (let x = 0; x < CIRC; x += 0.45) {
-      if (!terrain.walkableAt(x, z) || !terrain.walkableAt(x + 0.45, z)) continue;
-      const d = Math.abs(heightAt(x + 0.45, z) - heightAt(x, z));
-      if (d > steep) { steep = d; steepAt = [x, z]; }
-    }
-  }
-  ok(steep < 0.22, 'no cliffs anywhere he can stand',
-    `worst rise ${f(steep, 3)} m per 0.45 m at ${steepAt && steepAt.map((v) => f(v, 1)).join(', ')}`);
-
-  /* All longitudes meet at a pole, so relief that did not vanish there would
-   * tear the planet open along every meridian at once. */
   const spreadAt = (z) => {
     let lo = Infinity, hi = -Infinity;
     for (let x = 0; x < CIRC; x += 2.3) {
@@ -205,25 +213,35 @@ function sTerrain() {
     }
     return hi - lo;
   };
-  const POLE = planet.R * Math.PI / 2;
-  ok(spreadAt(POLE) < 1e-3, 'every longitude agrees on the height of the pole',
-    `spread ${f(spreadAt(POLE), 6)} m at the pole, ${f(spreadAt(POLE - 1), 3)} m a metre off it`);
+  const POLE = R * Math.PI / 2;
+  ok(spreadAt(POLE) < 1e-6, 'every longitude agrees on the height of the pole',
+    `spread ${f(spreadAt(POLE), 9)} m`);
 
-  // the lake is actually wet in the middle and dry outside
-  const [wa, wb] = plan.bandEdges(plan.LAKE);
-  const mid = (wa + wb) / 2;
-  ok(terrain.waterDepthAt(mid, 0) > 0.8, 'the lake has water in it',
-    `${f(terrain.waterDepthAt(mid, 0))} m deep at the middle`);
-  ok(terrain.waterDepthAt(wa - 3, 0) === 0 && terrain.waterDepthAt(wb + 3, 0) === 0,
-    'the lake stops at its own band');
-  ok(!terrain.walkableAt(mid, 0), 'he cannot walk into the lake');
-  ok(terrain.walkableAt(0, 0) && !terrain.walkableAt(0, BAND + 2),
-    'the field is walkable, and its edge is not');
+  /* No cliffs anywhere he can stand.  Stepped in metres of *ground*, which
+   * means dividing the longitude step by cos(latitude) — the same correction
+   * his own walk makes. */
+  let steep = 0, at = null;
+  for (let i = 0; i < 20000; i++) {
+    const z = R * Math.asin(-1 + (2 * i) / 20000);
+    const x = (i * 13.7) % CIRC;
+    if (!terrain.walkableAt(x, z)) continue;
+    const e = 0.4 / Math.max(0.08, Math.cos(z / R));
+    if (!terrain.walkableAt(x + e, z)) continue;
+    const d = Math.abs(heightAt(x + e, z) - heightAt(x, z));
+    if (d > steep) { steep = d; at = [x, z]; }
+  }
+  ok(steep < 0.22, 'no cliffs anywhere he can stand',
+    `worst rise ${f(steep, 3)} m per 0.4 m at ${at && at.map((v) => f(v, 1)).join(', ')}`);
 
-  // the shoreline is a contour, so it has to land between the band's edges
-  const s = terrain.shoreAt(0, -1);
-  ok(s > wa - 4 && s < mid, 'the shoreline is found where the bed crosses the water',
-    `x = ${f(s)} between ${f(wa - 4)} and ${f(mid)}`);
+  const lc = plan.CENTRE[plan.LAKE];
+  ok(terrain.waterDepthAt(lc.x, lc.z) > 0.8, 'the lake has water in it',
+    `${f(terrain.waterDepthAt(lc.x, lc.z))} m deep at the middle`);
+  ok(!terrain.walkableAt(lc.x, lc.z), 'he cannot walk into the lake');
+
+  const sh = terrain.lakeShore(0.7);
+  ok(sh.d > 6 && sh.d < plan.LAKE_R + 1 && terrain.waterDepthAt(sh.x, sh.z) < 0.03,
+    'and its shoreline is found where the bed crosses the water',
+    `${f(sh.d)} m out from the middle`);
 }
 
 function sPlanet() {
@@ -303,6 +321,103 @@ function sClock() {
     'the hour names line up with the phase they are indexed by');
 }
 
+function sOpen() {
+  const { R, CIRC } = plan;
+  /* **There is no edge to the world.**  The banded version had 26 m of
+   * walkable field and hillside you could not enter on either side of it;
+   * the only thing that may stop him now is water. */
+  let blocked = 0, wet = 0, n = 0;
+  for (let i = 0; i < 6000; i++) {
+    const z = R * Math.asin(-1 + (2 * i) / 6000);
+    const x = (i * 47.3) % CIRC;
+    n++;
+    if (terrain.walkableAt(x, z)) continue;
+    if (terrain.waterDepthAt(x, z) > 0.06) wet++; else blocked++;
+  }
+  ok(blocked === 0, 'nothing but water can stop him, anywhere on the planet',
+    `${n} samples, ${wet} of them in the lake`);
+
+  /* And he can prove it: walked in one direction for a full lap and a half,
+   * he should come back to where he started having never been stopped. */
+  const { hog, game, step, put } = makeWorld();
+  put(0, 0);
+  hog.hd = 0.9;                       // a diagonal, so it crosses latitudes
+  hog.speed = 4;                      // a brisk hedgehog, for the test's sake
+  let travelled = 0;
+  let overPole = false;
+  let px = hog.x, pz = hog.z;
+  for (let i = 0; i < 4200; i++) {
+    hog.target = null;
+    hog.tryStep(4 / 60, 1 / 60);
+    hog.y = terrain.heightAt(hog.x, hog.z);
+    travelled += plan.distance(px, pz, hog.x, hog.z);
+    if (Math.abs(hog.z) > plan.R * Math.PI / 2 - 3) overPole = true;
+    px = hog.x; pz = hog.z;
+  }
+  ok(travelled > 150, 'and one bearing held for 280 m of intent gets him most of the way',
+    `${f(travelled, 0)} m walked; the rest is the lake in the way`);
+  ok(Math.abs(hog.z) <= plan.R * Math.PI / 2 + 1e-9,
+    'and his coordinates survive going over the top of the world',
+    `${overPole ? 'he crossed a pole; ' : ''}ended ${f(hog.z, 1)} m from the equator`);
+}
+
+function sGait() {
+  const parts = buildHog();
+  const anim = createAnimator(parts, 1);
+  const s = { gait: 1, speed: HOG_SPD, curl: 0, shiver: 0, lookYaw: 0 };
+
+  /* **A planted foot does not slide.**  Track one foot's position in the
+   * world — how far he has travelled, plus how far forward the foot is of
+   * his hip — and while that foot is in stance the number must not change.
+   * Any drift at all is skate, and skate is the one cue that says puppet. */
+  const L = anim.legs[0];
+  let travelled = 0;
+  let drift = 0, samples = 0;
+  let prevWorld = null;
+  for (let i = 0; i < 1200; i++) {
+    const dt = 1 / 240;
+    anim.update(s, dt, i * dt);
+    travelled += s.speed * dt;
+    const world = travelled + L.fore;
+    if (L.stance && prevWorld !== null) {
+      drift = Math.max(drift, Math.abs(world - prevWorld));
+      samples++;
+    }
+    prevWorld = L.stance ? world : null;
+  }
+  ok(drift < 1e-4, 'a planted foot stays planted while he walks over it',
+    `worst slip ${(drift * 1000).toFixed(3)} mm per frame over ${samples} stance frames`);
+
+  /* The cycle is driven by ground covered, not by the clock: walked the same
+   * distance at two speeds, it must end in the same place. */
+  const runTo = (speed, metres) => {
+    const a = createAnimator(buildHog(), 1);
+    const st = { gait: 1, speed, curl: 0, shiver: 0, lookYaw: 0 };
+    const dt = 1 / 240;
+    const n = Math.round(metres / (speed * dt));
+    for (let i = 0; i < n; i++) a.update(st, dt, i * dt);
+    return a.state.cycle;
+  };
+  const slow = runTo(0.4, 3);
+  const fast = runTo(1.6, 3);
+  ok(Math.abs(slow - fast) < 1e-6, 'and the cycle is driven by ground, not by the clock',
+    `three metres at 0.4 and at 1.6 m/s both end at phase ${f(slow, 4)}`);
+
+  /* Cadence: fast enough to be a scurry, slow enough that you can see it. */
+  const hz = HOG_SPD / STRIDE;
+  ok(hz > 4 && hz < 8, 'and his cadence is one you can actually see',
+    `${f(hz, 1)} strides a second at ${f(HOG_SPD)} m/s`);
+
+  // both couplets down at once never happens; at least two feet always are
+  let worstDown = 4;
+  for (let i = 0; i < 400; i++) {
+    anim.update(s, 1 / 240, i / 240);
+    worstDown = Math.min(worstDown, anim.legs.filter((l) => l.stance).length);
+  }
+  ok(worstDown >= 2, 'and he always has at least two feet on the ground',
+    `worst ${worstDown} — a hedgehog has no suspension phase`);
+}
+
 function sFace() {
   const parts = buildHog();
   const { A, B, C } = HOG_BODY;
@@ -347,22 +462,25 @@ function sFace() {
 
 function sWalk() {
   const { hog, game, step, put } = makeWorld();
-  put(285, 0);
+  const c = plan.CENTRE[plan.MEADOW];
+  put(c.x, c.z);
   hog.hd = 0;
   hog.speed = HOG_SPD;
-  game.call(291, 3);
-  step(600);
-  const d = Math.hypot(plan.wrapDelta(hog.x, 291), hog.z - 3);
+  const to = plan.offsetFrom(c, 5, 4);
+  game.call(to.x, to.z);
+  step(700);
+  const d = plan.distance(hog.x, hog.z, to.x, to.z);
   ok(d < 0.12, 'called six metres off, he arrives', `${f(d, 3)} m short`);
   ok(hog.target === null, 'and the call is spent when he gets there');
   ok(hog.gait < 0.05, 'and he stops', `gait ${f(hog.gait)}`);
-  ok(hog.walked > 6 && hog.walked < 9, 'by roughly the direct route',
-    `${f(hog.walked, 1)} m walked for a 6.7 m call`);
+  ok(hog.walked > 6 && hog.walked < 9.5, 'by roughly the direct route',
+    `${f(hog.walked, 1)} m walked for a 6.4 m call`);
 }
 
 function sIdle() {
   const { hog, step, put } = makeWorld();
-  put(285, 0);
+  const c = plan.CENTRE[plan.MEADOW];
+  put(c.x, c.z);
   step(60);                       // let the arrival settle
   const x0 = hog.x, z0 = hog.z;
   step(1800);                     // thirty seconds of nobody calling him
@@ -375,30 +493,44 @@ function sIdle() {
 
 function sBack() {
   const { hog, game, step, put } = makeWorld();
-  put(285, 0);
-  hog.hd = 0;                     // facing east, called west
-  game.call(279, 0);
-  /* Sampled while he is walking, not after he arrives.  Standing still he
-   * glances about — which is the point of him — so his heading at the end of
-   * the leg is whatever he last looked at. */
-  let walkingHd = 0;
-  step(700, 1 / 60, () => { if (hog.gait > 0.8) walkingHd = hog.hd; });
-  const d = plan.wrapDelta(hog.x, 285);
-  ok(d < -5.5, 'he turns round and walks back the way he came',
-    `${f(d, 2)} m behind where he started`);
-  ok(Math.abs(walkingHd) > 2.9, 'and he walks it facing that way, the short way round',
-    `heading ${f(walkingHd, 2)} rad while moving`);
+  const c = plan.CENTRE[plan.MEADOW];
+  put(c.x, c.z);
+  const back = plan.offsetFrom(c, -6, 0);
+
+  /* Pointed 149° away from where he is about to be called, so the short way
+   * round is unambiguous.  v1's rule: **no forward clamp on his heading** —
+   * he can be sent anywhere — and turning uses `wrapAng`, without which he
+   * takes the long way to anything behind him. */
+  const aim = plan.bearing(hog.x, hog.z, back.x, back.z).angle;
+  hog.hd = wrapAng(aim + 2.6);
+  game.call(back.x, back.z);
+
+  let turned = 0;
+  let prev = hog.hd;
+  let walkingHd = hog.hd;
+  step(700, 1 / 60, () => {
+    turned += wrapAng(hog.hd - prev);
+    prev = hog.hd;
+    if (hog.gait > 0.8) walkingHd = hog.hd;
+  });
+
+  const d = plan.distance(hog.x, hog.z, back.x, back.z);
+  ok(d < 0.2, 'he turns round and walks to a target behind him',
+    `${f(plan.distance(hog.x, hog.z, c.x, c.z), 2)} m from where he started`);
+  ok(Math.abs(turned) < Math.PI, 'and turns the short way round, not the long way',
+    `${f(turned, 2)} rad of turning for a ${f(wrapAng(aim - (aim + 2.6)), 2)} rad correction`);
+  ok(Math.abs(wrapAng(walkingHd - aim)) < 0.25, 'and walks it pointing at the target',
+    `${f(wrapAng(walkingHd - aim), 3)} rad off`);
 }
 
 function sWater() {
   const { hog, game, step, put } = makeWorld();
-  const [wa, wb] = plan.bandEdges(plan.LAKE);
-  /* Off the boat's line.  Run down the middle of the field this walks him
-   * straight onto the mooring and he is ferried across — which is correct,
-   * and is `boat` below, and is not what this scenario is asking. */
-  const z = 5;
-  put(wa - 6, z);
-  game.call((wa + wb) / 2, z);    // dead centre of the water
+  const lake = plan.CENTRE[plan.LAKE];
+  /* Approached across the boat's line, so he is not simply ferried — that is
+   * `boat` below, and it is correct, and it is not what this asks. */
+  const start = plan.offsetFrom(lake, 0, plan.LAKE_R + 6);
+  put(start.x, start.z);
+  game.call(lake.x, lake.z);      // dead centre of the water
   let wettest = 0;
   step(900, 1 / 60, () => {
     wettest = Math.max(wettest, terrain.waterDepthAt(hog.x, hog.z));
@@ -413,17 +545,19 @@ function sWater() {
    * `walkableAt` tolerates 60 mm of water so that a shore which is a hair wet
    * does not become an invisible wall, so he legitimately stands a hand's
    * breadth past the contour. */
-  const short = plan.wrapDelta(terrain.shoreAt(z, -1), hog.x);
-  ok(short > -0.4 && short < 2.5, 'he waits at the shore instead',
-    `${f(short, 2)} m from the waterline`);
+  const out = plan.arcTo(lake, hog.x, hog.z);
+  const shore = terrain.lakeShore(Math.PI / 2).d;
+  ok(out > shore - 0.4 && out < shore + 3, 'he waits at the shore instead',
+    `${f(out - shore, 2)} m from the waterline`);
 }
 
 function sBoat() {
   const { hog, game, step, put, world } = makeWorld();
   const boat = world.out.boat;
-  const [wa, wb] = plan.bandEdges(plan.LAKE);
-  put(boat.moorA.x - 2.5, 0);
-  game.call(boat.moorA.x, 0);     // walk to the mooring
+  const lake = plan.CENTRE[plan.LAKE];
+  const start = plan.offsetFrom(lake, terrain.lakeShore(0).d + 2.5, 0);
+  put(start.x, start.z);
+  game.call(boat.moorA.x, boat.moorA.z);     // walk to the mooring
   let boarded = false;
   let wettest = 0;
   step(1400, 1 / 60, () => {
@@ -431,12 +565,12 @@ function sBoat() {
     if (!hog.afloat) wettest = Math.max(wettest, terrain.waterDepthAt(hog.x, hog.z));
   });
   ok(boarded, 'he gets into the boat when he reaches the mooring');
-  /* Past the far *waterline*, which is inside the band's nominal edge — the
-   * band edge is where the bank starts, not where the water stops. */
-  const far = terrain.shoreAt(0, 1);
-  ok(hog.x > far && terrain.waterDepthAt(hog.x, hog.z) === 0,
-    'and it puts him down on dry land on the far shore',
-    `x = ${f(hog.x, 1)}, past the waterline at ${f(far, 1)}`);
+  /* Set down on the far side of the lake, on dry land: the diameter of the
+   * water away from where he got in. */
+  const across = plan.distance(hog.x, hog.z, start.x, start.z);
+  ok(across > plan.LAKE_R && terrain.waterDepthAt(hog.x, hog.z) === 0,
+    'and it puts him down on dry land on the far side',
+    `${f(across, 1)} m across, against a ${f(plan.LAKE_R, 1)} m lake radius`);
   ok(hog.afloat === null && wettest === 0,
     'ashore at both ends, and never in the water on his own feet');
 }
@@ -446,15 +580,18 @@ function crossing({ atCulvert, runs = 12 }) {
   const w = makeWorld();
   const { hog, game, step, put, world } = w;
   const cv = world.out.culvert;
-  const z = atCulvert ? cv.z : cv.z + 6;
+  // in the road's own frame: `along` the ring, `across` it
+  const along = atCulvert ? cv.along : cv.along + 9;
   let bitten = 0;
   let wentUnder = 0;
   for (let r = 0; r < runs; r++) {
     game.state.hearts = 3;
-    put(cv.a - 0.3, z);
-    hog.hd = 0;
+    const from = plan.roadPoint(along, -(cv.half + 0.3));
+    const to = plan.roadPoint(along, cv.half + 1.4);
+    put(from.x, from.z);
+    hog.hd = plan.bearing(from.x, from.z, to.x, to.z).angle;
     step(90);                       // let the traffic get going
-    game.call(cv.b + 1.4, z);
+    game.call(to.x, to.z);
     let under = false;
     step(1200, 1 / 60, () => { if (hog.under) under = true; });
     if (under) wentUnder++;
@@ -548,28 +685,44 @@ function sGrass() {
   const t0 = Date.now();
   const grass = buildGrass(root);
   const built = Date.now() - t0;
-  ok(grass.chunks.length > 100, 'the meadow builds in chunks',
-    `${grass.chunks.length} chunks, ${grass.blades} tufts, ${built} ms`);
+
+  const c = plan.CENTRE[plan.MEADOW];
+  grass.prime(c.x, c.z);
+  ok(grass.liveCells > 20 && grass.blades > 8000,
+    'the meadow streams in around him',
+    `${grass.liveCells} cells, ${grass.blades} tufts, ${built + 0} ms to build the pool`);
+
+  /* The pool has to be big enough for everything in view, or patches flicker
+   * in and out at the rim as he turns. */
+  ok(grass.liveCells <= grass.cells.POOL, 'and the pool covers the whole view',
+    `${grass.liveCells} of ${grass.cells.POOL}`);
+
+  /* Walked a long way, it must still be full — a leak in the recycling shows
+   * up as a meadow that thins out the further you go. */
+  let x = c.x, z = c.z;
+  for (let i = 0; i < 900; i++) {
+    x += 0.06 / Math.max(0.1, Math.cos(z / plan.R));
+    z += 0.03;
+    grass.update(1 / 60, x, z, 0);
+  }
+  grass.prime(x, z);
+  ok(grass.liveCells > 20 && grass.blades > 8000,
+    'and it is still full after eighty metres of walking',
+    `${grass.liveCells} cells, ${grass.blades} tufts`);
 
   /* The bug this exists for: `SEA_DEN` for summer is 1.06, which in v1
-   * multiplied a spawn count.  Here it multiplies `InstancedMesh.count`, and
-   * a count past the end of the buffer draws **nothing at all** — so summer
-   * had no grass in it and nothing was logged. */
+   * multiplied a spawn count.  Here it trims a draw count, and a count past
+   * the end of the buffer draws **nothing at all**. */
   let over = 0, empty = 0;
-  for (const [len, den, name] of [[0.86, 0.94, 'spring'], [1.10, 1.06, 'summer'],
-    [1.00, 0.96, 'autumn'], [0.58, 0.55, 'winter']]) {
+  for (const [len, den] of [[0.86, 0.94], [1.10, 1.06], [1.00, 0.96], [0.58, 0.55]]) {
     grass.setSeason(len, den);
-    for (const c of grass.chunks) {
-      if (c.count > c.userData.maxCount) over++;
-      if (c.count < 1) empty++;
+    for (const im of grass.chunks) {
+      if (im.count > im.userData.full) over++;
+      if (im.userData.full > 0 && im.count < 1) empty++;
     }
   }
-  ok(over === 0, 'no season asks for more blades than were allocated', `${over} over`);
-  ok(empty === 0, 'and no season empties a chunk', `${empty} empty`);
-
-  grass.setSeason(1.10, 1.06);
-  const full = grass.chunks.every((c) => c.count === c.userData.maxCount);
-  ok(full, 'summer draws the whole field');
+  ok(over === 0 && empty === 0, 'no season asks for more blades than were allocated',
+    `${over} over, ${empty} empty`);
 }
 
 function sNan() {
@@ -603,15 +756,15 @@ function sNan() {
   }
   ok(badH === 0, 'and the ground has a finite height everywhere on the planet');
 
-  ok(world.stats.wrapped > 1000, 'the bake wrapped the world',
-    `${world.stats.wrapped} meshes, ${(world.stats.tris / 1000).toFixed(0)}k triangles, ` +
+  ok(world.stats.wrapped + world.stats.rigid > 500, 'the bake seated the world',
+    `${world.stats.rigid} props seated rigidly, ${world.stats.wrapped} meshes bent, ` +
     `${(world.stats.instanced / 1000).toFixed(0)}k instances`);
 }
 
 /* ================================== run =================================== */
 const SCENARIOS = {
   plan: sPlan, terrain: sTerrain, planet: sPlanet, clock: sClock,
-  face: sFace, walk: sWalk, idle: sIdle, back: sBack, water: sWater, boat: sBoat,
+  open: sOpen, gait: sGait, face: sFace, walk: sWalk, idle: sIdle, back: sBack, water: sWater, boat: sBoat,
   road: sRoad, roadmiss: sRoadmiss, abandon: sAbandon,
   burrow: sBurrow, grass: sGrass, nan: sNan,
 };

@@ -3,8 +3,6 @@ import { cel, flat } from '../core/toon.js';
 import { PAL } from '../core/palette.js';
 import { petalTex, blobTex } from '../core/textures.js';
 import { rngKit, clamp, lerp, TAU, bake, trs, shadowify } from '../core/util.js';
-import { heightAt, waterDepthAt } from './terrain.js';
-import { hardAt } from './plan.js';
 
 /* ------------------------------------------------------------------ *
  * The parts everything else is made of.
@@ -243,31 +241,36 @@ export function reeds({ seed = 13, n = 22, h = 0.32, r = 0.4 } = {}) {
   return shadowify(mesh, true, true);
 }
 
-/** Post and rail fence, following the ground along a line of x. */
-export function fenceRun({ x0, x1, z, seed = 17, postEvery = 1.6, h = 0.55 }) {
+/**
+ * One fence post with its two rails running off to the next one.
+ *
+ * A fence used to be a single merged mesh spanning twenty metres, which was
+ * fine along an equator and is not fine on an open globe: bent onto the
+ * sphere, geometry is squashed along longitude by `cos(latitude)`.  Built
+ * post by post and seated rigidly, every post stands up straight wherever it
+ * is, and the rails only have to span the metre and a half between two of
+ * them.
+ */
+export function fencePost({ seed = 17, h = 0.55, span = 0, ahead = 0 } = {}) {
   const rng = rngKit(seed * 2237);
   const g = new THREE.Group();
-  const parts = [];
-  const n = Math.max(2, Math.round(Math.abs(x1 - x0) / postEvery));
-  for (let i = 0; i <= n; i++) {
-    const x = lerp(x0, x1, i / n);
-    const y = heightAt(x, z);
-    const hh = h * rng.range(0.94, 1.06);
-    const pg = new THREE.BoxGeometry(0.07, hh, 0.07);
-    pg.translate(0, hh / 2, 0);
-    parts.push({ geometry: pg, matrix: trs(x, y, z, 0, rng.range(-0.08, 0.08), rng.range(-0.05, 0.05)) });
-
-    if (i < n) {
-      const xa = lerp(x0, x1, i / n), xb = lerp(x0, x1, (i + 1) / n);
-      for (const rail of [0.62, 0.92]) {
-        const len = Math.abs(xb - xa);
-        const rg = new THREE.BoxGeometry(len, 0.045, 0.03);
-        const ya = (heightAt(xa, z) + heightAt(xb, z)) / 2 + h * rail;
-        parts.push({ geometry: rg, matrix: trs((xa + xb) / 2, ya, z) });
-      }
+  const mat = MAT.timber();
+  const hh = h * rng.range(0.94, 1.06);
+  const pg = new THREE.BoxGeometry(0.07, hh, 0.07);
+  pg.translate(0, hh / 2, 0);
+  const post = new THREE.Mesh(pg, mat);
+  post.rotation.y = rng.range(-0.08, 0.08);
+  g.add(post);
+  if (span > 0) {
+    for (const rail of [0.62, 0.92]) {
+      const rg = new THREE.BoxGeometry(span, 0.045, 0.03);
+      rg.translate(span / 2, 0, 0);
+      const r = new THREE.Mesh(rg, mat);
+      r.position.y = h * rail;
+      r.rotation.y = -ahead;
+      g.add(r);
     }
   }
-  g.add(new THREE.Mesh(bake(parts), MAT.timber()));
   return shadowify(g);
 }
 
@@ -348,33 +351,6 @@ export function contactShadow(size = 0.6, opacity = 0.26) {
   m.userData.noOutline = true;
   m.renderOrder = 1;
   return m;
-}
-
-/**
- * Scatter helper.  Refuses hard ground and water, so no builder has to
- * remember to — v1's thorns had exactly this rule and it is why they never
- * grew on tarmac.
- */
-export function scatter(rng, { x0, x1, z0, z1, n, minGap = 0.4, avoidWater = true }, make) {
-  const placed = [];
-  let guard = 0;
-  while (placed.length < n && guard++ < n * 30) {
-    const x = rng.range(x0, x1);
-    const z = rng.range(z0, z1);
-    if (hardAt(x) > 0.4) continue;
-    if (avoidWater && waterDepthAt(x, z) > 0) continue;
-    let clash = false;
-    for (const p of placed) {
-      if (Math.hypot(p.x - x, p.z - z) < minGap) { clash = true; break; }
-    }
-    if (clash) continue;
-    const obj = make(x, z, placed.length);
-    if (obj) {
-      obj.position.set(x, heightAt(x, z), z);
-      placed.push({ x, z, obj });
-    }
-  }
-  return placed;
 }
 
 export { MAT as PROP_MAT };

@@ -34,23 +34,32 @@ thing about v1 worth refusing to give up.
 
 ## The shape of it
 
-**Ten places of thirty metres is a three-hundred-metre round, so the planet's
-radius is 47.75 m.** That number is derived, not chosen, and everything else
-follows from it: the walk lies on the equator and closes into itself with no
-seam, the horizon from the camera is about eleven metres away, and the field
-you can walk in is ±13 m of latitude with open hillside beyond it and poles a
-quarter-lap out at ±75 m.
+**The world is open.** There is no edge, no band and no corridor: you can set
+off in any direction at all and keep going, over the poles and round again.
+The only thing that can stop him is water.
 
-The ring, in order — and the order is v1's, where **neighbours must share
-something**:
+**The ten places are the vertices of a pentagonal antiprism** — an icosahedron
+with its two poles taken off. Five sit at latitude +26.565° and five at
+-26.565°, the lower ring turned 36° against the upper. Every place is exactly
+52.9 m from its four neighbours, every square metre of the planet belongs to
+one, and walking in a straight line takes you through them.
+
+v1's ordering rule survives, because the antiprism has a zigzag path that
+visits all ten and closes on itself. That path is the old walk, still in there
+as one route among many:
 
 > the butterfly garden · the wood · the mushroom garden · the lake · the mire ·
 > the hen run · the farmyard · the road · the edge of town · the long meadow
 
-Two of those run the full width of the field and are therefore unavoidable, so
-each comes with its own way across: **the road has a culvert**, and **the lake
-has a boat**. That rule is v1's and it is the sharpest thing in either build —
-a hazard that cannot be dodged is not a hazard, it is a wall.
+The planet is 300 m round, so its radius is 47.75 m and the horizon from the
+camera is about eleven metres away.
+
+**The road is the one thing you cannot walk round.** It is the great circle
+through the roadside and the town, so it goes all the way over the planet —
+and it keeps v1's sharpest rule alive, that a hazard which cannot be dodged is
+not a hazard but a wall. There is a culvert under it. The lake is a lake now
+rather than an ocean, so the boat is the *short* way across rather than the
+only way, which is a better thing for a boat to be.
 
 ## What is different from v1
 
@@ -86,7 +95,7 @@ src/
 │   ├── terrain.js       heightAt — the one answer to how high the ground is
 │   ├── planet.js        flat authoring bent onto the sphere, once, after the build
 │   ├── ground.js        the terrain grid and the lake surface
-│   ├── grass.js         250 instanced chunks, season in two uniforms
+│   ├── grass.js         streams the meadow; wind and him, in the shader
 │   ├── season.js        the year and the day, and every colour they touch
 │   ├── weather.js       rain, snow, leaves, petals, motes, fireflies
 │   ├── props.js         trees, brambles, mushrooms, fence, the burrow
@@ -94,14 +103,15 @@ src/
 │   └── places/          the ten builders
 ├── hog/
 │   ├── model.js         the character — read the badge before touching it
-│   └── hog.js           the walk, the gait, the curl
+│   ├── anim.js          the gait, the blink, the sniff, the ear flick
+│   └── hog.js           steering, calling, and being hurt
 └── game/game.js         hearts, legs, the burrow, hazards, sowing
 ```
 
-`smoke.js` is the headless harness: `node smoke.js` runs all fifteen
-scenarios, or name one — `node smoke.js roadmiss` measures how dangerous the
-open tarmac is, `node smoke.js terrain` checks the ground closes at the seam
-and agrees with itself at the poles. It drives the real modules, not a copy of
+`smoke.js` is the headless harness: `node smoke.js` runs all seventeen
+scenarios, or name one — `node smoke.js gait` proves a planted foot does not
+slide, `node smoke.js open` proves there is no edge to the world, `node
+smoke.js roadmiss` measures how dangerous the open tarmac is. It drives the real modules, not a copy of
 them; three.js runs in Node as long as nobody asks it for a WebGL context.
 
 `HANDOVER.md` is the one to read before changing anything. As with v1, most of

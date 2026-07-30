@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { cel } from '../core/toon.js';
-import { CIRC, wrapDelta } from './plan.js';
-import { heightAt, SPHERE_CLEARANCE } from './terrain.js';
+import { R, CIRC, wrapDelta } from './plan.js';
 
 /* ------------------------------------------------------------------ *
  * The planet.
@@ -28,8 +27,8 @@ import { heightAt, SPHERE_CLEARANCE } from './terrain.js';
  * anything.
  * ------------------------------------------------------------------ */
 
-/** Planet radius in metres — derived from the round of places. */
-export const R = CIRC / (2 * Math.PI);
+/** Planet radius in metres. Defined with the places, in `plan.js`. */
+export { R };
 
 /** Sphere centre, chosen so the flat origin sits on the surface with +Y up. */
 export const CENTER = new THREE.Vector3(0, -R, 0);
@@ -325,67 +324,7 @@ export function bakeToPlanet(root, { maxEdge = 2.2 } = {}) {
   return stats;
 }
 
-/* ------------------------------- the sphere ------------------------------- */
-
-/**
- * The globe itself: what you see out past the terrain grid, and the whole
- * of the far hemisphere from orbit.
- *
- * An icosphere rather than a UV sphere — even triangles, no pole pinch.
- * Detail 18 is derived, not guessed: `PolyhedronGeometry` splits each
- * icosahedron edge into `detail + 1`, so the facet is 1.0515 R / 19 = 2.6 m
- * and its centre sags below the true sphere by about e²/6R = 24 mm, safely
- * inside the 65 mm the terrain grid clears it by.  At detail 6 the sag would
- * be 0.24 m and the sphere would stand proud of the field.
- */
-export function buildPlanet(scene) {
-  const group = new THREE.Group();
-  group.name = 'planet';
-
-  const geo = new THREE.IcosahedronGeometry(R, 18);
-  const pos = geo.attributes.position;
-  const n = new THREE.Vector3();
-  const p = new THREE.Vector3();
-  const flat = { x: 0, z: 0, y: 0 };
-
-  for (let i = 0; i < pos.count; i++) {
-    n.set(pos.getX(i), pos.getY(i), pos.getZ(i)).normalize();
-    p.copy(n).multiplyScalar(R).add(CENTER);
-    flatAt(p, flat);
-    const h = heightAt(flat.x, flat.z) - SPHERE_CLEARANCE;
-    p.copy(n).multiplyScalar(R + h).add(CENTER);
-    pos.setXYZ(i, p.x, p.y, p.z);
-  }
-  pos.needsUpdate = true;
-
-  /* Normals from the sphere, not from the faces.  The geometry is
-   * non-indexed, so `computeVertexNormals()` gives every vertex of a
-   * triangle the face normal — flat shading whatever the material asks for.
-   * On a 2.6 m facet that is invisible as shape and very visible as tone:
-   * the toon ramp quantises per facet and the terminator becomes a staircase
-   * of triangles marching round the planet.  Every vertex here is on a
-   * sphere about CENTER, so its normal is simply the radial direction. */
-  const nrm = new Float32Array(pos.count * 3);
-  for (let i = 0; i < pos.count; i++) {
-    n.set(pos.getX(i), pos.getY(i), pos.getZ(i)).sub(CENTER).normalize();
-    nrm[i * 3] = n.x; nrm[i * 3 + 1] = n.y; nrm[i * 3 + 2] = n.z;
-  }
-  geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
-
-  /* Four bands rather than three: over a whole sphere the terminator sweeps
-   * through every angle, and three make it read as a coarse polyhedron. */
-  const land = new THREE.Mesh(
-    geo,
-    cel({ color: 0x93a878, bands: 4, tint: 0x6f6a92, flat: false, role: 'far' })
-  );
-  land.receiveShadow = true;
-  /* Must NOT cast: a planet-sized closed sphere renders its far hemisphere
-   * into the shadow map and drops the whole surface into its own shadow. */
-  land.castShadow = false;
-  land.frustumCulled = false;
-  land.name = 'planetLand';
-  group.add(land);
-
-  scene.add(group);
-  return { group, land };
-}
+/* The globe itself used to be built here, as a bare sphere under a separate
+ * terrain grid.  It is `ground.js` now, and it *is* the terrain: one surface,
+ * displaced by `heightAt`, coloured by place.  Two surfaces that had to agree
+ * to within 65 mm are one surface that cannot disagree with itself. */

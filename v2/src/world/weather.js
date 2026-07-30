@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { PAL } from '../core/palette.js';
 import { starTex, petalTex } from '../core/textures.js';
 import { rngKit, clamp, lerp, TAU } from '../core/util.js';
-import { positionAt, basisAt, flatAt } from './planet.js';
+import { positionAt, basisAt } from './planet.js';
 import { placeAmt, BGARD, WOOD, LAKE } from './plan.js';
 
 /* ------------------------------------------------------------------ *
@@ -139,8 +139,8 @@ export function createWeather(scene) {
       t += dt;
 
       const wet = state.wet;
-      const gardenPetals = placeAmt(hog.x, BGARD) * state.w[0];
-      const woodLeaves = clamp(state.leafFall * (0.5 + placeAmt(hog.x, WOOD) * 0.8), 0, 1);
+      const gardenPetals = placeAmt(hog.x, hog.z, BGARD) * state.w[0];
+      const woodLeaves = clamp(state.leafFall * (0.5 + placeAmt(hog.x, hog.z, WOOD) * 0.8), 0, 1);
 
       rain.set(wet * (1 - state.snowFall) * 0.9);
       snow.set(state.snowFall);
