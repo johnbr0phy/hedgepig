@@ -155,8 +155,12 @@ export class Hog {
 
   /** Aim his features at a point on screen — a damped yaw, since he has no neck. */
   lookAtScreen(dxNorm) {
-    // his neck stops at 1.35 rad; his eyes do not
-    this.lookYawTarget = clamp(dxNorm * 1.6, -1.35, 1.35);
+    /* v1's neck stopped at 1.35 rad, but that was a *head* being aimed, with
+     * visibility ramps fading each feature as it turned away.  He has no
+     * head and no ramps: what moves is the features sliding across his
+     * front, and past about half a radian his nose is on his cheek however
+     * correctly it is placed.  A glance, not a turn. */
+    this.lookYawTarget = clamp(dxNorm * 0.62, -0.5, 0.5);
     this.lookLock = 1.4;
   }
 
@@ -274,7 +278,8 @@ export class Hog {
     if (this.lookLock > 0) this.lookLock -= dt;
     else this.lookYawTarget = damp(this.lookYawTarget, 0, 1.2, dt);
     this.lookYaw = damp(this.lookYaw, this.lookYawTarget, 6, dt);
-    p.face.rotation.y = this.lookYaw * (1 - this.curl);
+    // an ellipsoid-preserving slide across his front — see `setLook`
+    p.setLook(this.lookYaw * (1 - this.curl));
 
     // a snuffling dip of the whole front while he stands
     const sn = Math.sin(now * 5.2) * 0.5 + Math.sin(now * 2.1) * 0.5;

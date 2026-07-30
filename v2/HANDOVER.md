@@ -157,6 +157,31 @@ height, which quietly *corrected* a constructor that had put the snout on top
 of his head. The model was wrong and the animation covered for it. The snuffle
 rides on `userData.restY` now.
 
+### Looking about is done in his own space, not in world space
+
+His features are on an ellipsoid 130 mm long and 88 mm wide. Rotating the face
+group about Y holds every one of them at a **constant distance from that
+axis**, which is right for a sphere and wrong for him: as a feature swings
+toward his flank the surface falls away beneath it and the feature is left
+hanging in the air beside him. His nose sits 147 mm out on the snout and his
+side is only 73 mm out, so at v1's 1.35 rad neck limit it flew **48 mm clear of
+his cheek** — 18 % of his whole body length, and from outside it looks exactly
+like what it was reported as: his eyes leaving his face.
+
+`setLook` scales into unit-sphere space, rotates there, and scales back, which
+maps the ellipsoid exactly onto itself; each feature is *placed* by that map
+and then turned rigidly, so nothing is stretched by it. `smoke.js face` asserts
+the invariant directly — the depth of every feature into the body must not
+change at any angle — and it holds to 4×10⁻¹⁶.
+
+Two things fell out of it. The **snout had to move into the face group**: the
+nose, mouth and whiskers all sit on it, so it has to swing with them or his
+nose is left behind. And the **glance had to get much smaller** — v1's 1.35 rad
+was a *head* being aimed, with visibility ramps fading each feature as it
+turned away. He has no head and no ramps, so past about half a radian his nose
+is on his cheek however correctly it is placed. It is 0.5 rad now: a glance,
+not a turn.
+
 ### The coat's edge is a brow line, not two circles
 
 The keep-out round his eyes was two separate circles, and between them the coat

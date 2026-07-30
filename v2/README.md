@@ -98,7 +98,7 @@ src/
 └── game/game.js         hearts, legs, the burrow, hazards, sowing
 ```
 
-`smoke.js` is the headless harness: `node smoke.js` runs all fourteen
+`smoke.js` is the headless harness: `node smoke.js` runs all fifteen
 scenarios, or name one — `node smoke.js roadmiss` measures how dangerous the
 open tarmac is, `node smoke.js terrain` checks the ground closes at the seam
 and agrees with itself at the poles. It drives the real modules, not a copy of

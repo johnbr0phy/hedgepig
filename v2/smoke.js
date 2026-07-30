@@ -16,6 +16,7 @@
  *
  * Scenarios
  *   plan terrain planet clock      pure geometry and arithmetic, no world
+ *   face                           his features stay on his face
  *   walk idle back water boat      the loop: he goes, he stops, he refuses
  *   road roadmiss abandon          the hazards, and v1's invincibility bug
  *   burrow grass nan               progression, the meadow, and finite maths
@@ -57,6 +58,7 @@ const { buildWorld } = await import('./src/world/index.js');
 const { buildPlaces } = await import('./src/world/places/index.js');
 const { buildGrass } = await import('./src/world/grass.js');
 const { Hog, HOG_SPD } = await import('./src/hog/hog.js');
+const { buildHog, HOG_BODY } = await import('./src/hog/model.js');
 const { createGame } = await import('./src/game/game.js');
 const { CULVERT_Z } = await import('./src/world/places/road.js');
 
@@ -299,6 +301,48 @@ function sClock() {
 
   ok(HOURS[0] === 'noon' && HOURS[4] === 'deep night',
     'the hour names line up with the phase they are indexed by');
+}
+
+function sFace() {
+  const parts = buildHog();
+  const { A, B, C } = HOG_BODY;
+  /* How far out on the body a point is: 1.0 is exactly on the surface.  The
+   * whole invariant is that **looking about must not change this for any
+   * feature** — that is what "on his face" means. */
+  const depth = (p) => Math.hypot(p.x / A, p.y / B, p.z / C);
+  const rest = parts.lookParts.map((p) => depth(p.rest));
+
+  let worst = 0;
+  for (let yaw = -0.5; yaw <= 0.5001; yaw += 0.02) {
+    parts.setLook(yaw);
+    parts.lookParts.forEach((p, i) => {
+      worst = Math.max(worst, Math.abs(depth(p.obj.position) - rest[i]));
+    });
+  }
+  parts.setLook(0);
+  ok(worst < 1e-9, 'his features stay on his surface at every angle he looks',
+    `worst drift ${worst.toExponential(1)} of a body radius, over ${parts.lookParts.length} features`);
+
+  /* The failure this replaces, measured: a plain rotation about Y holds each
+   * feature at a fixed distance from the axis, and his side is a great deal
+   * closer in than his nose is far out. */
+  const nose = parts.lookParts.find((p) => p.obj === parts.nose);
+  /* Measured at 1.35 rad, which is what the build actually shipped: v1's
+   * neck limit, taken across to a face that has no head to turn. */
+  const yaw = 1.35;
+  const naive = {
+    x: nose.rest.x * Math.cos(yaw) + nose.rest.z * Math.sin(yaw),
+    y: nose.rest.y,
+    z: -nose.rest.x * Math.sin(yaw) + nose.rest.z * Math.cos(yaw),
+  };
+  const flew = (depth(naive) - depth(nose.rest)) * C;
+  ok(flew > 0.03, 'and a plain Y rotation would not — which is the bug this locks down',
+    `his nose would hang ${(flew * 1000).toFixed(0)} mm clear of him at the old 1.35 rad`);
+
+  const hog = new Hog(makeWorld().world, { model: false });
+  hog.lookAtScreen(1);
+  ok(Math.abs(hog.lookYawTarget) <= 0.5 + 1e-9, 'and the glance is a glance, not a turn',
+    `${f(hog.lookYawTarget, 2)} rad at full deflection`);
 }
 
 function sWalk() {
@@ -567,7 +611,7 @@ function sNan() {
 /* ================================== run =================================== */
 const SCENARIOS = {
   plan: sPlan, terrain: sTerrain, planet: sPlanet, clock: sClock,
-  walk: sWalk, idle: sIdle, back: sBack, water: sWater, boat: sBoat,
+  face: sFace, walk: sWalk, idle: sIdle, back: sBack, water: sWater, boat: sBoat,
   road: sRoad, roadmiss: sRoadmiss, abandon: sAbandon,
   burrow: sBurrow, grass: sGrass, nan: sNan,
 };

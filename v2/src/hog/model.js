@@ -47,10 +47,10 @@ import { blobTex } from '../core/textures.js';
 
 export const HOG_LEN = 0.26;
 
-const A = HOG_LEN / 2;          // half length, along the snout
-const B = 0.079;                // half height
-const C = 0.088;                // half width
-const BODY_Y = 0.083;           // centre of the body above his feet
+/** His body's half-axes, exported so the harness can check features stay on it. */
+export const HOG_BODY = { A: HOG_LEN / 2, B: 0.079, C: 0.088, BODY_Y: 0.083 };
+
+const { A, B, C, BODY_Y } = HOG_BODY;   // length, height, width, and his height off the ground
 
 /** Front-and-down: the mantle is everything that is NOT within this cone. */
 const FRONT = new THREE.Vector3(0.80, -0.60, 0).normalize();
@@ -96,7 +96,6 @@ export function buildHog() {
   snout.position.set(SNOUT.x, SNOUT.y, 0);
   snout.castShadow = true;
   snout.userData.restY = SNOUT.y;
-  body.add(snout);
 
   /** Where the body's surface is, at a given height and distance forward. */
   const surfaceZ = (x, y) => {
@@ -111,6 +110,11 @@ export function buildHog() {
   const face = new THREE.Group();
   face.position.y = BODY_Y;
   root.add(face);
+  /* The snout belongs to the face, not to the body: it is a feature, and the
+   * nose, mouth and whiskers all sit on it, so it has to swing with them or
+   * his nose leaves his snout behind.  The two groups share an origin — both
+   * sit at BODY_Y — so nothing about its coordinates changes. */
+  face.add(snout);
 
   const eyeMat = cel({ color: PAL.hogEye, bands: 2, tint: 0x4a4058, flat: false });
   const noseMat = cel({ color: PAL.hogNose, bands: 2, tint: 0x4a4058, flat: false });
@@ -440,8 +444,42 @@ export function buildHog() {
   shadow.renderOrder = 1;
   root.add(shadow);
 
+  /* ------------------------------- looking ------------------------------- *
+   * **The yaw is done in the body's own space, not in world space.**
+   *
+   * Rotating the face group about Y keeps every feature at a constant
+   * distance from that axis — which is right for a sphere and wrong for
+   * him.  He is 130 mm long and 88 mm wide, so as a feature swings toward
+   * his flank the surface falls away beneath it and the feature is left
+   * hanging in the air beside him.  His nose was the worst of it: it sits
+   * 147 mm out on the snout and his side is only 73 mm out, so it flew a
+   * full 70 mm clear of his cheek — which is what "his eyes leave his face"
+   * looks like from outside.
+   *
+   * Scaling to a unit sphere, rotating there, and scaling back maps the
+   * ellipsoid exactly onto itself, so a feature that starts on his surface
+   * stays on it at every angle.  Each feature is *placed* by that map and
+   * then turned rigidly, so nothing is stretched by it.
+   */
+  const lookParts = face.children.map((c) => ({
+    obj: c,
+    rest: c.position.clone(),
+    restRotY: c.rotation.y,
+  }));
+
+  function setLook(yaw) {
+    const cs = Math.cos(yaw);
+    const sn = Math.sin(yaw);
+    for (const p of lookParts) {
+      // into unit-sphere space, round, and back out again
+      const ux = p.rest.x / A, uy = p.rest.y / B, uz = p.rest.z / C;
+      p.obj.position.set((ux * cs + uz * sn) * A, uy * B, (-ux * sn + uz * cs) * C);
+      p.obj.rotation.y = p.restRotY + yaw;
+    }
+  }
+
   return {
-    root, body, face, snout, nose, eyes, blushes, legs, shadow,
+    root, body, face, snout, nose, eyes, blushes, legs, shadow, setLook, lookParts,
     coats: [coatDark, coatPale, coatMid],
     materials: { cream: creamMat, quill: coatDark.material },
     quillCount: quills.length,
