@@ -2340,12 +2340,21 @@ function drawHog(){
     let gx = n.x/A, gy = n.y/B, gz = n.z/Cc;
     const gl = Math.sqrt(gx*gx + gy*gy + gz*gz) || 1;
     gx /= gl; gy /= gl; gz /= gl;
-    // raked toward his rump, and the whole coat stirs as he trots
-    const stir = Math.sin(p*2 + Q.wob)*.055*g;
+    /* Raked toward his rump, and a RIPPLE runs down him nose to tail on every
+       footfall — improvement #6, "nose to rump". The crest sits where
+       p*2 + n.x*2.7 = pi/2, so as p advances the crest's n.x DECREASES: it
+       starts at his nose (n.x = +1) and runs back to his rump (n.x = -1).
+       I had this term negative first, which sent the wave the other way,
+       rump to nose — and the comment claimed nose to rump regardless. It
+       spans 0.86 of a wavelength across his back, so there is one visible
+       crest on him at a time rather than a corrugation. A little per-quill
+       scatter keeps the wavefront off looking like a drawn line. */
+    const rip = Math.sin(p*2 + Q.n.x*2.7 + Q.wob*.30);
+    const stir = rip*.075*g;
     let dx = gx - .58 + stir, dy = gy - .16, dz = gz;
     const dl = Math.sqrt(dx*dx + dy*dy + dz*dz) || 1;
     dx /= dl; dy /= dl; dz /= dl;
-    const len = lerp(12.6, 6.0, (n.x + 1)/2) * Q.lf * (1 + c*.16);
+    const len = lerp(12.6, 6.0, (n.x + 1)/2) * Q.lf * (1 + c*.16) * (1 + rip*.05*g);
     const tx = px + dx*len, ty = py + dy*len, tz = pz + dz*len;
 
     const bX = px*ct - pz*st, bD = px*st + pz*ct;
