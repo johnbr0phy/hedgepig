@@ -319,6 +319,8 @@ cv.addEventListener("pointerdown", e => {
   cv.setPointerCapture(e.pointerId);
   if (GAME.state === "over"){ startRun(); wake(); return; }   // tap to set out again
   if (!GAME.started) startRun();
+  hover = { x:e.clientX, y:e.clientY };
+  hoverT = e.pointerType === "mouse" ? 1e9 : 1.4;
   ptrs.set(e.pointerId, { x:e.clientX, y:e.clientY, px:e.clientX, py:e.clientY,
                           vx:0, vy:0, r:118, age:0, sow:0.62 });
   if (dragId === null){ dragId = e.pointerId; lastDragY = e.clientY; scrollV = 0; }
@@ -327,7 +329,13 @@ cv.addEventListener("pointerdown", e => {
   wake();
 }, {passive:true});
 
+// He watches your pointer. A mouse hovers and then sits still, so its hold is
+// effectively forever; a finger only exists while it is down, so that one
+// expires and he goes back to snuffling about.
+let hover = null, hoverT = 0;
 cv.addEventListener("pointermove", e => {
+  hover = { x:e.clientX, y:e.clientY };
+  hoverT = e.pointerType === "mouse" ? 1e9 : 1.4;
   const p = ptrs.get(e.pointerId);
   if (!p) return;
   p.x = e.clientX; p.y = e.clientY;
@@ -1326,7 +1334,7 @@ const hog = {
   dip:0, gait:0, arrive:0, puffT:0, trackT:0, foot:0,
   under:0, underT:0, underX:0, warned:0, sniff:0,
   yaw:0, pitch:0, yawT:0, pitchT:0, lookT:0,       // the head rig, below
-  yawV:0, pitchV:0, hlag:0, hlagV:0, lag:0, lagV:0, turn:0, acc:0, spdPrev:0, flick:0, earT:1.2
+  yawV:0, pitchV:0, hlag:0, hlagV:0, lag:0, lagV:0, turn:0, acc:0, spdPrev:0, flick:0, earT:1.2, lookLock:0
 };
 const hogK    = () => clamp(H/844, .85, 1.4) * 2.1;
 const hogSpd  = () => HOG_SPD0 * (1 + (GAME.leg - 1) * .06);
@@ -1360,8 +1368,9 @@ const C = {
   creamHi: "#f8f2e4",     // lit top of the cream mass
   cream:   "#ecdfc8",
   creamLo: "#d2bc9b",     // where the belly turns under
-  mantleHi:"#6f5238",     // the spiny mantle: dark warm brown
-  mantleLo:"#38281b",
+  mantleHi:"#4b3623",     // the mass under the coat. It is the SHADOW between
+  mantleLo:"#221809",     // the quills, so it must be DARKER than they are —
+                          // lighter, and every gap in the coat reads as bald.
   quillDk: "#46331f",     // the needles. Mostly dark — the mass reads brown
   quillLt: "#dccdae",     // and only a minority are tipped pale
   muzzle:  "#e7d4b5",     // pale, barely warmer than the face
@@ -1536,9 +1545,31 @@ const PITCH_K = 54, PITCH_D = 10;
 const LAG_S = .088, LG_K = 90, LG_D = 12;   // turn lag: 22° behind at full turn rate
 const HL_K = 120, HL_D = 13, HL_F = .14;
 
+/* ── he watches your pointer ───────────────────────────────────────────
+   Given where the pointer is relative to him, in his own units, this is the
+   head yaw that puts his snout on it. The snout's screen-x component is
+   cos(hy + th) and its depth is sin(hy + th); the pointer is effectively at
+   the camera plane, so we want the solution with depth >= 0, and acos
+   returns exactly that branch.
+
+   The clamp is his neck. Past about 1.35 rad he cannot follow, and what he
+   does instead is strain as far round as he can, which is the right thing
+   for him to do anyway.
+
+   It sets only the spring TARGETS, so he still lags, overshoots and settles
+   onto you rather than snapping to you.
+   ────────────────────────────────────────────────────────────────────── */
+function lookAt(h, dx, dy, th){
+  const r = Math.hypot(dx, dy) || 1;
+  h.yawT   = clamp(wrapAng(Math.acos(clamp(dx/r, -1, 1)) - th), -1.35, 1.35);
+  h.pitchT = clamp(Math.atan2(-dy, Math.max(7, Math.abs(dx))), -.50, .55);
+  h.lookLock = .5;                  // and he stops glancing idly about
+}
+
 function updateLook(h, dt){
+  h.lookLock = Math.max(0, (h.lookLock || 0) - dt);
   h.lookT -= dt;
-  if (h.lookT <= 0){
+  if (h.lookT <= 0 && h.lookLock <= 0){    // not while he is watching you
     h.lookT = lerp(.9, 2.8, Math.random());
     const r = Math.random();
     h.yawT   = r < .26 ? lerp(.95, 1.45, Math.random())     // straight at you
@@ -2019,7 +2050,12 @@ function updateGame(dt){
   if (hog.blinkT <= 0){ hog.blinkT = lerp(2.2, 5.5, Math.random()); hog.blink = 1; }
   hog.blink = Math.max(0, hog.blink - dt*7);
 
-  // ── he looks about, noses down to sniff, and now and then right at you
+  // ── he looks about, noses down to sniff, and watches your pointer
+  if (hoverT > 0){
+    hoverT -= dt;
+    if (hover) lookAt(hog, (hover.x - hog.x)/k, (hover.y - hogY())/k,
+                      Math.PI/2 - hog.hd);
+  }
   updateLook(hog, dt);
 
   // ── he shivers where it is cold, and his breath shows
@@ -2363,9 +2399,12 @@ function drawHog(){
       });
     }
     crown.sort((u, v) => u.D - v.D);
-    function crownQuills(from, to){
+    // above his eyeline only. Below it they are debris stuck to his cheek,
+    // which is exactly what the old 2D hood did when drawn here.
+    const brow = crown.filter(q => q.bY < -hc.y - R*.30);
+    function crownQuills(list, from, to){
       for (let i=from;i<to;i++){
-        const q = crown[i];
+        const q = list[i];
         let vx = q.tX - q.bX, vy = q.tY - q.bY;
         let vl = Math.hypot(vx, vy);
         if (vl < 1.1){ const k = 1.1/(vl || 1); vx *= k; vy *= k; vl = 1.1; }
@@ -2382,7 +2421,7 @@ function drawHog(){
        face covers the roots and only the tips show as a fringe round the top
        of his head. Drawn after the face — as the 2D hood was — they landed on
        his cheek and read as debris stuck to it, not as spines. */
-    crownQuills(0, crown.length);
+    crownQuills(crown, 0, crown.length);
 
     // ears, BEFORE the head sphere so it buries all but the tip
     for (const side of [-1, 1]){
@@ -2502,6 +2541,8 @@ function drawHog(){
       ctx.beginPath(); ctx.arc(e.X, e.Y, 2.5*sc, -2.5, -1.0); ctx.stroke();
       ctx.globalAlpha = a * fa;
     }
+
+    crownQuills(brow, 0, brow.length);        // and the spines over his brow
     ctx.globalAlpha = a;
   }
 
@@ -2515,7 +2556,7 @@ function drawHog(){
       let vl = Math.hypot(vx, vy);
       // a quill aimed at the lens foreshortens to nothing; keep a stub, or it
       // degenerates and vanishes instead of reading as a cut-off spine
-      if (vl < 1.4){ const k = 1.4/(vl || 1); vx *= k; vy *= k; vl = 1.4; }
+      if (vl < 2.2){ const k = 2.2/(vl || 1); vx *= k; vy *= k; vl = 2.2; }
       const nx = -vy/vl*2.00, ny = vx/vl*2.00;      // half-width at the root
       ctx.fillStyle = QCOL[q.pale ? 2 : 0][q.s];
       ctx.beginPath();

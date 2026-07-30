@@ -517,6 +517,10 @@ Things worth knowing before touching it:
   you. Everything hung off the snout (muzzle, nose, mouth, whiskers) has the
   same gate one level down, or his nose sits on the back of his head as he walks
   away. The `walking away` stall exists for this.
+- **The dark mass must be DARKER than the quills standing on it.** It is the
+  shadow between them. At `#6f5238` it was *lighter* than `quillDk`, so every
+  gap in the coat read as a bald brown patch — worst of all nose-on, where his
+  rear-facing quills all foreshorten to stubs and pile up in the middle of him.
 - **The dark mass must be CLIPPED to the body.** Offset back-and-up by 7.6 it
   overhangs the top of his silhouette by about 3px, and what you see is a
   smooth brown crescent hanging behind his head with no coat on it.
@@ -627,6 +631,28 @@ wrong:
   so snout, nose and whiskers all work as one piece. The nose itself only
   **flares** on top of that: a wet nose working is a change of shape, not of
   position.
+
+### He watches your pointer
+
+`lookAt(h, dx, dy, th)` aims his head at a screen position. The snout's
+screen-x component is `cos(hy + th)` and its depth is `sin(hy + th)`; the
+pointer is effectively at the camera plane, so we want the branch with depth
+≥ 0, and `acos` returns exactly that. The clamp at ±1.35 rad is his neck —
+past it he strains as far round as he can, which is the right behaviour
+anyway.
+
+It sets only the spring **targets**, so he lags and settles onto you rather
+than snapping. `h.lookLock` suppresses the idle glancing while he is
+watching.
+
+In the game a mouse holds his attention indefinitely (it hovers, then sits
+still, so an expiring timer would make him look away from a stationary
+cursor); a finger only exists while it is down, so that one expires after
+1.4s and he goes back to snuffling. In the lab **every** stall tracks the
+pointer wherever it is on the page — eleven of him turning at once is the
+fastest way to see whether the aim is right at every body angle. Stall
+rects are cached in `resize()`, because a `getBoundingClientRect` per stall
+per frame thrashes layout.
 
 ### The head spring
 
