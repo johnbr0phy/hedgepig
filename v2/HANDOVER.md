@@ -432,6 +432,46 @@ Three things were only learned by doing it:
 a hidden tab has no rAF, so nothing that only runs inside `frame()` can be
 exercised from a console — and the keys are exactly that.
 
+### Built, listed as done, and never once seen
+
+"Butterflies, bees, birds" went into the run log two sessions running. They
+were all genuinely there, and nobody had ever seen one. Four things stacked up,
+and no single one of them would have been enough:
+
+- **Seven butterflies and five bees, for a whole planet**, all pinned within a
+  few metres of `CENTRE[BGARD]`. That is one place out of ten, on a world where
+  a lap is 300 m and the horizon is 11. Nine tenths of the time there were none
+  within sight of you, and in the garden itself seven insects over sixteen
+  square metres is one every two metres.
+- **They never streamed, although the code looked as though it might.** The
+  re-home test was "faded out and far away" — but they only fade when the
+  weather grounds them, so on a fine summer day a butterfly never qualified to
+  be moved and stayed where it was built for the whole game. The fix is the
+  *other* half: cull by distance off him, like the grass chunks. Without the
+  cull the streaming ran in principle and never once in practice.
+- **Half life size.** 26 mm wings against a 260 mm hedgehog. A small white is
+  about 45 mm across, so the honest number is nearly double.
+- **And the ones you could see were not butterflies.** The wings were mapped
+  with `petalTex`, which is a **five-petal flower** — so each wing was a whole
+  rosette and a butterfly read as a small flower hovering over the grass. They
+  have their own wing texture now, a forewing and a hindwing, and the flap is a
+  rotation about the body axis rather than a yaw that only slid them past each
+  other.
+
+Two smaller things came out of it. The fly-or-not gate was a hard threshold on
+a product of four factors, so one shower took every insect off the planet at the
+same instant; each one has its own tolerance now and a shower thins them. And
+three of the seven colours were near-white, which against this world's pale
+horizon is an invisible butterfly — one white is charming, three is a third of
+the population you cannot see.
+
+**The general lesson, and it has now happened twice:** a feature can be
+complete, correct, committed and still absent. "Ranged off him" is not the same
+as "reachable"; a pool anchored to one place on a planet you walk around is a
+pool nobody meets. The next thing built for the world wants a sentence about
+*how often you will be standing near one*, and the harness now asserts exactly
+that — walk to the far side of the planet, and count how many are within 12 m.
+
 ## 5. Things that will bite the next change
 
 - **A pitched roof is `s * +angle`, not `s * -angle`.** Rotating about +x by a

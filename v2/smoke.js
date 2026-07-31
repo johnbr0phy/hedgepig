@@ -1497,10 +1497,58 @@ function sCritters() {
   ok(bad === 0, 'four summer seconds of critters leave no non-finite matrix',
     `${seated} objects checked`);
   ok(c.bflies.every((b) => plan.distance(b.x, b.z, b.home.x, b.home.z) < 12),
-    'and the butterflies stay by their garden');
+    'and the butterflies stay near whatever they are homed on');
+
+  /* **They come to where he is.**
+   *
+   * Every butterfly and bee used to be pinned within a few metres of the
+   * butterfly garden — one place out of ten, on a planet where a lap is 300 m
+   * and the horizon is 11 — so unless you happened to be standing in that one
+   * disc there were none anywhere near you, and there were only seven of them
+   * to begin with.  Nobody had ever seen one, which is exactly what was
+   * reported.  The pool re-homes off *him* now, which is the same streaming
+   * the grass chunks do and obeys the same invariant. */
+  const nearHim = (arr, key) => arr.filter((b) => {
+    const p = key ? b[key] : b;
+    return plan.distance(hogLike.x, hogLike.z, p.x, p.z) < 12;
+  }).length;
+
+  const meadow = plan.CENTRE[plan.MEADOW];
+  hogLike.x = meadow.x; hogLike.z = meadow.z;
+  for (let i = 0; i < 60 * 40; i++) { st.t += 1 / 60; c.update(1 / 60, hogLike, st); }
+  ok(nearHim(c.bflies) >= 6, 'walk to the far side of the planet and the butterflies are there too',
+    `${nearHim(c.bflies)} of ${c.bflies.length} within 12 m`);
+  ok(nearHim(c.bees, 'anchor') >= 6, 'and so are the bees',
+    `${nearHim(c.bees, 'anchor')} of ${c.bees.length} within 12 m`);
+  ok(c.bflies.filter((b) => b.obj.visible).length > 10,
+    'and on a dry summer day most of them are on the wing',
+    `${c.bflies.filter((b) => b.obj.visible).length} flying`);
+
+  /* But not everywhere.  A butterfly does not belong over tarmac or water,
+   * and the re-homing has to refuse rather than place one there. */
+  const road = plan.CENTRE[plan.ROAD];
+  hogLike.x = road.x; hogLike.z = road.z;
+  for (let i = 0; i < 60 * 40; i++) { st.t += 1 / 60; c.update(1 / 60, hogLike, st); }
+  ok(c.bflies.every((b) => terrain.waterDepthAt(b.x, b.z) <= 0),
+    'none of them is ever homed onto the water');
+
+  /* Rain thins them; it does not delete the species.  The gate used to be a
+   * hard threshold on a product of four factors, so one shower took every
+   * insect off the planet at once. */
+  hogLike.x = meadow.x; hogLike.z = meadow.z;
+  for (let i = 0; i < 60 * 40; i++) { st.t += 1 / 60; c.update(1 / 60, hogLike, st); }
+  const dry = c.bflies.filter((b) => b.obj.visible).length;
+  st.wet = 0.85;
+  for (let i = 0; i < 60 * 10; i++) { st.t += 1 / 60; c.update(1 / 60, hogLike, st); }
+  const wet = c.bflies.filter((b) => b.obj.visible).length;
+  ok(wet > 0 && wet < dry * 0.8, 'a real shower thins them rather than ending them',
+    `${dry} dry, ${wet} in the rain`);
+  st.wet = 0;
+
   st.night = 1;
-  for (let i = 0; i < 120; i++) { st.t += 1 / 60; c.update(1 / 60, hogLike, st); }
+  for (let i = 0; i < 60 * 6; i++) { st.t += 1 / 60; c.update(1 / 60, hogLike, st); }
   ok(c.owl.obj.visible, 'and the owl is out once it is dark');
+  ok(c.bflies.filter((b) => b.obj.visible).length === 0, 'while the butterflies have gone to bed');
 }
 
 function sNan() {

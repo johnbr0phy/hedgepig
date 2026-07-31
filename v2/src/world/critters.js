@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import { flat, cel } from '../core/toon.js';
-import { petalTex, blobTex } from '../core/textures.js';
+import { petalTex, wingTex, blobTex } from '../core/textures.js';
 import { clamp, lerp, rngKit, TAU, wrapAng, damp } from '../core/util.js';
 import { positionAt, basisAt } from './planet.js';
 import { heightAt, waterDepthAt, lakeShore } from './terrain.js';
-import { CENTRE, BGARD, WOOD, LAKE, LAKE_R, MIRE, HENS, TOWN, FARM, MEADOW, distance, bearing, offsetFrom, R } from './plan.js';
+import { CENTRE, BGARD, WOOD, LAKE, LAKE_R, MIRE, HENS, TOWN, FARM, MEADOW, distance, bearing, offsetFrom, placeProp, hardAt, towards, R } from './plan.js';
 
 /* ------------------------------------------------------------------ *
  * The things that fly, with wings this time.
@@ -19,16 +19,39 @@ import { CENTRE, BGARD, WOOD, LAKE, LAKE_R, MIRE, HENS, TOWN, FARM, MEADOW, dist
  *
  *  - **Everything ranges off him.**  A butterfly flees the hedgehog, not
  *    the camera.
- *  - **Anchored, not free.**  Butterflies belong to the butterfly garden
- *    and to whatever has just been sown; bees belong to flowers.  A critter
- *    with no anchor drifts off the playable band within a minute.
+ *  - **Anchored, not free.**  A critter with no anchor drifts off the
+ *    playable band within a minute.
  *  - **The clock owns them.**  They fly in daylight, in the warm seasons,
  *    and not in the rain; winter grounds every one of them.  Nothing here
  *    checks the *place* to decide the weather — season and hour only.
+ *
+ * **And they stream.**  The first build read "anchored" as *anchored to the
+ * butterfly garden*, and put seven butterflies and five bees within a few
+ * metres of one place out of ten — on a planet where a lap is three hundred
+ * metres and the horizon is eleven.  Nobody ever saw one.  Standing in the
+ * garden itself at summer noon you got seven insects with 26 mm wings spread
+ * over sixteen square metres, which is a handful of pixels each.
+ *
+ * The pool re-homes near *him* now, on ground that suits — the same idea as
+ * the grass chunks, and off him rather than off the camera, so the invariant
+ * holds.  A butterfly still belongs somewhere; it is just that "somewhere" is
+ * anywhere with flowers in it rather than one disc.
  * ------------------------------------------------------------------ */
 
-const BFLY_N = 7;
-const BEE_N = 5;
+const BFLY_N = 22;
+const BEE_N = 16;
+
+/**
+ * How much this ground is butterfly country: grassy, soft, not tarmac and not
+ * water.  `dens` is the place's own grass density, which is already exactly
+ * the right discriminator — meadow 1.25 and garden 1.15 against town 0.38.
+ */
+function meadowlyAt(x, z) {
+  if (waterDepthAt(x, z) > 0) return 0;
+  const hard = hardAt(x, z);
+  if (hard > 0.35) return 0;
+  return clamp(placeProp(x, z, 'dens') * (1 - hard), 0, 1.3) / 1.3;
+}
 
 export function createCritters(scene, hooks = {}) {
   const rng = rngKit(4104);
@@ -57,7 +80,10 @@ export function createCritters(scene, hooks = {}) {
   }
 
   /* ------------------------------ butterflies ------------------------------ */
-  const BFLY_COLORS = [0xf5f2e6, 0xf0c95c, 0x9db7e8, 0xe8a0d0, 0xf5f2e6, 0xd8ecf0, 0xf0c95c];
+  /* Three of the seven used to be near-white, which against this world's pale
+   * horizon is an invisible butterfly.  One white is charming; three is a
+   * third of the population you cannot see. */
+  const BFLY_COLORS = [0xf0a03c, 0xf5d24c, 0x7f9fe0, 0xe07ab8, 0xf5f2e6, 0xd05a44, 0xa8d060];
   const bflies = [];
   for (let i = 0; i < BFLY_N; i++) {
     const g = new THREE.Group();
@@ -67,17 +93,23 @@ export function createCritters(scene, hooks = {}) {
      * drafting lines round her wings.  The petal texture rounds the
      * silhouette and the ink follows that instead. */
     const mat = flat({
-      color: BFLY_COLORS[i % BFLY_COLORS.length], map: petalTex(),
+      color: BFLY_COLORS[i % BFLY_COLORS.length], map: wingTex(),
       alphaTest: 0.4, side: THREE.DoubleSide, cache: false,
     });
     const wings = [];
     for (const s of [-1, 1]) {
-      const wg = new THREE.PlaneGeometry(0.026, 0.032);
-      wg.translate(0, 0.016, 0);            // hinge at the body
+      /* 23 mm a side, so 46 mm across — a small white is about 45 mm, so
+       * this is honest rather than generous, and the old pair were under half
+       * life size on an animal already the size of your thumbnail.
+       *
+       * Built lying flat and hinged **at the body**, so the flap is one
+       * rotation about the fore-aft axis and looks like a butterfly rather
+       * than like two planes disagreeing. */
+      const wg = new THREE.PlaneGeometry(0.023, 0.040);
+      wg.rotateX(-Math.PI / 2);             // into the ground plane
+      if (s < 0) wg.scale(-1, 1, 1);        // mirrored, so both tips lead
+      wg.translate(0.0115 * s, 0, 0);       // inner edge on the body line
       const w = new THREE.Mesh(wg, mat);
-      w.rotation.x = -Math.PI / 2;          // lying flat, hinged along the body
-      w.rotation.z = 0;
-      w.position.z = 0.001 * s;
       w.userData.side = s;
       w.userData.noOutline = true;
       g.add(w);
@@ -91,6 +123,10 @@ export function createCritters(scene, hooks = {}) {
       home, flee: 0,
       wobble: rng.range(0, TAU),
       flap: rng.range(4, 6),
+      /* Her own tolerance for a poor day.  Without it every butterfly shares
+       * one threshold and the whole species blinks on and off together — a
+       * shower took every insect off the planet at the same instant. */
+      hardy: rng.range(0.14, 0.66),
       out: 0,                                // eased presence, 0 hidden – 1 flying
     };
     root.add(g);
@@ -104,12 +140,12 @@ export function createCritters(scene, hooks = {}) {
     for (let i = 0; i < BEE_N; i++) {
       const g = new THREE.Group();
       g.matrixAutoUpdate = false;
-      const bl = new THREE.Mesh(new THREE.SphereGeometry(0.007, 7, 5), body);
-      bl.scale.set(1.35, 1, 1);
+      const bl = new THREE.Mesh(new THREE.SphereGeometry(0.011, 7, 5), body);
+      bl.scale.set(1.45, 1, 1);
       const wingMat = flat({ color: 0xdfe8f0, transparent: true, opacity: 0.55, side: THREE.DoubleSide, cache: false });
       wingMat.depthWrite = false;           // a blur, not a pane of glass
-      const wing = new THREE.Mesh(new THREE.PlaneGeometry(0.012, 0.007), wingMat);
-      wing.position.y = 0.006;
+      const wing = new THREE.Mesh(new THREE.PlaneGeometry(0.020, 0.011), wingMat);
+      wing.position.y = 0.009;
       wing.rotation.x = -Math.PI / 2;
       bl.userData.noOutline = wing.userData.noOutline = true;
       g.add(bl, wing);
@@ -120,6 +156,7 @@ export function createCritters(scene, hooks = {}) {
         rad: rng.range(0.2, 0.5),
         speed: rng.range(1.6, 2.6),
         bob: rng.range(0, TAU),
+        hardy: rng.range(0.12, 0.60),
         out: 0,
       };
       root.add(g);
@@ -131,7 +168,7 @@ export function createCritters(scene, hooks = {}) {
   const birds = [];
   {
     const dark = flat({ color: 0x4a4458, side: THREE.DoubleSide, cache: false });
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < 4; i++) {
       const g = new THREE.Group();
       g.matrixAutoUpdate = false;
       const bodyG = new THREE.ConeGeometry(0.02, 0.09, 5);
@@ -156,7 +193,7 @@ export function createCritters(scene, hooks = {}) {
       birds.push({ obj: g, wings, live: false, x: 0, z: 0, y: 5, hd: 0, t: 0 });
     }
   }
-  let birdWait = 12;
+  let birdWait = 6;
 
   /* ------------------------------ water rings ------------------------------ *
    * A shared pool, spent by frogs going in and fish coming up. */
@@ -534,13 +571,67 @@ export function createCritters(scene, hooks = {}) {
 
   /* --------------------------------- update -------------------------------- */
 
+  /**
+   * Find somewhere near him for a critter to belong, or null if here will not
+   * do at all — a road, a lake, a town.  Ranged off *him*, never the camera:
+   * that is the invariant, and the streaming does not get to bend it.
+   *
+   * Eight tries and then give up. A critter that cannot be placed simply
+   * stays where it is and stays hidden, which is right: there are no
+   * butterflies over tarmac.
+   */
+  function nearbySpot(hog, near, far) {
+    for (let i = 0; i < 8; i++) {
+      const a = rng.range(0, TAU);
+      const d = near + Math.sqrt(rng.next()) * (far - near);
+      const cs = Math.max(0.08, Math.cos(hog.z / R));
+      const x = hog.x + (Math.cos(a) * d) / cs;
+      const z = hog.z + Math.sin(a) * d;
+      if (meadowlyAt(x, z) > 0.45) return { x, z };
+    }
+    return null;
+  }
+
   function update(dt, hog, state) {
-    /* Whether anything should be on the wing at all: day, warm, dry. */
-    const season = state.w ? state.w[1] + state.w[0] * 0.6 : 1;    // summer + some spring
-    const flying = clamp(season, 0, 1) * (1 - state.night) * (1 - clamp(state.wet * 2, 0, 1)) * (1 - state.snow);
+    /* Whether anything should be on the wing at all: day, warm, dry.
+     *
+     * **A ramp, not a cliff.**  This was a hard `flying > 0.25` test against
+     * a product of four factors, so a passing shower or the first week of
+     * autumn took every insect off the planet at once.  Autumn counts for
+     * something now, and rain thins them rather than ending them. */
+    const season = state.w
+      ? state.w[1] + state.w[0] * 0.85 + state.w[2] * 0.45
+      : 1;
+    const flying = clamp(season, 0, 1)
+      * (1 - clamp(state.night * 1.15, 0, 1))
+      * (1 - clamp(state.wet * 0.8, 0, 0.85))
+      * (1 - state.snow);
 
     for (const b of bflies) {
-      b.out = damp(b.out, flying > 0.25 ? 1 : 0, 1.5, dt);
+      /* **Streaming.**  Re-home a butterfly that is nowhere near him — but
+       * only while it is invisible, or it teleports in front of you.  This is
+       * what makes them exist at all: seven of them pinned to one 16 m square
+       * on a 300 m lap meant nobody had ever seen one. */
+      if (b.out < 0.03 && distance(hog.x, hog.z, b.x, b.z) > 13) {
+        const spot = nearbySpot(hog, 2.5, 11);
+        if (spot) {
+          b.home = spot;
+          b.x = spot.x; b.z = spot.z;
+          b.hd = rng.range(0, TAU);
+        }
+      }
+      /* **Culled by distance off him**, exactly as the grass chunks are — and
+       * this is what makes the re-homing above ever run.  Without it a
+       * butterfly on a fine summer day never fades, so it never qualifies to
+       * be moved, so it stays where it was built for the whole game: the pool
+       * streamed in principle and never once in practice.
+       *
+       * 14 m is past the horizon anyway.  From a camera 1.2 m up on a 47.75 m
+       * planet you can see 11. */
+      const away = distance(hog.x, hog.z, b.x, b.z);
+      const here = meadowlyAt(b.x, b.z);
+      const up = flying > b.hardy && here > 0.3 && away < 14;
+      b.out = damp(b.out, up ? Math.min(1, flying * 1.6) : 0, 1.5, dt);
       b.obj.visible = b.out > 0.02;
       if (!b.obj.visible) continue;
 
@@ -564,20 +655,32 @@ export function createCritters(scene, hooks = {}) {
       const ground = heightAt(b.x, b.z);
       b.y = ground + 0.32 + Math.sin(b.wobble * 1.3) * 0.14 + (b.flee > 0 ? 0.2 : 0);
 
+      /* The flap is a rotation about the body's own axis — wings up, wings
+       * down — not a yaw, which only slid them sideways past each other. */
       const flap = Math.sin(b.wobble * (b.flee > 0 ? 3.2 : 1.9) * b.flap);
-      for (const w of b.wings) w.rotation.y = w.userData.side * (0.5 + flap * 0.75);
+      for (const w of b.wings) w.rotation.z = w.userData.side * (0.30 + flap * 0.80);
       seat(b.obj, b.x, b.y, b.z, b.hd + Math.PI / 2, b.out);
     }
 
     for (const b of bees) {
-      b.out = damp(b.out, flying > 0.25 ? 1 : 0, 1.5, dt);
+      // the same streaming: a bee works whatever flowers are where he is
+      if (b.out < 0.03 && distance(hog.x, hog.z, b.anchor.x, b.anchor.z) > 12) {
+        const spot = nearbySpot(hog, 1.6, 9);
+        if (spot) b.anchor = spot;
+      }
+      const hereB = meadowlyAt(b.anchor.x, b.anchor.z);
+      const awayB = distance(hog.x, hog.z, b.anchor.x, b.anchor.z);
+      const upB = flying > b.hardy && hereB > 0.3 && awayB < 14;
+      b.out = damp(b.out, upB ? Math.min(1, flying * 1.6) : 0, 1.5, dt);
       b.obj.visible = b.out > 0.02;
       if (!b.obj.visible) continue;
       b.ang += dt * b.speed;
       b.bob += dt * 7;
       const x = b.anchor.x + Math.cos(b.ang) * b.rad;
       const z = b.anchor.z + Math.sin(b.ang) * b.rad;
-      const y = heightAt(x, z) + 0.16 + Math.sin(b.bob) * 0.05;
+      /* Clear of the canopy.  At 0.16 they worked *inside* 0.10–0.33 m grass
+       * and were hidden by it even when they were right in front of you. */
+      const y = heightAt(x, z) + 0.26 + Math.sin(b.bob) * 0.06;
       b.wing.rotation.z = Math.sin(b.bob * 9) * 0.9;
       seat(b.obj, x, y, z, -b.ang, b.out);
     }
@@ -587,8 +690,9 @@ export function createCritters(scene, hooks = {}) {
      * feathers. */
     birdWait -= dt;
     if (birdWait <= 0) {
-      birdWait = 16 + rng.range(0, 26);
-      if (flying > 0.2) {
+      // one every seven to twenty seconds, not every sixteen to forty-two
+      birdWait = 7 + rng.range(0, 13);
+      if (flying > 0.15) {
         const b = birds.find((x) => !x.live);
         if (b) {
           b.live = true;

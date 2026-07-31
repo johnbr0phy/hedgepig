@@ -155,6 +155,37 @@ export const petalTex = () => memo('petals', () => {
   return toTexture(c);
 });
 
+/**
+ * One butterfly wing: a forewing and a hindwing, hinge at the left edge.
+ *
+ * The wings used to be mapped with `petalTex`, which is a **five-petal
+ * flower** — so each wing was a whole rosette and a butterfly read as a small
+ * flower hovering over the grass. It was the only one of these you could
+ * actually see, and it did not look like an insect at all.
+ *
+ * u runs from the body (0) to the wingtip (1); v from fore (0) to aft (1).
+ */
+export const wingTex = () => memo('wing', () => {
+  const [c, x] = canvas(64, 64);
+  x.clearRect(0, 0, 64, 64);
+  x.fillStyle = '#ffffff';
+  // forewing: the long one, swept back to a tip
+  x.beginPath();
+  x.moveTo(3, 31);
+  x.quadraticCurveTo(16, 3, 58, 11);
+  x.quadraticCurveTo(55, 27, 28, 34);
+  x.closePath();
+  x.fill();
+  // hindwing: shorter, rounder, tucked behind
+  x.beginPath();
+  x.moveTo(4, 33);
+  x.quadraticCurveTo(30, 33, 45, 45);
+  x.quadraticCurveTo(34, 61, 7, 51);
+  x.closePath();
+  x.fill();
+  return toTexture(c);
+});
+
 /** Stars: a sparse field of points, drawn once and reused on the dome. */
 export const starTex = () => memo('star', () => {
   const [c, x] = canvas(64, 64);

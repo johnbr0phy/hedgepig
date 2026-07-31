@@ -113,8 +113,11 @@ last run did *not* touch.
 
 ### Debt and harness
 
-- `sky.js` now has coverage; the **weather fields** in `weather.js` still have
-  none, and neither does `puffs.js`.
+- `sky.js` and the critters now have coverage; the **weather fields** in
+  `weather.js` still have none, and neither does `puffs.js`.
+- **`weather.js` still calls its motes butterflies and bees** in the comment
+  at the top of the file, and now that there are real ones the motes are a
+  second, worse version of the same idea.
 - **Per-frame allocations** have never been profiled. `critters.js` (905
   lines) and `game.js` (830) are the likely sources.
 - **`main.js` is 670 lines** and owns fireflies, the rainbow, photo mode,
@@ -210,3 +213,20 @@ Newest last. One line each: date, workstream, what landed, what the sweep found.
   branch of `update` is moving him, so a roll begun by the keys survived the
   release and he stood about tucked into a ball for ever. Sliding is a step
   deflection now, and the drive un-tucks what it tucked.
+- **2026-07-31 — the insects nobody had ever seen (interactive session).**
+  157/157. Butterflies, bees and birds had been in the run log twice and were
+  all genuinely built; four things stacked up to make them invisible. Seven
+  butterflies and five bees for a whole planet, pinned within a few metres of
+  one place out of ten. Streaming that could never fire, because the re-home
+  test wanted them faded and they only fade when the weather grounds them —
+  the missing half was culling by distance off him, as the grass does. Half
+  life size. And the ones you *could* see were mapped with `petalTex`, which
+  is a five-petal flower, so a butterfly read as a small flower hovering over
+  the grass. Now: 22 and 16, re-homed near him on ground that suits, at 46 mm
+  with a proper wing texture and a flap about the body axis, each with its own
+  tolerance for a wet day so a shower thins them instead of deleting the
+  species. Birds every 7–20 s rather than 16–42.
+  **Sweep found / still open:** they are honest-sized, which means subtle — if
+  they still read as too quiet, the size is one number. And `weather.js` still
+  spawns motes named for butterflies and bees, which now duplicates real
+  animals.
