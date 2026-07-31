@@ -208,6 +208,85 @@ New here, and worth knowing:
   face printed on a large cream balloon, because the mass above the eyes becomes
   a forehead and a hedgehog does not have one. Eyes are high and forward now.
 
+### The sun never set, and three other things were downstream of that
+
+`state.sunDir` was built as `max(|alt|, 0.22)` in its up component, so the key
+light's elevation was **never below 0.22** — the sun swung round in azimuth and
+bobbed between 13° and 90°, and never once touched the horizon. Everything
+that reasoned about a sun going down was therefore dead code:
+
+- `sky.js` chose the disc's position with "if the sun is below the horizon,
+  use the anti-sun instead". That test never fired, so what was called the
+  moon was the sun's own direction in a colder colour, drawn with a phase
+  that had nothing to do with where it was. A full moon's geometry with a
+  crescent's face, and never on the correct side of the sky.
+- Shadows never lengthened, because the light never grazed.
+- There was no such thing as twilight, because there was no such thing as
+  sunset.
+
+The sun is on a tilted great circle now and goes properly under. Two things had
+to come with it, and both are the kind of thing that only shows up in a frame:
+
+- **The key light had to gain a floor.** The old clamp was, accidentally,
+  guaranteeing that a night still had a directional light in it (intensity
+  0.52 at full dark). Removing the clamp without replacing it gave a moonless
+  night with *no* key at all — a black field with a catchlight floating in it.
+  There is now the moon when there is one and a fifth of a light from
+  overhead when there is not.
+- **The moon's phase is now its position.** Elongation from the sun *is* the
+  phase, which is the real astronomy and costs nothing: full is opposite the
+  sun and up all night, new is beside it and therefore not there.
+
+### One darkness was doing three jobs
+
+`nightAt` carries a deliberate -0.22 offset so that dusk lags sunset. That is
+correct for *is it night* — fireflies, the owl, lit windows — and it is flat
+zero until the sun is 13° under, which meant the whole of dusk was painted in
+**full daylight sky colours**. The blue hour came out as a flat cream wash and
+no amount of tuning the three sky stops could fix it, because the sky was being
+told it was still afternoon.
+
+There are three curves now and they are not interchangeable:
+
+| | |
+|---|---|
+| `night` | is it night — gameplay, unchanged, still v1's |
+| `dark` | what colour is it — starts the moment the sun touches the rim |
+| `lum` | how much light is there — `max(night, dark·0.62)`, so evening dims steadily and the small hours are still darkest |
+
+Driving the light intensities off `dark` instead makes dusk exactly as black as
+midnight; driving the sky off `night` gives a violet-free dusk. Both were tried
+in that order.
+
+### A sky with no bearing cannot have an hour
+
+The dome was a function of height alone, so a sunset looked identical whichever
+way you turned — the one cue that gives a sky a time *and a direction* was
+simply absent. It now carries a horizon glow aimed at the sun's own bearing,
+with a cooler counter-glow behind you, off a seven-stop ramp keyed to sun
+altitude. That ramp is doing the job a Rayleigh/Mie model does in a photoreal
+sky; chosen stops are the right trade in a world drawn with four-band ramps.
+
+Related, and cheap: the hour readout was an eighth of the clock each. Once the
+clock stopped running at one speed that stopped being an hour, and it announced
+"dawn" for a sun 25° up. `hourNameAt` reads the sun's height instead, which is
+what an hour has always been a description of.
+
+### A blocker may never hold something already inside it
+
+Sown props were never registered as obstacles, so he walked into snowmen and
+settled into an idle inside one. Adding them as blockers is three lines; the
+trap it opens is the whole problem. A no-go that appears *around* him refuses
+every direction including his escape, and he is frozen for good — a far worse
+bug than the one being fixed.
+
+`blockedAt` therefore takes where the step is coming *from* and refuses only
+moves that go **deeper**. Not *strictly* outward, which was the first version
+and was still a cage: with a second blocker in front of him the only way out is
+`tryStep`'s slide, and a slide is tangential — the same depth, not less — so
+both moves were refused and he was pinned between two things he could have
+walked around. The harness has that case, and it caught it.
+
 ## 5. Things that will bite the next change
 
 - **A pitched roof is `s * +angle`, not `s * -angle`.** Rotating about +x by a

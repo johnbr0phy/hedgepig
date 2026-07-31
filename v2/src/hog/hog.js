@@ -387,7 +387,8 @@ export class Hog {
   canStand(x, z) {
     if (this.under) return true;
     if (!walkableAt(x, z)) return false;
-    return !this.world?.blockedAt?.(x, z);
+    // where he is going, *from where he is* — see `world.blockedAt`
+    return !this.world?.blockedAt?.(x, z, this.x, this.z);
   }
 
   /** Standing still is not standing still: he snuffles, and looks about. */

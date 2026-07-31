@@ -6,8 +6,8 @@ import { rngKit, clamp, lerp, TAU } from '../core/util.js';
 import { heightAt, waterDepthAt, walkableAt, lakeShore } from '../world/terrain.js';
 import { basisAt, positionAt } from '../world/planet.js';
 import {
-  PLACE, ORDER, COUNT, CENTRE, CENTRES, ROAD_HALF,
-  placeKindAt, placeAt, offsetFrom, distance, bearing, hardAt,
+  PLACE, ORDER, COUNT, CENTRE, CENTRES, ROAD_HALF, R as R_PLANET,
+  placeKindAt, placeAt, offsetFrom, distance, bearing, hardAt, towards,
   roadAlong, roadOffset, roadPoint,
   LAKE, ROAD, WOOD, MGARD, HENS, TOWN, MIRE, BGARD,
 } from '../world/plan.js';
@@ -472,12 +472,49 @@ export function createGame({ world, hog, hud, climate, audio = null }) {
   }
 
   /**
+   * What you sow that he cannot then walk through, and how wide it is.
+   *
+   * Everything else on the list is grass-height or flatter and he goes over
+   * it, which is right: a flower that stopped him would be an obstacle
+   * course. These two are waist-high on a hedgehog and were being **stood
+   * inside** — you sow a snowman at his feet, it grows around him, and he
+   * settles into an idle in the middle of it. The radius is a shade under
+   * the silhouette, the same allowance the brambles get, because being
+   * stopped by something that looked like a miss is the unfairness nobody
+   * forgives.
+   */
+  const SOLID = { snowman: 0.135, stone: 0.115 };
+
+  /**
    * Sow at (x, z).  Runs on **every** call, before any early return, because
    * whatever is sown is the thing he then walks to — put this lower down and
    * the mushroom garden, the wood and the hen run quietly stop steering him.
+   *
+   * Returns where it actually went, which is not always where you tapped: a
+   * solid thing is pushed clear of him first.  `blockedAt`'s escape rule
+   * means sowing one on top of him could not trap him even so, but he would
+   * still be standing inside a snowman, and the fix for that is to not put
+   * it there.
    */
   function sow(x, z) {
     const kind = sowKinds(x, z);
+    const solid = SOLID[kind] || 0;
+    if (solid) {
+      const clear = solid + 0.16;             // his own half-width, and a little air
+      const d = distance(hog.x, hog.z, x, z);
+      if (d < clear) {
+        if (d > 1e-3) {
+          const p = towards(hog.x, hog.z, x, z, clear);
+          x = p.x; z = p.z;
+        } else {
+          // tapped on his own feet: it goes where he is looking
+          x += (Math.cos(hog.hd) * clear) / Math.max(0.08, Math.cos(hog.z / R_PLANET));
+          z += Math.sin(hog.hd) * clear;
+        }
+      }
+      if (!walkableAt(x, z)) return { kind, x, z, solid: 0 };
+    }
+
     const { obj, tint } = makeSown(kind);
     obj.matrixAutoUpdate = false;
     scene.add(obj);
@@ -492,6 +529,7 @@ export function createGame({ world, hog, hud, climate, audio = null }) {
       grow: 0, age: 0, sparkle,
     };
     seat(obj, x, z, rec.y, rec.yaw, 0.001);
+    if (solid) rec.blocker = world.addBlocker(x, z, solid);
     sown.push(rec);
     state.sown++;
     audio?.sow(kind);
@@ -500,11 +538,12 @@ export function createGame({ world, hog, hud, climate, audio = null }) {
       const old = sown.shift();
       scene.remove(old.obj);
       scene.remove(old.sparkle.pts);
+      if (old.blocker) world.removeBlocker(old.blocker);
       old.obj.traverse((o) => o.geometry?.dispose?.());
       old.sparkle.geo.dispose();
       old.sparkle.pts.material.dispose();
     }
-    return kind;
+    return { kind, x, z, solid };
   }
 
   /** Grow what has been sown, and let the sparkle go up and out. */
@@ -558,7 +597,17 @@ export function createGame({ world, hog, hud, climate, audio = null }) {
      * sown is the thing he then walks to.  The one exception is the second
      * tap of a double: the first already sowed here, and two flowers in one
      * spot is not a reward, it is a stutter. */
-    if (!roll) sow(x, z);
+    if (!roll) {
+      const s = sow(x, z);
+      /* He walks to what he sowed — but a solid thing is somewhere he cannot
+       * stand, and a target inside a blocker is a target he presses into for
+       * 1.1 s and abandons.  Stop him at its edge instead, which is also
+       * simply what you want to watch: he walks up to the snowman. */
+      if (s.solid) {
+        const p = towards(s.x, s.z, hog.x, hog.z, s.solid + 0.13);
+        x = p.x; z = p.z;
+      }
+    }
     if (!walkableAt(x, z)) {
       /* Called into the water: he goes as close as he can, which is what a
        * hedgehog would do and is far better than nothing happening. */

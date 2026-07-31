@@ -322,6 +322,58 @@ function sClock() {
 
   ok(HOURS[0] === 'noon' && HOURS[4] === 'deep night',
     'the hour names line up with the phase they are indexed by');
+
+  /* The year was 1.36 days long, so a season was less than half a day and the
+   * palette never once settled.  What "funky weather" turned out to be. */
+  ok(season.YEAR / season.DAY > 4,
+    'a season is longer than a day, so weather can settle',
+    `${f(season.YEAR / season.DAY / 4, 2)} days per season`);
+
+  /* The warp: monotone, so time never runs backwards, and it must return
+   * exactly half the clock to daylight or the year drifts against itself. */
+  const { solarPhase } = season;
+  let mono = true, worstBack = 0;
+  for (let i = 1; i <= 2000; i++) {
+    const a = solarPhase((i - 1) / 2000), b = solarPhase(i / 2000);
+    if (b <= a) { mono = false; worstBack = Math.max(worstBack, a - b); }
+  }
+  ok(mono, 'the warped clock never runs backwards', `worst ${f(worstBack, 6)}`);
+  let up = 0;
+  for (let i = 0; i < 4000; i++) if (sunAltAt(i / 4000) > 0) up++;
+  ok(Math.abs(up / 4000 - 0.5) < 0.002, 'and the sun is up exactly half the day',
+    `${f((up / 4000) * 100, 1)} %`);
+
+  /* And what the warp is *for*: the light near the horizon is where a cel
+   * ramp earns its keep, and the plain cosine spent the least time there. */
+  let low = 0;
+  for (let i = 0; i < 4000; i++) if (Math.abs(sunAltAt(i / 4000)) < 0.25) low++;
+  const plain = (2 * Math.asin(0.25)) / Math.PI;      // the same count, unwarped
+  ok(low / 4000 > plain * 1.75, 'and the low sun lasts nearly twice as long as a plain cosine gives',
+    `${f((low / 4000) * 100, 1)} % of the day against ${f(plain * 100, 1)} %`);
+
+  /* The sun sets.  It never did: the key light was clamped to 0.22 elevation
+   * and above, so it swung round in azimuth and bobbed but never touched the
+   * skyline — which also meant the sky's "is the sun down" test never fired
+   * and the moon was the sun in a colder colour, in the sun's own place. */
+  const d = new THREE.Vector3();
+  let lowest = 1, highest = -1;
+  for (let i = 0; i < 400; i++) {
+    season.sunDirAt(i / 400, d);
+    lowest = Math.min(lowest, d.y); highest = Math.max(highest, d.y);
+  }
+  ok(lowest < -0.7 && highest > 0.7, 'the sun rises and sets, rather than bobbing overhead',
+    `altitude ${f(lowest, 2)} to ${f(highest, 2)}`);
+
+  /* The moon's phase *is* its place in the sky, which is the astronomy and
+   * costs nothing: full is opposite the sun and up all night, new is beside
+   * it and not there at all. */
+  const sd = new THREE.Vector3(), md = new THREE.Vector3();
+  season.sunDirAt(0.5, sd); season.moonDirAt(0.5, 0.5, md);
+  ok(sd.dot(md) < -0.999, 'a full moon stands opposite the sun', `dot ${f(sd.dot(md), 3)}`);
+  season.moonDirAt(0.5, 0, md);
+  ok(sd.dot(md) > 0.999, 'and a new moon stands with it, which is why you cannot see one');
+  season.sunDirAt(0.5, sd); season.moonDirAt(0.5, 0.5, md);
+  ok(md.y > 0.7, 'so the full moon is high at midnight', `altitude ${f(md.y, 2)}`);
 }
 
 function sOpen() {
@@ -930,6 +982,70 @@ function sGrass() {
     `${over} over, ${empty} empty`);
 }
 
+function sSolid() {
+  /* What you sow is the thing he walks to, and two of the things you can sow
+   * are taller than he is.  Nothing registered them as obstacles, so he
+   * walked into a snowman and settled into an idle inside it.  Three
+   * properties, and the third is the one that makes the other two safe. */
+  const { world, hog, game, step, put, climate, centre } = makeWorld();
+  const snow = climate.state.snow;
+  climate.state.snow = 0.9;                 // sowing gives snowmen
+  try {
+    const m = centre(plan.MEADOW);
+    put(m.x, m.z);
+
+    /* 1. Tapped on his own feet — the case that produced the report. */
+    game.call(hog.x, hog.z);
+    const last = game.sown[game.sown.length - 1];
+    ok(last.kind === 'snowman', 'in deep snow, a tap raises a snowman');
+    const born = plan.distance(hog.x, hog.z, last.x, last.z);
+    ok(born > 0.2, 'sown clear of him, not around him', `${f(born, 3)} m away`);
+    step(600);
+    const settled = plan.distance(hog.x, hog.z, last.x, last.z);
+    ok(settled > 0.13, 'and he comes to rest beside it, not inside it',
+      `${f(settled, 3)} m from its centre`);
+    ok(world.blockedAt(last.x, last.z), 'it is a no-go while it stands');
+
+    /* 2. Called across it: the target is behind the snowman, and he must not
+     *    end up standing in the middle of one to get there. */
+    put(m.x, m.z);
+    let deepest = 0;
+    const far = plan.towards(m.x, m.z, m.x + 6, m.z, 4);
+    game.call(far.x, far.z);
+    const solid = game.sown[game.sown.length - 1];
+    step(900, 1 / 60, () => {
+      const d = plan.distance(hog.x, hog.z, solid.x, solid.z);
+      deepest = Math.max(deepest, 0.135 - d);
+    });
+    ok(deepest <= 0.02, 'walking to one, he never gets inside it',
+      `deepest penetration ${f(Math.max(0, deepest), 3)} m`);
+
+    /* 3. The escape rule.  A blocker put on top of him by any route at all
+     *    must not be a cage — if this fails he is frozen for good, which is
+     *    a far worse bug than the one being fixed. */
+    let clear = null;
+    for (let i = 0; i < 64 && !clear; i++) {
+      const a = (i / 64) * Math.PI * 2;
+      const p = plan.offsetFrom(m, Math.cos(a) * 5, Math.sin(a) * 5);
+      if (!terrain.walkableAt(p.x, p.z)) continue;
+      if (world.blockers.some((b) => plan.distance(p.x, p.z, b.x, b.z) < 2.5)) continue;
+      clear = p; clear.a = a;
+    }
+    ok(!!clear, 'the meadow has open ground to test an escape in');
+    put(clear.x, clear.z);
+    const cage = world.addBlocker(hog.x, hog.z, 0.4);
+    const out = plan.offsetFrom(m, Math.cos(clear.a) * 8, Math.sin(clear.a) * 8);
+    hog.callTo(out.x, out.z);              // no sowing: this is about the cage alone
+    step(600);
+    const escaped = plan.distance(hog.x, hog.z, clear.x, clear.z);
+    world.removeBlocker(cage);
+    ok(escaped > 0.4, 'and a blocker sprung on top of him is never a cage',
+      `he walked ${f(escaped, 2)} m out of a 0.4 m one`);
+  } finally {
+    climate.state.snow = snow;
+  }
+}
+
 function sPersist() {
   /* The save: a browser thing, shimmed here.  What must hold is the round
    * trip — one game writes its numbers, a second game built over the same
@@ -1041,7 +1157,7 @@ const SCENARIOS = {
   plan: sPlan, terrain: sTerrain, planet: sPlanet, clock: sClock,
   open: sOpen, gait: sGait, roll: sRoll, face: sFace, walk: sWalk, idle: sIdle, back: sBack, water: sWater, boat: sBoat,
   road: sRoad, roadmiss: sRoadmiss, abandon: sAbandon,
-  burrow: sBurrow, grass: sGrass, persist: sPersist, palette: sPalette, critters: sCritters, nan: sNan,
+  burrow: sBurrow, grass: sGrass, solid: sSolid, persist: sPersist, palette: sPalette, critters: sCritters, nan: sNan,
 };
 
 const arg = process.argv[2] || 'all';

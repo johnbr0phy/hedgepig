@@ -334,6 +334,29 @@ export function distance(x1, z1, x2, z2) {
   return arcBetween(_r1, _r2);
 }
 
+/**
+ * The point `dist` metres of arc from (x1, z1) along the great circle toward
+ * (x2, z2).  A true slerp, not a lerp-and-normalise: the callers use it to
+ * park him a stated distance from something solid, and an approximation there
+ * puts him a stated distance *inside* it.
+ *
+ * Degenerate cases return the start point, so a caller that asks to step
+ * toward where it already is gets an answer rather than a NaN.
+ */
+const _s1 = new THREE.Vector3();
+const _s2 = new THREE.Vector3();
+export function towards(x1, z1, x2, z2, dist, out = { x: 0, z: 0 }) {
+  dirAt(x1, z1, _s1);
+  dirAt(x2, z2, _s2);
+  const ang = Math.acos(clamp(_s1.dot(_s2), -1, 1));
+  const s = Math.sin(ang);
+  if (!(s > 1e-7)) return flatOf(_s1, out);
+  const f = clamp(dist / R, 0, ang);
+  _p.copy(_s1).multiplyScalar(Math.sin(ang - f) / s)
+    .addScaledVector(_s2, Math.sin(f) / s);
+  return flatOf(_p.normalize(), out);
+}
+
 /** Unit heading from one flat point toward another, in the first one's frame. */
 export function bearing(x1, z1, x2, z2) {
   dirAt(x1, z1, _r1);

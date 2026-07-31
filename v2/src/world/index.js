@@ -98,6 +98,7 @@ export function buildWorld(scene, { places = null, grass: withGrass = true } = {
   const pickables = [ground.land, ...(built.pickables || [])];
   const blockers = built.blockers || [];
   const _d = new THREE.Vector3();
+  const _f = new THREE.Vector3();
 
   return {
     root, ground, water, grass, stats,
@@ -109,6 +110,24 @@ export function buildWorld(scene, { places = null, grass: withGrass = true } = {
     setSound: (fn) => built.setSound?.(fn),
     heightAt,
 
+    blockers,
+
+    /**
+     * Register a no-go at runtime — what you sow, which the builders never
+     * saw.  Returns the record, which is the handle you pass back to
+     * `removeBlocker`.
+     */
+    addBlocker(x, z, r) {
+      const b = { x, z, r, dir: dirAt(x, z, new THREE.Vector3()), cosR: Math.cos(r / R) };
+      blockers.push(b);
+      return b;
+    },
+
+    removeBlocker(b) {
+      const i = blockers.indexOf(b);
+      if (i >= 0) blockers.splice(i, 1);
+    },
+
     /**
      * Anything he may not walk into, beyond the water itself.
      *
@@ -116,12 +135,33 @@ export function buildWorld(scene, { places = null, grass: withGrass = true } = {
      * direction of its centre and the cosine of its radius, so the test is
      * "is this direction inside that cone".  With two hundred blockers on an
      * open planet, `acos` per blocker per step was showing up in the frame.
+     *
+     * `(fx, fz)` is where the step is coming *from*, and it buys one thing
+     * that matters more than it looks: **a blocker may never hold something
+     * that is already inside it.**  A snowman sown on top of him would
+     * otherwise be a cage — every direction refused, his own escape included
+     * — and the only cure would be a rule about where things may be sown,
+     * which is a rule that will eventually be got wrong.  Deeper is refused;
+     * anything else is allowed.
+     *
+     * Not *strictly* outward, which was the first version of this and was
+     * still a cage: with a second blocker in front of him the only way out is
+     * `tryStep`'s slide, and a slide is tangential — the same depth, not
+     * less — so both moves were refused and he was pinned between two things
+     * he could have walked around.
      */
-    blockedAt(x, z) {
+    blockedAt(x, z, fx, fz) {
       dirAt(x, z, _d);
+      const inside = fx !== undefined ? dirAt(fx, fz, _f) : null;
       for (const b of blockers) {
         if (b.enabled === false) continue;
-        if (_d.dot(b.dir) > b.cosR) return true;
+        const d = _d.dot(b.dir);
+        if (d <= b.cosR) continue;
+        if (inside) {
+          const was = inside.dot(b.dir);
+          if (was > b.cosR && d <= was) continue;     // already in it, and not going deeper
+        }
+        return true;
       }
       return false;
     },

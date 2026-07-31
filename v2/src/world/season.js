@@ -14,9 +14,18 @@ import { clamp, lerp, TAU, sstep } from '../core/util.js';
  * you would be a nonsense — so they are clocks now.
  *
  * The three periods are still deliberately coprime-ish, for the same
- * reason: a lap of the planet takes about 220 s at his pace, the day is
- * 150 s and the year 204 s, so a given place, hour and season line up again
- * roughly once every four hours of play.
+ * reason: a lap of the planet takes about 220 s at his pace, so a given
+ * place, hour and season line up again only after many laps.
+ *
+ * **The year used to be shorter than one and a half days.**  150 s and
+ * 204 s is 1.36 days per year, so a season lasted 51 s — less than half a
+ * day — and the world went spring-summer-autumn-winter *inside a single
+ * afternoon*.  Nothing in the code was wrong; every weight was derived
+ * correctly from a year that was simply far too short, and what it produced
+ * was a palette that never settled and snow that arrived and left twice
+ * before dark.  It reads as a bug in the weather, and the bug is here.
+ * A season is now 1.1 days, which is long enough to be a season and short
+ * enough that you see all four.
  *
  * **Snow and night are times, not places.**  v1 tried them as zones, found
  * it jarring, and made them weights instead; that is kept exactly.  Season
@@ -24,8 +33,11 @@ import { clamp, lerp, TAU, sstep } from '../core/util.js';
  * sky, whether there is ice on the lake, and whether the bees fly at all.
  * ------------------------------------------------------------------ */
 
-export const DAY = 150;
-export const YEAR = 204;
+export const DAY = 240;
+export const YEAR = 1080;          // 4.5 days; a season is 1.125 of one
+/** How long the moon takes to go round its phases.  Six days: one night to
+ *  the next is a visibly different moon, one hour to the next is not. */
+export const LUNATION = 6 * DAY;
 
 /* Phase 0 is noon, not midnight — that is what `nightAt` below assumes, and
  * getting it the other way round lights the world at 40 % night while the
@@ -33,10 +45,42 @@ export const YEAR = 204;
 export const HOURS = ['noon', 'afternoon', 'evening', 'dusk', 'deep night', 'before dawn', 'dawn', 'morning'];
 
 /**
- * How dark it is at day-phase `dp`. v1's `nightAt`, unchanged: flat dark
- * through the small hours and quick at the edges.
+ * What to call the hour, from the sun's own height and whether it is on the
+ * way up.  It was an eighth of the clock each, which was fine while the clock
+ * ran at one speed; with the phase warped, equal eighths are no longer equal
+ * amounts of daylight and the readout said "dawn" for a sun already 25° up.
+ * An hour has always been a description of the light, so read it off the
+ * light.
  */
-export const nightAt = (dp) => clamp((-Math.cos(dp * TAU) - 0.22) / 0.78, 0, 1);
+export function hourNameAt(alt, rising) {
+  if (alt > 0.86) return 'noon';
+  if (alt > 0.34) return rising ? 'morning' : 'afternoon';
+  if (alt > 0.09) return rising ? 'early' : 'evening';
+  if (alt > -0.03) return rising ? 'sunrise' : 'sunset';
+  if (alt > -0.28) return rising ? 'dawn' : 'dusk';
+  if (alt > -0.86) return rising ? 'before dawn' : 'night';
+  return 'deep night';
+}
+
+/**
+ * **The clock does not run at one speed.**
+ *
+ * A sun on a plain cosine moves *fastest* through the horizon and dawdles at
+ * noon and midnight, which is precisely backwards for how a day looks: the
+ * two minutes either side of sunset are the only part of the cycle where the
+ * light has anything to say, and they were the part the world spent least
+ * time in.  This warps the day-phase before anything reads it — slow near
+ * the horizon crossings, quick over the top and under the bottom — so
+ * twilight runs at 45 % speed and takes 18 % of the day instead of 8 %,
+ * while noon and midnight run at 155 % and are over sooner.
+ *
+ * It is a *phase* warp, not a separate curve per system, and that is the
+ * point: `sunAltAt`, `nightAt`, the hour readout and the moon all read the
+ * warped phase, so they cannot disagree.  Day and night are still exactly
+ * half the clock each — the warp is antisymmetric about the crossings.
+ */
+const SKEW = 0.55;                                  // 0 is a plain cosine; must stay under 1
+export const solarPhase = (dp) => dp + (SKEW / (2 * TAU)) * Math.sin(2 * TAU * dp);
 
 /**
  * How high the sun is at day-phase `dp`: +1 overhead, -1 under our feet.
@@ -46,7 +90,46 @@ export const nightAt = (dp) => clamp((-Math.cos(dp * TAU) - 0.22) / 0.78, 0, 1);
  * 40 % night while the readout said "morning", and read as a moody palette
  * rather than as a bug for an embarrassingly long time.
  */
-export const sunAltAt = (dp) => Math.cos(dp * TAU);
+export const sunAltAt = (dp) => Math.cos(solarPhase(dp) * TAU);
+
+/**
+ * How dark it is at day-phase `dp`. v1's `nightAt`, with its -0.22 offset so
+ * that dusk lags sunset — but now *derived from the sun* rather than written
+ * out again in parallel, so the two can no longer drift apart.
+ */
+export const nightAt = (dp) => clamp((-sunAltAt(dp) - 0.22) / 0.78, 0, 1);
+
+/** How far the sun's arc leans off the vertical, so noon is not the zenith. */
+const TILT = 0.42;
+
+/**
+ * Where the sun is, in his own frame: x east, y up, z north.  It **sets**,
+ * which is new — the old rig held the key light at 0.22 elevation or above
+ * at all times, so the sun never once touched the horizon: it swung round in
+ * azimuth and bobbed, and since it was never below the skyline the sky's
+ * "whichever of sun and anti-sun is up" test never fired and the moon was
+ * only ever the sun wearing a different colour.
+ */
+export function sunDirAt(dp, out = new THREE.Vector3()) {
+  const th = solarPhase(dp) * TAU;
+  // -sin, so he sees it rise in the east and set in the west, not the reverse
+  return out.set(-Math.sin(th), Math.cos(th) * Math.cos(TILT), Math.cos(th) * Math.sin(TILT))
+    .normalize();
+}
+
+/**
+ * Where the moon is.  Its lag behind the sun **is** its phase — that is the
+ * actual astronomy and it costs nothing: a full moon is opposite the sun and
+ * therefore up all night, a new moon is beside the sun and therefore not
+ * there at all, and a crescent is a thing you catch near dawn or dusk.  The
+ * old moon was pinned exactly opposite the sun while being *drawn* with an
+ * unrelated phase, which is a full moon's geometry with a crescent's face.
+ */
+export function moonDirAt(dp, phase, out = new THREE.Vector3()) {
+  const th = (solarPhase(dp) + phase) * TAU;
+  return out.set(-Math.sin(th), Math.cos(th) * Math.cos(TILT), Math.cos(th) * Math.sin(TILT))
+    .normalize();
+}
 
 const _a = new THREE.Color();
 const _b = new THREE.Color();
@@ -67,6 +150,38 @@ function seasonColor(key, w, out = new THREE.Color()) {
   return out;
 }
 
+/**
+ * The colour of the air at the skyline, by sun altitude.
+ *
+ * Read down it: pale warm while the sun is high, gold as it comes down, red
+ * on the horizon itself, then the magenta afterglow, then the blue hour, then
+ * nothing.  This ramp is doing the work that a Rayleigh/Mie scattering model
+ * does in a photoreal sky — the stops are chosen rather than integrated,
+ * which is the correct trade in a world drawn with four-band toon ramps.
+ */
+const GLOW = [
+  [0.55, 0xfff2d2], [0.26, 0xffd79a], [0.08, 0xffab5e],
+  [-0.02, 0xef6f52], [-0.12, 0xb85386], [-0.26, 0x5b4f96], [-0.45, 0x2b2f5a],
+];
+/** Opposite the sun: the counter-glow, which is pinker and much fainter. */
+const COUNTER = [
+  [0.55, 0xeef2f0], [0.26, 0xdfe6ee], [0.08, 0xd0b6c8],
+  [-0.02, 0xb98fae], [-0.12, 0x74689f], [-0.26, 0x3f4478], [-0.45, 0x252a4e],
+];
+
+function rampAt(ramp, alt, out) {
+  if (alt >= ramp[0][0]) return out.set(ramp[0][1]);
+  for (let i = 1; i < ramp.length; i++) {
+    if (alt >= ramp[i][0]) {
+      const t = (alt - ramp[i][0]) / (ramp[i - 1][0] - ramp[i][0]);
+      return out.set(ramp[i][1]).lerp(_a.set(ramp[i - 1][1]), t);
+    }
+  }
+  return out.set(ramp[ramp.length - 1][1]);
+}
+const glowAt = (alt, out) => rampAt(GLOW, alt, out);
+const counterAt = (alt, out) => rampAt(COUNTER, alt, out);
+
 function seasonNumber(key, w) {
   let v = 0;
   for (let i = 0; i < 4; i++) v += SEASONS[i][key] * w[i];
@@ -75,12 +190,13 @@ function seasonNumber(key, w) {
 
 export function createClimate({
   scene, sun, fill, bounce, hemi, sky, grass, pipeline,
-  startAt = 0.30, startHour = 0.86,
+  /* 0.915 of a day is mid-morning *after the warp* — the light is off the
+   * vertical, which is when a cel ramp has the most to say.  Before the warp
+   * the same number was well past sunrise; a raw phase is no longer an hour. */
+  startAt = 0.30, startHour = 0.915,
 }) {
   const state = {
     t: startAt * YEAR,
-    // 0.86 of a day is mid-morning: the light is off the vertical, which is
-    // when a cel ramp has the most to say
     dayT: startHour * DAY,
     w: [1, 0, 0, 0],
     season: 'spring',
@@ -91,7 +207,24 @@ export function createClimate({
     leafFall: 0,
     wind: 0.16,
     wet: 0,
+    /** The true sun, which goes below the horizon. */
     sunDir: new THREE.Vector3(-0.4, 0.8, 0.45),
+    /** The true moon, wherever its phase has put it. */
+    moonDir: new THREE.Vector3(0.4, -0.8, -0.45),
+    /** What the key light actually follows: the sun by day, the moon by night. */
+    keyDir: new THREE.Vector3(-0.4, 0.8, 0.45),
+    keyIsSun: true,
+    sunAlt: 1,
+    moonAlt: -1,
+    moonPhase: 0.5,
+    /** 0 by night, 1 in clear daylight — the honest one, unlike `1 - night`. */
+    day: 1,
+    /** How dark it *looks*, which starts at sunset, not thirteen degrees after. */
+    dark: 0,
+    /** Peaks with the sun on the skyline and is zero by 20° either side. */
+    golden: 0,
+    /** The sun is *under* the horizon but the sky is still lit. */
+    twilight: 0,
     dayPhase: 0.34,
     yearPhase: startAt,
   };
@@ -100,6 +233,8 @@ export function createClimate({
   const skyMid = new THREE.Color();
   const skyHaze = new THREE.Color();
   const fogCol = new THREE.Color();
+  const skyGlow = new THREE.Color();
+  const skyCounter = new THREE.Color();
   const grassCol = new THREE.Color();
   const groundCol = new THREE.Color();
 
@@ -140,18 +275,74 @@ export function createClimate({
     state.wind = base * (swell + gust);
 
     /* --- the day --- */
+    const sp = solarPhase(dp) % 1;
     state.night = nightAt(dp);
-    const n = state.night;
-    state.hour = HOURS[Math.floor(dp * 8) % 8];
+    state.hour = hourNameAt(sunAltAt(dp), sp > 0.5);
 
     /* --- where the light comes from --- */
     const alt = sunAltAt(dp);                        // +1 noon, -1 midnight
-    const az = dp * TAU;
-    // never let the key light lie flat on the ground: at dawn and dusk it
-    // grazes, which is what we want, but a light at 0° elevation gives every
-    // toon surface the same band and the world goes flat
-    const elev = Math.max(Math.abs(alt), 0.22) * (alt < 0 ? 0.75 : 1);
-    state.sunDir.set(Math.sin(az) * 0.85, elev, Math.cos(az) * 0.5).normalize();
+    state.sunAlt = alt;
+    state.moonPhase = (state.t / LUNATION) % 1;
+    sunDirAt(dp, state.sunDir);
+    moonDirAt(dp, state.moonPhase, state.moonDir);
+    state.moonAlt = state.moonDir.y;
+    // 0 new, 1 full — and it is how much light the moon has to give
+    const fullness = 0.5 - 0.5 * Math.cos(state.moonPhase * TAU);
+
+    state.day = sstep(-0.02, 0.26, alt);
+    /* **`night` is not darkness, it is night.**  v1's curve carries a
+     * deliberate -0.22 offset so that dusk lags sunset, which is right for
+     * anything that asks *is it night* — fireflies, the owl, lit windows —
+     * and quite wrong for anything that asks *what colour is it*.  It stays
+     * flat at zero until the sun is 13° under, so the whole of dusk was being
+     * painted in full daylight sky colours with only the horizon glow laid
+     * over the top: a flat cream wash where the blue hour should be.  This is
+     * the colour curve, and it starts the moment the sun touches the rim. */
+    state.dark = 1 - sstep(-0.35, 0.10, alt);
+    const dk = state.dark;
+    state.golden = clamp(1 - Math.abs(alt) / 0.30, 0, 1);
+    state.twilight = sstep(-0.42, -0.02, alt) * (1 - sstep(-0.02, 0.10, alt));
+
+    /* How dark the *lighting* is, which is neither of the other two.  `night`
+     * is still zero through all of dusk, so lighting off it leaves the world
+     * at full noon intensity under a violet sky; `dark` reaches one before the
+     * sun is 20° under, so lighting off *that* makes dusk as black as
+     * midnight.  Take the higher of the two with the fast one held back:
+     * evening dims steadily and the small hours are still the darkest part. */
+    const lum = Math.max(state.night, dk * 0.62);
+
+    /* Two keys, one light.  The sun hands over to the moon in the window
+     * where **both** are dark — the sun below -0.02 and the moon not yet
+     * counted until then — so the direction swaps while nothing is casting,
+     * and what you see across the swap is a minute of skylight only.  That
+     * minute is the blue hour, and it is free.
+     *
+     * And there is a floor under all of it.  The old rig never let the sun
+     * below 0.22 elevation, so there was *always* a key light — take the
+     * clamp away without replacing it and a moonless night has no directional
+     * light at all, which came out as a black field with a catchlight
+     * floating in it.  A clear night is not black; it is dim and blue and it
+     * comes from the whole sky.  So: the moon when there is one, and a fifth
+     * of a light from overhead when there is not. */
+    const sunKey = sstep(-0.02, 0.17, alt);
+    const moonLight = fullness * sstep(-0.02, 0.16, state.moonAlt);
+    const moonKey = moonLight * (1 - sstep(-0.06, 0.04, alt));
+    state.keyIsSun = sunKey > 0.001;
+    if (state.keyIsSun) {
+      state.keyDir.copy(state.sunDir);
+    } else if (moonKey > 0.02) {
+      state.keyDir.copy(state.moonDir);
+    } else {
+      // no moon: skyglow, from above and leaning away from where the sun went
+      state.keyDir.set(-state.sunDir.x * 0.35, 1, -state.sunDir.z * 0.35).normalize();
+    }
+    /* Never let the key lie flat on the ground: grazing is the whole point at
+     * dawn, but at 0° every toon surface takes the same band and the world
+     * goes flat.  Lift it, keeping its bearing. */
+    if (state.keyDir.y < 0.14) {
+      state.keyDir.y = 0.14;
+      state.keyDir.normalize();
+    }
 
     /* --- colour --- */
     seasonColor('sky', w, skyMid);
@@ -160,20 +351,38 @@ export function createClimate({
     skyTop.copy(skyMid).lerp(_c, 0.45);
 
     // night pulls everything toward the night palette
-    if (n > 0) {
-      _d.set(NIGHT.skyTop); skyTop.lerp(_d, n * 0.92);
-      _d.set(NIGHT.sky);    skyMid.lerp(_d, n * 0.9);
-      _d.set(NIGHT.haze);   skyHaze.lerp(_d, n * 0.85);
+    if (dk > 0) {
+      _d.set(NIGHT.skyTop); skyTop.lerp(_d, dk * 0.92);
+      _d.set(NIGHT.sky);    skyMid.lerp(_d, dk * 0.9);
+      _d.set(NIGHT.haze);   skyHaze.lerp(_d, dk * 0.85);
     }
 
+    /* The horizon glow.
+     *
+     * The dome was a function of *height only*, so a sunset looked exactly
+     * the same in every direction you turned — the one thing that gives a sky
+     * an hour and a bearing was missing, and no amount of tuning the three
+     * stops could put it back.  `glowAt` is the colour of the air right at
+     * the skyline for a given sun altitude, and the dome now lays it in on
+     * the sun's side and its own cooler counterpart opposite: warm where the
+     * sun is going down, violet-blue away from it. */
+    glowAt(alt, skyGlow);
+    counterAt(alt, skyCounter);
+    const glowAmt = clamp(state.golden * 0.92 + state.twilight * 0.55, 0, 1);
+
     sky.setColors({
-      top: skyTop, mid: skyMid, haze: skyHaze, night: n,
-      cloud: _a.set(PAL.cloud).lerp(_b.set(0x8f9ac4), n).getHex(),
-      cloudShade: _a.set(PAL.cloudShade).lerp(_b.set(0x5c648e), n).getHex(),
-      // thirteen lunations a year, so two evenings apart is a different moon
-      moonPhase: (state.yearPhase * 13) % 1,
+      top: skyTop, mid: skyMid, haze: skyHaze, night: dk,
+      glow: skyGlow, counter: skyCounter, glowAmt,
+      cloud: _a.set(PAL.cloud).lerp(_b.set(0x8f9ac4), dk)
+        .lerp(skyGlow, state.golden * 0.55).getHex(),
+      cloudShade: _a.set(PAL.cloudShade).lerp(_b.set(0x5c648e), dk)
+        .lerp(skyCounter, state.golden * 0.40).getHex(),
+      moonPhase: state.moonPhase,
+      moonUp: sstep(-0.06, 0.06, state.moonAlt),
+      sunUp: sstep(-0.05, 0.05, alt),
+      starAmt: 1 - sstep(-0.22, 0.02, alt),
       // the aurora belongs to deep winter nights and nowhere else
-      aurora: n * w[3],
+      aurora: state.night * w[3],
     });
 
     /* Fog takes the horizon colour, so the world dissolves into its own sky.
@@ -187,31 +396,44 @@ export function createClimate({
      * you pressed P.  (The other half of that fix is in `main.js`, which now
      * arms the next frame first.) */
     if (scene.fog) {
-      fogCol.copy(skyHaze).lerp(skyMid, 0.35);
+      fogCol.copy(skyHaze).lerp(skyMid, 0.35)
+        .lerp(skyGlow, state.golden * 0.45 + state.twilight * 0.30);
       scene.fog.color.copy(fogCol);
-      scene.fog.near = lerp(11, 7, n) * lerp(1, 0.72, state.snowFall);
-      scene.fog.far = lerp(40, 26, n) * lerp(1, 0.62, state.snowFall);
+      scene.fog.near = lerp(11, 7, dk) * lerp(1, 0.72, state.snowFall);
+      scene.fog.far = lerp(40, 26, dk) * lerp(1, 0.62, state.snowFall);
     } else {
-      fogCol.copy(skyHaze).lerp(skyMid, 0.35);
+      fogCol.copy(skyHaze).lerp(skyMid, 0.35)
+        .lerp(skyGlow, state.golden * 0.45 + state.twilight * 0.30);
     }
 
-    /* --- lights --- */
+    /* --- lights --- *
+     * The key is the sun's colour while the sun is up and the moon's once it
+     * is not, and between the two it is simply *off*: a directional light at
+     * a tenth of an intensity still draws a shadow with a bearing, and a
+     * shadow pointing at a sun that set two minutes ago is the kind of thing
+     * nobody names but everybody feels.  What lights the blue hour is the
+     * hemisphere and the fill, which is also what lights it outdoors. */
     seasonColor('sun', w, _a);
+    // the low sun is its own colour, not the noon one dimmed
+    _a.lerp(skyGlow, state.golden * 0.62);
     _b.set(NIGHT.sun);
-    sun.color.copy(_a).lerp(_b, n);
-    sun.intensity = lerp(2.15, 0.52, n) * lerp(1, 0.72, state.wet);
+    sun.color.copy(state.keyIsSun ? _a : _b.set(0xc3d2ff));
+    sun.intensity = state.keyIsSun
+      ? lerp(2.15, 0.95, state.golden) * sunKey * lerp(1, 0.72, state.wet)
+      : (0.26 + 0.46 * moonKey) * dk * lerp(1, 0.6, state.wet);
 
     seasonColor('fill', w, _a);
     _b.set(NIGHT.fill);
-    fill.color.copy(_a).lerp(_b, n);
-    fill.intensity = lerp(1.05, 0.42, n);
+    fill.color.copy(_a).lerp(_b, dk);
+    // the fill carries the twilight: it is the sky, and at dusk the sky is lit
+    fill.intensity = lerp(1.05, 0.42, lum) + state.twilight * 0.55;
 
     _a.set(PAL.hemiSky); _b.set(NIGHT.hemiSky);
-    hemi.color.copy(_a).lerp(_b, n);
+    hemi.color.copy(_a).lerp(_b, dk).lerp(skyGlow, state.golden * 0.34 + state.twilight * 0.30);
     _a.set(PAL.hemiGround); _b.set(NIGHT.hemiGround);
-    hemi.groundColor.copy(_a).lerp(_b, n);
-    hemi.intensity = lerp(1.05, 0.46, n);
-    bounce.intensity = lerp(0.32, 0.12, n);
+    hemi.groundColor.copy(_a).lerp(_b, dk);
+    hemi.intensity = lerp(1.05, 0.52, lum) + state.twilight * 0.22;
+    bounce.intensity = lerp(0.32, 0.14, lum);
 
     /* --- the world's own colours --- */
     seasonColor('grass', w, grassCol);
@@ -223,10 +445,10 @@ export function createClimate({
       groundCol.lerp(_a, state.snow * 0.86);
     }
     // and the whole lot cools off after dark
-    if (n > 0) {
+    if (dk > 0) {
       _a.set(0x5a6a94);
-      grassCol.lerp(_a, n * 0.5);
-      groundCol.lerp(_a, n * 0.5);
+      grassCol.lerp(_a, lum * 0.5);
+      groundCol.lerp(_a, lum * 0.5);
     }
 
     seasonColor('canopy', w, _c);
@@ -240,16 +462,16 @@ export function createClimate({
       _d.lerp(_a, state.snow * 0.40);
       _e.lerp(_a, state.snow * 0.40);
     }
-    if (n > 0) {
+    if (dk > 0) {
       _a.set(0x46527e);
-      _c.lerp(_a, n * 0.55);
-      _d.lerp(_a, n * 0.55);
-      _e.lerp(_a, n * 0.55);
+      _c.lerp(_a, dk * 0.55);
+      _d.lerp(_a, dk * 0.55);
+      _e.lerp(_a, dk * 0.55);
     }
 
     _a.set(PAL.water);
     if (state.snow > 0.45) _a.lerp(_b.set(PAL.ice), clamp((state.snow - 0.45) / 0.4, 0, 1));
-    if (n > 0) _a.lerp(_b.set(0x2f4568), n * 0.7);
+    if (dk > 0) _a.lerp(_b.set(0x2f4568), dk * 0.7);
 
     applyPalette({
       grass: grassCol,
@@ -266,7 +488,7 @@ export function createClimate({
      * goes from dark glass to warm paper.  It costs nothing and reads from
      * right across the field, which a real point light at this scale would
      * not. */
-    const lit = clamp((n - 0.25) / 0.4, 0, 1);
+    const lit = clamp((dk - 0.30) / 0.35, 0, 1);
     applyPalette({
       window: _a.set(0x2b2130).lerp(_b.set(0xffd489), lit),
       lamp: _a.set(0x6a6858).lerp(_b.set(0xfff0c0), lit),
@@ -275,21 +497,27 @@ export function createClimate({
     state.lit = lit;
 
     // shade goes bluer and deeper after dark; ink goes with it
-    _a.set(0x6b5f8e).lerp(_b.set(0x2d3352), n);
+    _a.set(0x6b5f8e).lerp(_b.set(0x2d3352), dk);
     setShadowTint(_a.getHex());
-    _a.set(PAL.ink).lerp(_b.set(NIGHT.ink), n);
+    _a.set(PAL.ink).lerp(_b.set(NIGHT.ink), dk);
     setOutlineColor(_a.getHex());
     pipeline.ink.mat.uniforms.uInk.value.copy(_a);
 
     /* --- the grade --- */
     const gr = pipeline.grade.mat.uniforms;
-    _a.set(0xaea9d2).lerp(_b.set(0x6d78ad), n);
+    /* Golden hour is not "everything warmer" — it is the *split*: the lit
+     * side goes gold and the shade goes further blue at the same time, and it
+     * is the distance between them that reads as evening.  Warming both is
+     * what a sepia filter does, and it looks like one. */
+    _a.set(0xaea9d2).lerp(_b.set(0x6d78ad), dk).lerp(_b.set(0x7f8cd8), state.golden * 0.55);
     gr.uShadowTint.value.copy(_a);
-    _a.set(0xfff8ea).lerp(_b.set(0xc3ccec), n);
+    _a.set(0xfff8ea).lerp(_b.set(0xc3ccec), dk).lerp(_b.set(0xffd9a2), state.golden * 0.72);
     gr.uLightTint.value.copy(_a);
-    gr.uSaturation.value = lerp(1.12, 0.86, n) * lerp(1, 0.88, state.wet);
-    gr.uWarmth.value = lerp(0.028, -0.02, n) + 0.045 * w[2];
-    gr.uVignette.value = lerp(0.16, 0.30, n);
+    gr.uSaturation.value = lerp(1.12, 0.86, dk) * lerp(1, 0.88, state.wet)
+      + state.golden * 0.14;
+    gr.uWarmth.value = lerp(0.028, -0.02, dk) + 0.045 * w[2] + state.golden * 0.05
+      - state.twilight * 0.035;
+    gr.uVignette.value = lerp(0.16, 0.30, dk) + state.golden * 0.05;
 
     /* --- the field itself --- */
     grass.setSeason(seasonNumber('len', w), seasonNumber('den', w));

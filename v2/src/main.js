@@ -584,7 +584,7 @@ function frame() {
     chase.update(dt);
     const b = basisAt(hog.x, hog.z);
     positionAt(hog.x, 0, hog.z, _origin);
-    SUN_LOCAL.copy(state.sunDir);
+    SUN_LOCAL.copy(state.keyDir);
     seatLight(sun, SUN_LOCAL, b, _origin, 26);
     seatLight(fill, FILL_LOCAL, b, _origin, 14);
     seatLight(bounce, BOUNCE_LOCAL, b, _origin, 12);
@@ -592,7 +592,7 @@ function frame() {
   }
 
   sky.setWet(state.wet);
-  sky.update(dt, camera, planetView ? null : state.sunDir);
+  sky.update(dt, camera, planetView ? null : state);
   hud.update(dt);
 
   pipeline.render(dt);
@@ -623,7 +623,7 @@ if (import.meta.env?.DEV) {
       chase.update(0.016);
       const b = basisAt(hog.x, hog.z);
       positionAt(hog.x, 0, hog.z, _origin);
-      seatLight(sun, climate.state.sunDir, b, _origin, 26);
+      seatLight(sun, climate.state.keyDir, b, _origin, 26);
       seatLight(fill, FILL_LOCAL, b, _origin, 14);
       seatLight(bounce, BOUNCE_LOCAL, b, _origin, 12);
       hemi.position.copy(b.up);
@@ -634,7 +634,7 @@ if (import.meta.env?.DEV) {
       camera.up.set(0, 1, 0);
       camera.lookAt(CENTER);
     }
-    sky.update(0.0001, camera, planetView ? null : climate.state.sunDir);
+    sky.update(0.0001, camera, planetView ? null : climate.state);
 
     camera.aspect = W / H;
     camera.updateProjectionMatrix();

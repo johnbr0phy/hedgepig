@@ -30,6 +30,13 @@ export function buildSky(scene, radius = 300) {
       uMid: { value: new THREE.Color(PAL.skyMid) },
       uHaze: { value: new THREE.Color(PAL.skyHaze) },
       uBands: { value: 26.0 },
+      /* The sky's *bearing*.  Without these three the dome is a function of
+       * height alone and every sunset looks identical whichever way you turn,
+       * which is the single largest thing that was missing from it. */
+      uGlow: { value: new THREE.Color(0xffab5e) },
+      uCounter: { value: new THREE.Color(0xd0b6c8) },
+      uGlowAmt: { value: 0 },
+      uSunFlat: { value: new THREE.Vector3(0, 0, 1) },
     },
     vertexShader: /* glsl */ `
       varying vec3 vWorld;
@@ -40,12 +47,14 @@ export function buildSky(scene, radius = 300) {
       }
     `,
     fragmentShader: /* glsl */ `
-      uniform vec3 uTop, uMid, uHaze;
-      uniform float uBands;
+      uniform vec3 uTop, uMid, uHaze, uGlow, uCounter;
+      uniform float uBands, uGlowAmt;
+      uniform vec3 uSunFlat;
       varying vec3 vWorld;
 
       void main() {
-        float h = normalize( vWorld ).y;
+        vec3 dir = normalize( vWorld );
+        float h = dir.y;
         // soft quantisation: mostly smooth, with a faint painted step
         float t = clamp( h * 1.15 + 0.02, 0.0, 1.0 );
         float q = floor( t * uBands ) / uBands;
@@ -58,6 +67,17 @@ export function buildSky(scene, radius = 300) {
         vec3 col = mix( uHaze, uMid, smoothstep( 0.0, 0.14, t ) );
         col = mix( col, uTop, smoothstep( 0.16, 0.78, t ) );
         col = mix( col, uHaze, smoothstep( 0.12, -0.05, h ) * 0.6 );
+
+        /* The glow.  It hugs the skyline — an exponential rather than a
+         * smoothstep, so it has no upper edge to read as a band — and it
+         * leans hard toward the sun's bearing: gold where the sun is, the
+         * cooler counter-glow behind you.  The forward lobe is tight
+         * (a high power) because a wide one is just an orange sky, and an
+         * orange sky is a filter, not a sunset. */
+        float toward = dot( normalize( vec3( dir.x, 0.0, dir.z ) ), uSunFlat ) * 0.5 + 0.5;
+        float band = exp( -max( h, 0.0 ) * 5.5 );
+        vec3 warm = mix( uCounter, uGlow, pow( toward, 2.2 ) );
+        col = mix( col, warm, clamp( uGlowAmt * band, 0.0, 1.0 ) );
         gl_FragColor = vec4( col, 1.0 );
       }
     `,
@@ -67,12 +87,20 @@ export function buildSky(scene, radius = 300) {
   dome.renderOrder = -10;
   group.add(dome);
 
-  /* --- the light in the sky: sun by day, moon by night, one disc ---
+  /* --- the two lights in the sky ---
    *
-   * The moon has a **phase**, carved by a second circle sliding across the
-   * first, and the phase runs off the year clock — thirteen lunations a
-   * year, so a night sky two evenings apart is visibly a different moon.
-   * By day the same disc is the sun and the shader leaves it whole. */
+   * They were **one disc** with a rule that flipped it to the anti-solar
+   * point whenever the sun went below the horizon.  Two things were wrong
+   * with that and one of them hid the other: the sun's direction was clamped
+   * to stay above the horizon at all times, so the flip never once fired and
+   * the "moon" was only ever the sun in a colder colour, in the sun's own
+   * place; and even had it fired, one disc means sun and moon can never
+   * share a sky, which they do most evenings of the real world.
+   *
+   * They are separate objects now, each simply drawn where it is, each fading
+   * out as it goes under.  The moon's phase is carved by a second circle slid
+   * across the first, and its phase and its position are the *same number* —
+   * see `moonDirAt`. */
   const discMat = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
@@ -110,10 +138,19 @@ export function buildSky(scene, radius = 300) {
       }
     `,
   });
+  const moonMat = discMat.clone();
+  moonMat.uniforms = THREE.UniformsUtils.clone(discMat.uniforms);
+  moonMat.uniforms.uNight.value = 1;                 // the moon is always a moon
+
   const disc = new THREE.Mesh(new THREE.PlaneGeometry(radius * 0.104, radius * 0.104), discMat);
   disc.renderOrder = -9;
   disc.frustumCulled = false;
   group.add(disc);
+
+  const moon = new THREE.Mesh(new THREE.PlaneGeometry(radius * 0.072, radius * 0.072), moonMat);
+  moon.renderOrder = -9;
+  moon.frustumCulled = false;
+  group.add(moon);
 
   const haloMat = flat({
     color: 0xfff2d0, map: starTex(), transparent: true, opacity: 0.30,
@@ -123,6 +160,15 @@ export function buildSky(scene, radius = 300) {
   halo.renderOrder = -10;
   halo.frustumCulled = false;
   group.add(halo);
+
+  const moonHaloMat = flat({
+    color: 0xdfe8ff, map: starTex(), transparent: true, opacity: 0,
+    depthWrite: false, fog: false, cache: false,
+  });
+  const moonHalo = new THREE.Mesh(new THREE.PlaneGeometry(radius * 0.13, radius * 0.13), moonHaloMat);
+  moonHalo.renderOrder = -10;
+  moonHalo.frustumCulled = false;
+  group.add(moonHalo);
 
   /* --- stars --- */
   const rng = rngKit(2711);
@@ -294,19 +340,29 @@ export function buildSky(scene, radius = 300) {
   scene.add(group);
 
   const _c = new THREE.Color();
+  const _g = new THREE.Color();
   const _sunDir = new THREE.Vector3(0, 1, 0);
+  const _moonDir = new THREE.Vector3(0, -1, 0);
   const _anti = new THREE.Vector3();
+  const _flat = new THREE.Vector3();
   let skyT = 0;
   let nightNow = 0;
   let wetNow = 0;
 
   return {
-    group, dome, clouds, stars, disc, halo,
+    group, dome, clouds, stars, disc, halo, moon, moonHalo,
 
     /** Sky colours for the hour. `night` is 0 by day, 1 at full dark. */
-    setColors({ top, mid, haze, night = 0, cloud, cloudShade, moonPhase = 0.5, aurora = 0 }) {
+    setColors({
+      top, mid, haze, night = 0, cloud, cloudShade, moonPhase = 0.5, aurora = 0,
+      glow = null, counter = null, glowAmt = 0,
+      sunUp = 1, moonUp = 0, starAmt = null,
+    }) {
       auroraNow = aurora;
-      const starA = clamp((night - 0.18) / 0.55, 0, 1);
+      /* Stars come up with the *sun going down*, not with a night scalar that
+       * is still zero a long way past sunset — `starAmt` reaches them before
+       * `night` has begun to move, which is when the first of them appear. */
+      const starA = clamp(starAmt === null ? (night - 0.18) / 0.55 : starAmt, 0, 1);
       const cu = constellations.userData;
       cu.lines.material.opacity = starA * 0.16;
       cu.bright.material.opacity = starA * 0.75;
@@ -314,17 +370,35 @@ export function buildSky(scene, radius = 300) {
       domeMat.uniforms.uTop.value.set(top);
       domeMat.uniforms.uMid.value.set(mid);
       domeMat.uniforms.uHaze.value.set(haze);
+      if (glow) domeMat.uniforms.uGlow.value.set(glow);
+      if (counter) domeMat.uniforms.uCounter.value.set(counter);
+      domeMat.uniforms.uGlowAmt.value = glowAmt;
       nightNow = night;
-      starMat.opacity = clamp((night - 0.18) / 0.55, 0, 1) * 0.9;
+      starMat.opacity = starA * 0.9;
       stars.visible = starMat.opacity > 0.01;
-      // the disc cools and shrinks into a moon, and takes its phase
-      _c.set(0xfff6de).lerp(new THREE.Color(0xe9eeff), night);
+
+      /* The sun reddens as it goes down, because the air it is seen through
+       * is the same air that is reddening the sky behind it. */
+      _c.set(0xfff6de);
+      if (glow) _c.lerp(_g.set(glow), clamp(glowAmt, 0, 1) * 0.75);
       discMat.uniforms.uColor.value.copy(_c);
-      discMat.uniforms.uNight.value = night;
+      discMat.uniforms.uNight.value = 0;
+      discMat.uniforms.uOpacity.value = 0.95 * sunUp;
+      disc.visible = sunUp > 0.01;
+      haloMat.opacity = 0.30 * sunUp * (0.7 + 0.6 * clamp(glowAmt, 0, 1));
+      halo.visible = disc.visible;
+
       const fullness = 0.5 - 0.5 * Math.cos(moonPhase * Math.PI * 2);   // 0 new, 1 full
-      discMat.uniforms.uBite.value = fullness * 2.6;
-      disc.scale.setScalar(1 - 0.34 * night);
-      haloMat.opacity = (0.30 * (1 - night) + 0.10 * night) * (0.4 + 0.6 * fullness);
+      // uBite slides the bite *away*: 0 eats the whole disc, 2.6 leaves it whole
+      moonMat.uniforms.uBite.value = fullness * 2.6;
+      /* A daylight moon is a pale grey wafer, not a lamp; the same moon after
+       * dark is the brightest thing in the sky. */
+      moonMat.uniforms.uColor.value.set(0xe9eeff);
+      moonMat.uniforms.uOpacity.value = moonUp * (0.22 + 0.74 * night) * (0.25 + 0.75 * fullness);
+      moon.visible = moonMat.uniforms.uOpacity.value > 0.02;
+      moonHaloMat.opacity = moonUp * night * fullness * 0.22;
+      moonHalo.visible = moonHaloMat.opacity > 0.01;
+
       if (cloud) matA.color.set(cloud);
       if (cloudShade) matB.color.set(cloudShade);
       matA.opacity = 0.66 - 0.22 * night;
@@ -343,9 +417,16 @@ export function buildSky(scene, radius = 300) {
       wetNow = wet;
     },
 
-    update(dt, camera, sunDir) {
+    /**
+     * `sky` is the climate state, or null in orbit view.  It used to be a
+     * bare sun direction; the sky needs the moon's too, and they are not
+     * derivable from one another once the moon has a phase.
+     */
+    update(dt, camera, sky) {
       skyT += dt;
       group.position.copy(camera.position);
+      const sunDir = sky?.sunDir || null;
+      const moonDir = sky?.moonDir || null;
 
       /* The rainbow stands opposite the sun, feet on the horizon, and
        * fades over half a minute — long enough to walk toward, short
@@ -364,18 +445,26 @@ export function buildSky(scene, radius = 300) {
       } else {
         rainbow.visible = false;
       }
+      /* Each body simply goes where it is.  Nothing is flipped, nothing is
+       * held above the skyline: the sun sets, and the dome's glow — which is
+       * aimed at the sun's bearing whether it is up or not — is what keeps
+       * the horizon alive after it has gone. */
       if (sunDir) {
-        /* Whichever of sun and anti-sun is above the horizon is the disc:
-         * the sun goes down and the moon comes up **opposite it**, which is
-         * both roughly the astronomy and the only way the night sky ever
-         * actually contains the moon — following the sun's own direction
-         * put the "moon" under the planet all night, every night. */
         _sunDir.copy(sunDir).normalize();
-        if (_sunDir.y < 0) _sunDir.negate();
         disc.position.copy(_sunDir).multiplyScalar(radius * 0.9);
         disc.lookAt(camera.position);
         halo.position.copy(_sunDir).multiplyScalar(radius * 0.88);
         halo.lookAt(camera.position);
+        _flat.set(_sunDir.x, 0, _sunDir.z);
+        if (_flat.lengthSq() < 1e-6) _flat.set(0, 0, 1);
+        domeMat.uniforms.uSunFlat.value.copy(_flat.normalize());
+      }
+      if (moonDir) {
+        _moonDir.copy(moonDir).normalize();
+        moon.position.copy(_moonDir).multiplyScalar(radius * 0.9);
+        moon.lookAt(camera.position);
+        moonHalo.position.copy(_moonDir).multiplyScalar(radius * 0.88);
+        moonHalo.lookAt(camera.position);
       }
 
       /* Each cloud on its own ring at its own pace, some against the rest —
