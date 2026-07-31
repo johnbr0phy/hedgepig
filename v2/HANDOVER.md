@@ -524,6 +524,34 @@ And one self-inflicted trap worth recording: `season.js` had a local
 lines later as `damp is not a function`, in a code path added long afterwards.
 It is `wetness` now.
 
+### A star drawn with normal blending is a paint
+
+The constellations came out at dusk as a **line of dark dashes across a bright
+horizon**, turning slowly as he walked. Reported, quite reasonably, as a
+strange black line rotating in the sky.
+
+Two things made it, and the second is new:
+
+- `LineBasicMaterial` in pale blue at 0.07 opacity over a bright cream-and-
+  orange sky comes out *darker than the sky*. Normal blending is a paint: it
+  can darken. A star that darkens the sky it is on is a contradiction, and it
+  was reachable because nothing said otherwise.
+- They **rotate** now, because the sky group carries his tangent frame. That
+  was the fix for the tilted dome and it is correct — but it turned a static
+  artifact into a moving one, which is what made it read as a fault rather
+  than as scenery.
+
+Everything star-shaped is **additive** now: stars, constellation lines,
+constellation points. A star can only add light, so where the sky is brighter
+than the star the star disappears — which is precisely what happens at dawn,
+for free. And their opacity is gated on `night` as well as on the sun's
+altitude: the sun going under is a good while before the sky stops being
+bright, and they were at a third strength over an orange horizon.
+
+**The rule:** anything in this world that represents *emitted* light — stars,
+fireflies, glints, the aurora, a lit window seen from outside — must be
+additive. If it can darken what is behind it, it is not a light.
+
 ## 5. Things that will bite the next change
 
 - **A pitched roof is `s * +angle`, not `s * -angle`.** Rotating about +x by a

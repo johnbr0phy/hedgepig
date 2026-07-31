@@ -207,6 +207,7 @@ export function buildSky(scene, radius = 300) {
     fog: false,
     sizeAttenuation: true,
     color: 0xf2f4ff,
+    blending: THREE.AdditiveBlending,      // a star adds light; it never paints
   });
   const stars = new THREE.Points(starGeo, starMat);
   stars.renderOrder = -9;
@@ -283,14 +284,26 @@ export function buildSky(scene, radius = 300) {
       starPts.push(...pts);
       for (let i = 0; i < pts.length - 1; i++) linePts.push(pts[i], pts[i + 1]);
     }
+    /* **Additive, all of it.**  A star drawn with normal blending is a
+     * *paint*: over a bright sky, pale blue at low opacity comes out darker
+     * than the sky it is on, so the constellations appeared at dusk as a line
+     * of dark dashes across a bright horizon — and since the sky group now
+     * carries his tangent frame, they turned as he walked.  Reported, quite
+     * reasonably, as a strange black line rotating in the sky.
+     *
+     * Additive makes it impossible by construction: a star can only ever add
+     * light.  Where the sky is brighter than the star, the star disappears,
+     * which is exactly what happens at dawn. */
     const lg = new THREE.BufferGeometry().setFromPoints(linePts);
     const lines = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({
       color: 0xaab6e0, transparent: true, opacity: 0, depthWrite: false, fog: false,
+      blending: THREE.AdditiveBlending,
     }));
     const sg = new THREE.BufferGeometry().setFromPoints(starPts);
     const bright = new THREE.Points(sg, new THREE.PointsMaterial({
       size: radius * 0.02, map: starTex(), color: 0xfff6e0, transparent: true,
       opacity: 0, depthWrite: false, fog: false, sizeAttenuation: true,
+      blending: THREE.AdditiveBlending,
     }));
     constellations.add(lines, bright);
     constellations.userData = { lines, bright };
@@ -351,7 +364,13 @@ export function buildSky(scene, radius = 300) {
       /* Stars come up with the *sun going down*, not with a night scalar that
        * is still zero a long way past sunset — `starAmt` reaches them before
        * `night` has begun to move, which is when the first of them appear. */
-      const starA = clamp(starAmt === null ? (night - 0.18) / 0.55 : starAmt, 0, 1);
+      /* And held back until the sky is genuinely dark.  `starAmt` alone tracks
+       * the sun going under, which is a good half-hour before the sky stops
+       * being bright — the constellations were at a third of their strength
+       * over an orange horizon.  Squared against `night`, so they arrive with
+       * the dark rather than with the sunset. */
+      const starA = clamp(starAmt === null ? (night - 0.18) / 0.55 : starAmt, 0, 1)
+        * clamp(night, 0, 1);
       const cu = constellations.userData;
       cu.lines.material.opacity = starA * 0.16;
       cu.bright.material.opacity = starA * 0.75;
