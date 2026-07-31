@@ -66,6 +66,7 @@ const { BALL_R } = await import('./src/hog/hog.js');
 const { createGame } = await import('./src/game/game.js');
 const { CULVERT_Z } = await import('./src/world/places/road.js');
 const { cel, applyPalette } = await import('./src/core/toon.js');
+const { buildSky } = await import('./src/core/sky.js');
 const { createCritters } = await import('./src/world/critters.js');
 
 /* ------------------------------- reporting ------------------------------- */
@@ -1046,6 +1047,128 @@ function sSolid() {
   }
 }
 
+function sSky() {
+  /* `sky.js` had no coverage at all, and the fault it was hiding was not one
+   * a colour test would have caught: the dome took the view direction's
+   * **world** y as elevation, which is the horizon at exactly one point on a
+   * planet.  What must hold is that his frame reaches the sky. */
+  const scene = new THREE.Scene();
+  const sky = buildSky(scene, 300);
+  const cam = new THREE.PerspectiveCamera(60, 1.6, 0.05, 400);
+  const st = {
+    sunDir: new THREE.Vector3(0, 1, 0),
+    moonDir: new THREE.Vector3(0, -1, 0),
+  };
+
+  const b = planet.basisAt(80, 30);          // somewhere well away from flat (0,0)
+  sky.update(1 / 60, cam, st, b);
+  sky.group.updateMatrixWorld(true);
+
+  /* The dome's own up must be *his* up.  Before the fix the group had no
+   * rotation at all, so this was world +Y wherever he stood. */
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(sky.group.quaternion);
+  ok(up.dot(b.up) > 0.9999, 'the sky is rotated into his tangent frame, not the world\'s',
+    `dome up vs his up: ${f(up.dot(b.up), 6)}`);
+  ok(Math.abs(up.y - 1) > 1e-6, 'and that is genuinely a different frame here',
+    `world +Y would give ${f(up.dot(new THREE.Vector3(0, 1, 0)), 3)}`);
+
+  /* Which means a local-frame sun lands where the light rig puts it. */
+  const sunWorld = sky.disc.getWorldPosition(new THREE.Vector3()).sub(sky.group.position).normalize();
+  ok(sunWorld.dot(b.up) > 0.9999, 'a sun overhead in his frame is drawn overhead',
+    `${f(sunWorld.dot(b.up), 4)}`);
+
+  /* The moon is its own body now, and both can be in the sky at once. */
+  st.sunDir.set(0.9, 0.1, 0).normalize();
+  st.moonDir.set(-0.9, 0.1, 0).normalize();
+  sky.setColors({ top: 0x88aacc, mid: 0xaaccee, haze: 0xeeeedd, night: 0.2, moonUp: 1, sunUp: 1 });
+  sky.update(1 / 60, cam, st, b);
+  sky.group.updateMatrixWorld(true);
+  const a = sky.disc.getWorldPosition(new THREE.Vector3()).sub(sky.group.position);
+  const m = sky.moon.getWorldPosition(new THREE.Vector3()).sub(sky.group.position);
+  ok(a.dot(m) < 0, 'sun and moon are two objects, on opposite sides when they should be');
+  ok(sky.disc.visible && sky.moon.visible, 'and both can be in the sky at the same time');
+
+  // orbit view takes the rotation off with the position, or the dome tilts
+  sky.setOrbit(true);
+  ok(sky.group.position.lengthSq() === 0 && Math.abs(sky.group.quaternion.w - 1) < 1e-9,
+    'orbit view puts the sky back where it really is, unrotated');
+}
+
+function sSlow() {
+  /* **Fifteen frames a second.**  Every hazard here is a distance test done
+   * once per frame, and at 1/15 s he covers 91 mm a step against a thorn
+   * hitbox of 265–405 mm.  That is fine; what would not be fine is nobody
+   * ever checking, because the failure mode is silent — he walks through the
+   * bramble and takes no hit, which reads as luck. */
+  const { hog, game, world, put, step } = makeWorld();
+  const thorns = world.out.thorns.filter((t) => t.live);
+  const t = thorns[0];
+  const from = plan.towards(t.x, t.z, plan.CENTRE[plan.MEADOW].x, plan.CENTRE[plan.MEADOW].z, 3);
+
+  const run = (dt) => {
+    put(from.x, from.z);
+    game.state.hearts = 3;
+    game.state.invuln = 0;
+    hog.callTo(t.x, t.z);
+    let closest = 9;
+    for (let i = 0; i < Math.ceil(9 / dt); i++) {
+      hog.update(dt, i * dt);
+      game.update(dt);
+      closest = Math.min(closest, plan.distance(hog.x, hog.z, t.x, t.z));
+    }
+    return { hearts: game.state.hearts, closest };
+  };
+
+  const fast = run(1 / 60);
+  const slow = run(1 / 15);
+  ok(fast.hearts < 3, 'walked into a bramble at 60 fps, it costs him a heart',
+    `${fast.hearts} hearts, closest ${f(fast.closest, 2)} m`);
+  ok(slow.hearts < 3, 'and at 15 fps it still does — no tunnelling through a hazard',
+    `${slow.hearts} hearts, closest ${f(slow.closest, 2)} m`);
+
+  /* And the other thing a long step could break: the water refusing him is
+   * also a per-step test. */
+  const lake = plan.CENTRE[plan.LAKE];
+  put(plan.offsetFrom(lake, 0, terrain.lakeShore(Math.PI / 2).d + 4).x,
+      plan.offsetFrom(lake, 0, terrain.lakeShore(Math.PI / 2).d + 4).z);
+  game.call(lake.x, lake.z);
+  let wettest = 0;
+  for (let i = 0; i < 240; i++) {
+    hog.update(1 / 15, i / 15);
+    game.update(1 / 15);
+    wettest = Math.max(wettest, terrain.waterDepthAt(hog.x, hog.z));
+  }
+  ok(wettest <= 0.06, 'and a long step does not put him in the lake',
+    `deepest ${f(wettest, 3)} m`);
+}
+
+function sMerge() {
+  /* The static merge folds 1 200 prop meshes into ~80.  Two things must hold
+   * or it silently breaks the world: nothing marked `noMerge` may be merged,
+   * and the call count must not creep back up unnoticed. */
+  const { world } = makeWorld();
+  ok(world.stats.merged.before > 400, 'the merge is actually doing something',
+    `${world.stats.merged.before} meshes into ${world.stats.merged.after}`);
+  ok(world.stats.merged.after < world.stats.merged.before / 8,
+    'and folding them by an order of magnitude', `${world.stats.merged.after} left`);
+
+  let leaked = 0, transparentMerged = 0;
+  for (const t of world.out.thorns || []) {
+    // a bramble toggles its own visibility by leg; merged, the toggle is lost
+    if (!t.obj.parent) leaked++;
+  }
+  ok(leaked === 0, 'every bramble survived the merge as its own object',
+    `${(world.out.thorns || []).length} checked`);
+
+  world.root.traverse((o) => {
+    if (o.isMesh && o.material?.transparent && o.geometry?.attributes?.position?.count > 20000) {
+      transparentMerged++;
+    }
+  });
+  ok(transparentMerged === 0, 'and nothing transparent was folded into a big batch',
+    'sort order is load-bearing');
+}
+
 function sPersist() {
   /* The save: a browser thing, shimmed here.  What must hold is the round
    * trip — one game writes its numbers, a second game built over the same
@@ -1226,7 +1349,7 @@ const SCENARIOS = {
   plan: sPlan, terrain: sTerrain, planet: sPlanet, clock: sClock,
   open: sOpen, gait: sGait, roll: sRoll, face: sFace, walk: sWalk, idle: sIdle, back: sBack, water: sWater, boat: sBoat,
   road: sRoad, roadmiss: sRoadmiss, abandon: sAbandon,
-  burrow: sBurrow, grass: sGrass, solid: sSolid, persist: sPersist, palette: sPalette, weather: sWeather, critters: sCritters, nan: sNan,
+  burrow: sBurrow, grass: sGrass, solid: sSolid, persist: sPersist, palette: sPalette, weather: sWeather, sky: sSky, slow: sSlow, merge: sMerge, critters: sCritters, nan: sNan,
 };
 
 const arg = process.argv[2] || 'all';

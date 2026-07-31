@@ -4,6 +4,11 @@ This file is the memory between unattended runs. Each run reads the top of the
 backlog, builds **one** item, sweeps for new ones, re-ranks, and appends a line
 to the run log. See `AGENT.md`.
 
+**Strike what you land.** The backlog went a whole session stale once — the
+frame measurement, the flat-wash ground, the orange stems, the butterflies and
+the entire sound list were all done and still sitting at the top of their
+workstreams, so the next run would have rebuilt something that already existed.
+
 ---
 
 ## Backlog
@@ -13,59 +18,110 @@ last run did *not* touch.
 
 ### Graphics
 
-1. **Nobody has measured the frame rate.** Every frame observed while building
-   this was a background-tab frame, so the cost of ~50 000 grass tufts, a
-   21 500-triangle globe and 830 rigid props is genuinely unknown. Measure it
-   focused, at a real window size, and put the number in `HANDOVER.md`. Every
-   other item on this list is guesswork until that exists.
-2. **The ground reads as one flat wash.** Ten place colours blended over a
-   whole sphere average out to a single olive. Wants either more contrast
-   between places, or a second signal — worn paths, bare soil, moss in the
-   damp, something that varies at a scale smaller than a place.
-3. **Flower stems go orange in autumn** because they share the `leaf` colour
-   role. A stem is not a leaf. Give stems their own role.
-4. **The far side of the planet is bare** in orbit view (`P`): a 4-band toon
-   ramp over an icosphere with nothing on it.
-5. **`weather.js` names butterflies and bees** that were never built — they are
-   still just motes. Summer should have something flying that reacts to him.
-6. **The ink pass may be too heavy on grass again** now the meadow is three
-   times denser. Check `uSens` against a full-density frame.
+1. **The orbit far side is bare.** Press `P` and half the planet is a 4-band
+   ramp with nothing on it. Real props at reduced density, not labels. Flagged
+   by three consecutive sweeps and taken by none of them.
+2. **The road is a featureless mass.** From the town it is the largest single
+   thing in frame and it has no camber, no markings, no verge, no litter and
+   no wear. `places/road.js`.
+3. **Post-rain glints on the quills** — a wet hedgehog, for the thirty seconds
+   after a front clears. `front` now falls to zero on its own, so there is an
+   event to hang it on.
+4. **Shadow-map texel budget.** ±17 m at 2048 is 8 mm/texel, which flatters him
+   and coarsens a fence post. A tight cascade around him is the obvious fix and
+   the shadow camera has bitten twice before — read HANDOVER §3 first.
+5. **Cel banding on large smooth surfaces** — the lake sheet and the sky dome
+   in orbit. The ramp was tuned on props at two metres, not on a 47 m sphere.
+6. **The far field has no aerial perspective.** Fog is one colour at one
+   density; distant hills should also desaturate and lift, not just tint.
+7. **Inverted-hull outlines after the static merge** — check that `noOutline`
+   and hull assignment survived being folded into 78 meshes.
+8. **Windows and lamps are painted pools that do not reach the ground.** `lit`
+   starts at dusk now (it is driven off `dark`), but nothing under a lamp is
+   any brighter for it.
+
+### World
+
+1. **Instanced brambles.** 260 thorn meshes are the remaining draw-call bulk;
+   they are excluded from the static merge because they toggle visibility, and
+   instancing solves both at once.
+2. **Grass chunk LOD.** 250 chunks culled by hand off him; a coarser ring
+   beyond ~8 m would halve what is left after the brambles.
+3. **Place boundaries are invisible.** Ten 30 m places blend by weight and you
+   cannot tell you have left the mire. A signal at the seam — reeds thinning,
+   soil changing — at a scale smaller than a place.
+4. **No place owns its own relief.** The terrain rolls identically everywhere;
+   the mire should be flat and low and the hillside actually steep.
+5. **Worn paths.** Molehills and thistle rings are the world's only memory.
+   Ground that darkens where he repeatedly walks would be the third, and the
+   grass shader already carries 16 trail markers to build it on.
+6. **The wood is one tree at one density.** A clearing, a deadfall, a stand of
+   one species.
+7. **The mire, the hen run and the farmyard read as one brown wash** at ground
+   level — the moss/soil mottle helps in the meadow and does nothing here.
+
+### The hedgepig
+
+1. **He does not shelter.** `rainHurry` is half of it; the other half is going
+   *somewhere* — under the barn eave, into the wood — and waiting it out.
+2. **Uphill and downhill look identical.** Gait, body pitch and speed should
+   all answer the slope he is on. `slopeAt` is right there.
+3. **No fatigue.** Speed is constant within a leg. A late-leg tiredness that
+   shows in the gait and nowhere else.
+4. **He never looks at anything.** The glance tracks the pointer and nothing
+   else — not the cat, not a bird flyover, not the hoglet behind him.
+5. **Turning is feet, not spine.** Check whether anything bends into a pivot.
+6. **Curl has one shape.** The defensive curl (a thorn) and the sleep curl
+   (home after dark) are the same pose and should not be.
+7. **He never grooms.** A quill shake exists; a slow preen at rest is exactly
+   the kind of detail the taste section asks for.
 
 ### Gameplay
 
-1. **There is no reason to cross an open planet.** It is walk, dodge two
-   hazards, reach the burrow. Wants something worth finding out there, and a
-   reason to return somewhere. Quiet, not a quest log.
-2. **Nothing persists between legs.** What you sow is recycled after 26 items
-   and nothing else remembers you were there. Footprints, worn paths, flowers
-   that stay — v1's world remembered nothing either, and it was its weakest
-   part.
-3. **The interactables say one line and go quiet.** The cat, the coop, the
-   fairy door, the birdbath. They could reward a second visit.
-4. **Weather does not touch him.** He shivers in snow and that is all. Rain
-   should change how he moves or where he wants to be.
+1. **Legs escalate only in speed and thorn density.** Leg 12 is leg 3 with
+   more brambles in it.
+2. **The burrow is always found, never missed.** A leg you fail to finish
+   before dawn is the obvious tension and it does not exist.
+3. **Nothing is ever lost.** Hearts are the only stake; the thistle, the
+   carried leaf and both hoglets are pure gain. The hoglets in particular
+   follow forever and cannot be left behind, so following costs nothing.
+4. **Seasons change what things look like and almost nothing else.** Winter
+   should close something and open something else. Now that a season lasts
+   longer than a day there is room for it to matter.
+5. **Night is only a palette** beyond the owl and the fireflies. Nothing is
+   nocturnal-only.
+6. **Sowing has no consequence past the 26-item pool.** What you sowed in
+   place 3 could still be there next lap, and the golden thistle proves the
+   idea works.
+7. **Photo mode goes nowhere.** `S` keeps a shot and nothing ever shows it
+   again; a contact sheet in the journal closes the loop.
+8. **The journal has no second page.** Nothing gets harder or stranger to earn
+   a new first.
 
 ### Sound
 
-1. **There is none at all.** Start with `core/audio.js` and *one* convincing
-   sound: footfalls, driven off the real gait cycle — `anim.js` exposes
-   `fore`, `lift` and `stance` per leg, and a footfall is the frame `stance`
-   goes true. Synthesised, no files. Mute toggle. No audio before a gesture.
-2. Grass rustle, scaled by how hard he is pushing through it — the shader
-   already knows, via `uHog`/`uHogR` in `grass.js`.
-3. Water at the lake, traffic swelling as you near the road, wind on the open
-   hillside.
-4. Something ambient that moves with season and time of day, the way the
-   palette already does.
+1. **No reverb anywhere.** The wood, the culvert and the open hillside are all
+   equally dry. One feedback-delay bus switched by place.
+2. **Footfalls have one timbre.** Grass, road, mud, snow and boat deck want
+   their own noise-burst envelopes — the surface is already known.
+3. **Weather has no voice beyond rain.** Now that fronts arrive and clear
+   there is wind to hear coming, which is the whole point of it leading.
+4. **His own voice is one sneeze.** A snuffle, a huff and a contented chirrup
+   off the states `anim.js` already exposes.
+5. **No audio LOD** — check what stays running while muted or off screen.
 
-### Debt
+### Debt and harness
 
-- `props.js` still exports `contactShadow` and `PROP_MAT`, unused since the
-  disc rebuild.
-- `plan.js` exports `PLACE_SPAN`, `wrapX` and `arcTo` that may now have no
-  callers — check before deleting, `arcTo` is used by `terrain`.
-- The harness has no coverage of `season.js`'s palette application, `sky.js`,
-  or the weather fields.
+- `sky.js` now has coverage; the **weather fields** in `weather.js` still have
+  none, and neither does `puffs.js`.
+- **Per-frame allocations** have never been profiled. `critters.js` (905
+  lines) and `game.js` (830) are the likely sources.
+- **`main.js` is 670 lines** and owns fireflies, the rainbow, photo mode,
+  puddles, hoglet names and the frame loop. The exception guard in `frame()`
+  is protecting a lot of unrelated code.
+- **The frame is measured but from a hidden tab.** 503 calls, 201 k triangles,
+  45 programs at 1260×693, 22.1 ms with a real `gl.finish()`. A focused
+  measurement would settle it.
 
 ---
 
@@ -75,62 +131,58 @@ Newest last. One line each: date, workstream, what landed, what the sweep found.
 
 - **2026-07-30 — setup.** Backlog seeded by hand from the build session that
   produced the open world, the streaming meadow, the rebuilt gait and the
-  sown-flower growth. 65/65 in the harness at `3a2f12e`. No unattended run has
+  sown-flower growth. 65/65 in the harness at `3a2f12e`. No unattended run had
   happened yet.
-- **2026-07-30 — the big pass (interactive session).** Landed, 83/83 green:
-  animation rebuild (one trunk for body/mantle/coats/ears — the flashing was
-  them disagreeing by the mantle's own clearance; a reserve coat that grows
-  through the skin as he curls, so the ball is spiky all over; spin settles
-  to the nearest whole turn instead of unwinding ten revolutions; pivots
-  step the feet; eyes in against the nose; near-constant sniffing and
-  ground-nuzzles; doze/yawn/scratch/shake/arrival-wiggle). Sound: all of
-  `core/audio.js`, synthesised, gait-driven footfalls, clock-driven beds,
-  him-ranged lake/traffic, music box, `M` mute. Sky: phased moon (13
-  lunations/year, risen opposite the sun — it had been under the planet all
-  night, every night), shooting stars, per-cloud drift, a rainbow when rain
-  clears. Critters: butterflies/bees/birds/frogs/fish/owl, hens that
-  scatter. Feel: world-anchored dust puffs (footsteps, roll trail, unfurl),
-  tap ripple, camera out a fifth while rolling, tremble on a hit. Ground:
-  place contrast + moss/soil mottle, stems get their own colour role. Quiet
-  rewards: localStorage persistence, the golden thistle that plants a
-  permanent ring, rain hurries him, and the hoglet that follows from leg 3.
-  HUD: heartbeat on change, weather glyph, `C` photo mode. Frame measured:
-  1 104 calls / 1.33 M tris — see HANDOVER §7; prop merge is the lever if a
-  focused frame is slow.
-  **Sweep found / still open:** post-rain glints on the quills; the orbit
-  far side is still bare of props; interactables still say one line;
-  footprints and trampled-grass memory; merging the ~830 rigid props by
-  material (draw-call bulk).
-- **2026-07-31 — the second fifty (interactive session).** Landed, 92/92
-  green, deployed to johnbr0phy.github.io/hedgepig/v2 by the new Pages
-  workflow (which runs the harness as a deploy gate). Him: footprints in
-  snow and mud off the real footfalls; the grass remembers his path (16
-  fading trail markers in the blade shader — strongest-only, because
-  summing them folded blades through the ground); he balks at the water's
-  edge, laps at the lake, nibbles what is edible, carries autumn leaves,
-  sneezes after a good sniff, darkens in the rain; home after dark sleeps
-  him to a visibly wound-forward dawn. Company: the hoglet celebrates
-  finding him, a second follows the first from leg six, N names them.
-  World: squirrel up the trunk, mice out of the straw, dragonflies over
-  the mire, snails after rain, moths round the town lamp, the cat's ear
-  and tail answer him, ducks with wake rings and dabbling, a dew-lit
-  spiderweb, barn swallows at dusk, molehills that accrue. Sky and
-  weather: dawn fog on the mire, puddles after rain, cicadas at summer
-  noon, distant lightning with late thunder, leaf-bursts off bumped
-  autumn trees, snow-dusted canopies, a winter aurora, constellations
-  (one of them a hedgehog — the birdbath mentions it). Sound: car
-  doppler, grass swish off his own gait, panned hoots, a dawn phrase,
-  boat creaks, culvert drips, M now cycles on/quiet/off. Quiet rewards:
-  every interactable owns three rotating lines, five thistles knit their
-  rings together with a flower path, autumn berries earn a fourth heart
-  for the leg, C photo mode auto-orbits and S keeps a shot, J opens a
-  journal of firsts, fireflies light him at deep night with the world's
-  only point light, and standing in all ten places blooms the start of
-  the world. Debt: the static merge folds 1 205 prop meshes into 78
-  (frame calls 1 104 → 837 at the measured view), contactShadow/PROP_MAT
-  deleted, and the harness gained persist/palette/critters scenarios.
-  **Sweep found / still open:** the orbit far side wants real props, not
-  just labels; footprint decals could rotate with the slope; the second
-  hoglet deserves its own name; the static merge leaves thorns and grass
-  as the remaining call bulk — instanced brambles would halve what is
-  left.
+- **2026-07-30 — the big pass (interactive session).** 83/83. Animation
+  rebuild (one trunk for body/mantle/coats/ears; a reserve coat that grows
+  through the skin as he curls; spin settling to the nearest whole turn;
+  pivots that step the feet; eyes in against the nose; sniffing, dozing,
+  yawning, scratching, shaking, the arrival wiggle). All of `core/audio.js`,
+  synthesised, gait-driven. A phased moon, shooting stars, per-cloud drift, a
+  rainbow after rain. Butterflies, bees, birds, frogs, fish, an owl, hens that
+  scatter. World-anchored dust, tap ripple, camera out while rolling. Place
+  contrast and moss/soil mottle; stems got their own colour role. localStorage
+  persistence, the golden thistle, `rainHurry`, the hoglet from leg 3. Frame
+  measured at 1 104 calls / 1.33 M tris.
+- **2026-07-31 — the second fifty (interactive session).** 92/92, deployed to
+  johnbr0phy.github.io/hedgepig/v2 by a Pages workflow that runs the harness
+  as a deploy gate. Footprints in snow and mud, the grass remembering his
+  path, balking at the water's edge, lapping, nibbling, carrying leaves,
+  sneezing, darkening in rain, sleeping home-after-dark to a wound-forward
+  dawn. A second hoglet, named. Squirrel, mice, dragonflies, snails, moths,
+  the cat's ear and tail, ducks with wake rings, a spiderweb, barn swallows,
+  molehills. Dawn fog, puddles, cicadas, distant lightning, leaf-bursts,
+  snow-dusted canopies, an aurora, constellations. Car doppler, grass swish,
+  panned hoots, a dawn phrase, boat creaks, culvert drips. Three lines per
+  interactable, thistle rings that knit, autumn berries, photo mode, a
+  journal, fireflies, and the world blooming when you have stood everywhere.
+  The static merge folded 1 205 prop meshes into 78.
+- **2026-07-31 — the third pass (interactive session, four reported faults
+  plus a backlog sweep).** 126/126. **Reported and fixed:** he sat inside
+  snowmen (sown solids were never blockers — they are now, placed clear of
+  him, he walks to their edge, and a blocker may never hold what is already
+  inside it); the weather churned (the year was 1.36 days long, so a season
+  lasted 51 s — the day is 240 s and the year 1 080 s now); the sun and moon
+  moved wrongly (the clock is phase-warped so the sun crawls through the
+  horizon and hurries over the top, doubling twilight to 30 % of the day);
+  and the colour was flat (a seven-stop glow ramp keyed to sun altitude, a
+  warm horizon on the sun's bearing with a cool counter-glow behind, and a
+  golden-hour split that warms the light while cooling the shade).
+  **Found while doing it, all four invisible in the console:** the sun never
+  set at all — its elevation was clamped at 0.22, so shadows never lengthened
+  and the moon was the sun in a colder colour in the sun's own place; the sky
+  dome took the *world* `.y` as elevation, so the entire gradient was tilted
+  against the skyline everywhere but one point on the planet, and both discs
+  were being placed with tangent-frame vectors read as world ones; the ink
+  pass had never once been below a blade of grass, and no threshold could put
+  it there because size is the discriminator and a depth filter cannot see
+  size; and snow could not cover the ground's *hue*, because the place tint
+  lives in the vertex colours — a white field with a bright green
+  hedgehog-shaped hole in it. Also: weather became fronts that arrive and
+  clear, lying snow accumulates and melts, the lake got a shore, footprints
+  got toes and the ground's slope, clouds got small enough that several fit
+  in the sky, and the second hoglet got its own name.
+  **Sweep found / still open:** the orbit far side (three sweeps running now);
+  the road as a featureless mass, which is the largest single thing in frame
+  from the town; no aerial perspective in the far field; and the mire, hen run
+  and farmyard reading as one brown wash at ground level.

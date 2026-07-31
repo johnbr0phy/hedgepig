@@ -245,9 +245,19 @@ window.addEventListener('keydown', (e) => {
     hud.toggleJournal(Object.keys(game.state.flags).map((k) => LABELS[k]).filter(Boolean));
   }
   if (e.code === 'KeyN') {
-    hogletName = HOGLET_NAMES[(HOGLET_NAMES.indexOf(hogletName) + 1) % HOGLET_NAMES.length];
-    localStorage.setItem('hedgepig.hoglet', hogletName);
-    hud.flash(`the hoglet answers to ${hogletName} now`);
+    /* `N` names whichever hoglet is out there — the first until the second
+     * arrives, and then the second, because the one you just met is the one
+     * you want to name.  They shared a name before, which made the pair read
+     * as one animal drawn twice. */
+    if (hoglet2.state.live) {
+      hoglet2Name = nextName(hoglet2Name, hogletName);
+      localStorage.setItem('hedgepig.hoglet2', hoglet2Name);
+      hud.flash(`and the little one answers to ${hoglet2Name}`);
+    } else {
+      hogletName = nextName(hogletName, hoglet2Name);
+      localStorage.setItem('hedgepig.hoglet', hogletName);
+      hud.flash(`the hoglet answers to ${hogletName} now`);
+    }
   }
   if (e.code === 'KeyS' && document.body.classList.contains('photo') && import.meta.env?.DEV) {
     window.__shot?.(`photo-${Math.floor(acc * 10)}`, 1400, 800);
@@ -256,7 +266,17 @@ window.addEventListener('keydown', (e) => {
 });
 
 const HOGLET_NAMES = ['Pip', 'Bramble', 'Conker', 'Sorrel', 'Moss', 'Teasel', 'Hazel', 'Dot'];
+/** The next name round the list, skipping the one the other hoglet has. */
+function nextName(cur, taken) {
+  let i = HOGLET_NAMES.indexOf(cur);
+  for (let k = 0; k < HOGLET_NAMES.length; k++) {
+    i = (i + 1) % HOGLET_NAMES.length;
+    if (HOGLET_NAMES[i] !== taken) return HOGLET_NAMES[i];
+  }
+  return cur;
+}
 let hogletName = localStorage.getItem('hedgepig.hoglet') || 'Pip';
+let hoglet2Name = localStorage.getItem('hedgepig.hoglet2') || 'Teasel';
 
 hud.onStart = () => {};
 document.getElementById('start')?.addEventListener('click', () => hud.begin(), { once: true });
@@ -487,7 +507,7 @@ function frame() {
     speed: hog.speed, shiver: hog.shiver, night: hog.night, wet: hog.wet,
   });
   if (hoglet2.update(dt, hoglet1Leader, game.state.leg >= 6 && h1.live, acc) === 'arrived') {
-    hud.flash('another hoglet — a whole procession now');
+    hud.flash(`another hoglet — ${hoglet2Name}, behind ${hogletName}, a whole procession`);
     game.note('hoglet2');
   }
 
