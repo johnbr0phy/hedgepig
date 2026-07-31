@@ -451,5 +451,10 @@ export function buildStarbase(root, ctx, { u = PAD_U, v = PAD_V } = {}) {
     'it is leaning very slightly. everything on a round world is.',
   ));
 
-  return { apron, stack, apronR: APRON_R, at: centre, base, height: MOUNT + STACK };
+  /* `booster` and `ship` come out separately because hot-stage separation
+   * needs to take one away from the other — see `game/mission.js`. */
+  return {
+    apron, stack, booster, ship, mount, tower: rigid[2], tanks,
+    apronR: APRON_R, at: centre, base, height: MOUNT + STACK,
+  };
 }

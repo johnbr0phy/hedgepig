@@ -40,7 +40,14 @@ const BLOOMS = [
 
 export function createGame({ world, hog, hud, climate, audio = null }) {
   const rng = rngKit(90210);
-  const scene = world.root.parent;
+  /* Everything the game itself puts into the world goes in ONE group.
+   * It was seven separate `scene.add` calls, which is fine until something
+   * needs to hide the lot of them at once — and `mission.js` does, because
+   * a burrow, a sown snowman and a golden thistle are all things that
+   * belong to the meadow and none of them is coming to Mars. */
+  const scene = new THREE.Group();
+  scene.name = 'sown';
+  world.root.parent.add(scene);
 
   const state = {
     hearts: MAX_HEARTS,
@@ -57,6 +64,8 @@ export function createGame({ world, hog, hud, climate, audio = null }) {
     flags: {},                 // the journal of firsts
     visited: [],               // place kinds he has stood in, ever
     met: [],                   // residents he has been up to and spoken with, ever
+    /** What he is heading for: `undefined` the burrow, a point the ship, null Mars. */
+    goal: undefined,
   };
 
   /* ------------------------------ persistence ------------------------------ *
@@ -805,8 +814,19 @@ export function createGame({ world, hog, hud, climate, audio = null }) {
     if (s.snowFall > 0.3) weather += ' · snow';
     else if (s.wet > 0.35) weather += ' · rain';
     hud.setPlace(PLACE[kind].name, weather);
-    const d = distance(hog.x, hog.z, state.burrow.x, state.burrow.z);
-    hud.setStatus(state.leg, hog.walked, ` · burrow ${d.toFixed(0)} m`);
+    /* The readout says what the game is for.  `goal` is set by `main.js`
+     * from the mission — the ship until he is aboard it, nothing once he is
+     * standing on Mars — and it falls back to the burrow so that the game
+     * still reads correctly with no mission wired in at all, which is how
+     * the harness builds it. */
+    if (state.goal === null) {
+      hud.setStatus(state.leg, hog.walked, ' · Mars');
+    } else {
+      const g = state.goal || state.burrow;
+      const d = distance(hog.x, hog.z, g.x, g.z);
+      hud.setStatus(state.leg, hog.walked,
+        ` · ${state.goal ? 'the ship' : 'burrow'} ${d.toFixed(0)} m`);
+    }
   }
 
   hud.setHearts(state.hearts, state.maxHearts);

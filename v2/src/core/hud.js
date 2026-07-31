@@ -162,7 +162,75 @@ export function createHud() {
     node.innerHTML = text;
   };
 
-  let toastT = 0;
+  /* ------------------------------- the toast ------------------------------- *
+   *
+   * **Messages queue now.  They did not, and that was the whole fault.**
+   *
+   * `flash` used to write straight into the element and reset one timer, so
+   * two things happening on the same frame meant you read the second one and
+   * the first never existed.  That is not a rare case here — there are
+   * twenty-seven callers, and arriving at the burrow alone can fire the leg
+   * message, a journal first, a hoglet catching up and a resident greeting
+   * within a few frames of each other.  What you saw was a flicker and then
+   * one line, which is why they read as broken.
+   *
+   * Three rules, and each one is a thing that was wrong:
+   *
+   *  - **Every message gets its own turn**, in the order it happened.
+   *  - **A minimum on screen**, so a queued line cannot be flashed away
+   *    before it can be read.  Long lines get longer: this world's messages
+   *    run from two words to a full sentence and a fixed 2.6 s served
+   *    neither.
+   *  - **A gap between them**, spent faded out.  Swapping the text under a
+   *    panel that is already up reads as a glitch rather than as a second
+   *    thing being said — the eye needs the beat to know it is new.
+   *
+   * And the queue is capped.  A burst of nine would otherwise hold the last
+   * of them thirty seconds after the moment that earned it; past the cap the
+   * OLDEST go, because the newest is the one you are still looking at the
+   * cause of.
+   */
+  const TOAST_GAP = 0.22;       // faded out between messages
+  const TOAST_MIN = 1.9;        // nothing is on screen for less than this
+  const TOAST_MAX_Q = 4;
+
+  let toastT = 0;               // time left on what is showing
+  let toastGap = 0;             // time left of the beat before the next one
+  const toastQ = [];
+  let toastNow = null;
+
+  /* The DOM is optional here, exactly as it is in `dialogue.js` and for the
+   * same reason: the part of a queue worth asserting is the order things
+   * come out in, and the harness has a `getElementById` that returns null.
+   * Everything below runs and counts correctly with no element at all. */
+  const showToast = (m) => {
+    toastNow = m;
+    toastT = m.secs;
+    if (!el.toast) return;
+    el.toast.innerHTML = '<span class="panel"></span>';
+    /* `textContent`, not interpolation: two of these messages carry a hoglet
+     * name out of localStorage, and a name is not markup. */
+    el.toast.firstChild.textContent = m.msg;
+    el.toast.classList.add('on');
+  };
+
+  const pumpToast = (dt) => {
+    if (toastGap > 0) {
+      toastGap -= dt;
+      if (toastGap <= 0 && toastQ.length) showToast(toastQ.shift());
+      return;
+    }
+    if (toastNow) {
+      toastT -= dt;
+      if (toastT > 0) return;
+      toastNow = null;
+      el.toast?.classList.remove('on');
+      // the beat only costs anything when somebody is waiting for it
+      toastGap = toastQ.length ? TOAST_GAP : 0;
+      return;
+    }
+    if (toastQ.length) showToast(toastQ.shift());
+  };
 
   return {
     onStart: null,
@@ -192,21 +260,73 @@ export function createHud() {
       set(el.clock, 'clock', `leg ${leg}<br /><small>${Math.round(metres)} m walked${extra}</small>`);
     },
 
+    /**
+     * A standing instruction — "press E" — rather than a passing remark.
+     *
+     * Deliberately **not** a `flash`: a toast is a thing that happened and
+     * goes away, and this is a thing that is true for as long as he stands
+     * there.  Putting it through the queue would either make it vanish while
+     * the offer was still open, or hold the queue up for as long as he
+     * loitered.  They are two different kinds of message and the fault the
+     * queue was fixing was exactly that they had been one.
+     */
+    setPrompt(html) {
+      let node = document.getElementById('prompt');
+      if (!node) {
+        if (!html) return;
+        node = document.createElement('div');
+        node.id = 'prompt';
+        node.className = 'panel';
+        node.style.cssText =
+          'position:absolute;left:50%;bottom:12.5rem;transform:translateX(-50%);' +
+          'padding:0.4rem 0.7rem;font-size:0.92rem;white-space:nowrap;' +
+          'opacity:0;transition:opacity 240ms ease;pointer-events:none;';
+        el.toast?.parentNode?.appendChild(node);
+      }
+      if (last.prompt === html) return;
+      last.prompt = html;
+      if (html) node.innerHTML = html;
+      node.style.opacity = html ? '1' : '0';
+    },
+
+    /**
+     * Say something, in its turn.  `secs` is a floor rather than a setting:
+     * a long line is given time to be read whatever the caller asked for,
+     * because every caller here passed the default and none of them was
+     * thinking about how long their own sentence was.
+     */
     flash(msg, secs = 2.6) {
-      if (!el.toast) return;
-      el.toast.innerHTML = `<span class="panel">${msg}</span>`;
-      el.toast.classList.add('on');
-      toastT = secs;
+      const text = String(msg ?? '').trim();
+      if (!text) return;
+      /* The same thing twice running is one thing.  `note()` and the caller
+       * that earned it often both want to say so, and two identical lines
+       * in a row reads as a stutter. */
+      if (toastNow?.msg === text || toastQ.some((q) => q.msg === text)) return;
+      const need = Math.max(TOAST_MIN, secs, 0.9 + text.length * 0.035);
+      toastQ.push({ msg: text, secs: need });
+      // past the cap the oldest go: the newest is the one you just caused
+      while (toastQ.length > TOAST_MAX_Q) toastQ.shift();
+    },
+
+    /** What is being said and what is still waiting — for the harness. */
+    pending() {
+      return { showing: toastNow?.msg ?? null, queued: toastQ.map((q) => q.msg) };
+    },
+
+    /** Everything waiting, dropped — for a cutscene taking the screen over. */
+    clearFlash() {
+      toastQ.length = 0;
+      toastNow = null;
+      toastT = 0;
+      toastGap = 0;
+      el.toast?.classList.remove('on');
     },
 
     /** Redraw the compass.  See `drawCompass` for what it does and does not show. */
     setCompass(data) { drawCompass(data); },
 
     update(dt) {
-      if (toastT > 0) {
-        toastT -= dt;
-        if (toastT <= 0) el.toast?.classList.remove('on');
-      }
+      pumpToast(dt);
     },
 
     /**

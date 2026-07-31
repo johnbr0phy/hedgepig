@@ -110,6 +110,17 @@ last run did *not* touch.
 
 ### Gameplay
 
+0. **The flight cannot be skipped, and there is no way back.** Forty-two
+   seconds is right the first time and long the fourth, and nothing offers to
+   cut it short. And once he is on Mars he is on Mars: the ship he arrived in
+   is scenery, `begin()` refuses a second launch, and a reload is the only
+   way home. A return leg — or even just holding a key to skip — is the
+   obvious next thing.
+0b. **Mars is a destination, not a place.** A red sphere with rocks and
+   craters and the ship standing on it, and nothing whatever to do. No
+   residents, no hazards, no weather that means anything, nothing to find.
+   The whole of the meadow's content is switched off and none of it is
+   replaced.
 1. **Legs escalate only in speed and thorn density.** Leg 12 is leg 3 with
    more brambles in it.
 2. **The burrow is always found, never missed.** A leg you fail to finish
@@ -352,3 +363,29 @@ Newest last. One line each: date, workstream, what landed, what the sweep found.
   actually *glows* — the sun is a pale disc with a painted halo rather than a
   source, and that is the one remaining thing that would make either body read
   as emitting. It is also the only option here with real frame cost.
+- **2026-07-31 — he goes to Mars (interactive session, four asks).** 252/252,
+  deployed. **The point of the game is now to leave**: find the Starship in
+  the mire, press `E`, and forty-two seconds later he is standing on another
+  planet. Countdown, ascent, hot-stage separation, coast, turn, entry, the
+  belly-flop flip, the landing burn, and getting out. Mars is *this* planet
+  re-dressed at five kilometres up while the camera faces the other way —
+  every frame real geometry, no cut — which is what makes walking on it free.
+  **Also fixed, both reported:** the rain, which was 420 round dots in a cube
+  the camera could only see eleven of at a time, and is 2 600 wind-leaned
+  streaks in a tighter box now; and the pop-up messages, which had no queue at
+  all, so two things on one frame meant you read the second and the first
+  never existed.
+  **Seven faults made and caught on the way**, all in HANDOVER §4: a landed
+  ship 113 m above the ground because the stack's origin is the mount deck; a
+  plume firing out of the nose because a cone's geometry occupies local −y; a
+  Mars sky the dome never saw because `sky.setColors` runs from the middle of
+  `climate.update`; a red planet with the old world's ten places showing
+  through in green, which is §4's snow fault exactly; critters and hoglets
+  that switched their own visibility back on and followed him to Mars; a
+  launch site that came with him because the landing site is 31 m from the
+  pad; and every flower he ever sowed, now one group for that reason.
+  **Sweep found / still open:** the flight cannot be skipped or replayed —
+  forty-two seconds is right the first time and long the fourth. There is no
+  way home. And there is nothing to *do* on Mars: it is a red sphere with
+  rocks on it and the ship he came in, which is a destination rather than a
+  place.

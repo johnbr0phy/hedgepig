@@ -123,6 +123,28 @@ export const SEASONS = [
   },
 ];
 
+/**
+ * Mars, blended over whatever the season and the hour gave us — and it is
+ * blended for a reason rather than replacing them: the day still runs, the
+ * sun still sets, and Mars at dusk should be a different picture from Mars at
+ * noon in exactly the way the meadow is.
+ *
+ * The colours are the ones the surface photographs actually show, not the
+ * red anybody draws from memory.  Martian ground is **butterscotch**, a
+ * dusty ochre-brown; the famous red is what the dust does to the *sky*, which
+ * is why the sky here is the warmest thing in the set.  A Mars painted the
+ * other way round — red ground, blue sky — is the single commonest mistake
+ * anyone makes about the place, and it looks like a desert on Earth.
+ */
+export const MARS = {
+  ground: 0x8c5a3c,   // butterscotch, damped — the ground is duller than the sky
+  dust: 0xa8734a,     // what the wind has moved and left in drifts
+  rock: 0x6b4230,     // basalt under the dust, where a boulder has been swept
+  sky: 0xc98d63,      // the dust does this, and it is the whole look of Mars
+  skyTop: 0x9c6a4e,
+  haze: 0xdba87e,
+};
+
 /** Night, blended over whatever the season gave us. */
 export const NIGHT = {
   sky: 0x2b3355,

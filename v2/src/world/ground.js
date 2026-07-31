@@ -131,13 +131,24 @@ export function buildGround(scene) {
    * One uniform, one line of vertex shader: snow lerps the whole multiplier
    * to one. Rewriting 20 000 vertex colours per frame was the alternative. */
   const snowU = { value: 0 };
+  /* **Mars is the same problem as snow, and takes the same one line.**
+   *
+   * The material's colour goes to butterscotch, but every vertex still
+   * carries how much *greener than the meadow* its own place is — the wood
+   * darker, the mire browner, the garden brighter — and that multiplier is
+   * still applied.  So a red planet came out with the ten places of the old
+   * world faintly showing through it in green, which reads as a texture bug
+   * rather than as a tint nobody painted over.  §4 records this exact fault
+   * costing a winter; it would have cost a planet. */
+  const marsU = { value: 0 };
   const prevCompile = mat.onBeforeCompile;
   mat.onBeforeCompile = (shader, renderer) => {
     prevCompile?.call(mat, shader, renderer);
     shader.uniforms.uSnow = snowU;
-    shader.vertexShader = 'uniform float uSnow;\n' + shader.vertexShader.replace(
+    shader.uniforms.uMars = marsU;
+    shader.vertexShader = 'uniform float uSnow;\nuniform float uMars;\n' + shader.vertexShader.replace(
       '#include <color_vertex>',
-      '#include <color_vertex>\n\tvColor = mix( vColor, vec3( 1.0 ), uSnow );'
+      '#include <color_vertex>\n\tvColor = mix( vColor, vec3( 1.0 ), max( uSnow, uMars ) );'
     );
   };
   const prevKey = mat.customProgramCacheKey?.bind(mat);
@@ -157,6 +168,8 @@ export function buildGround(scene) {
     group, land, material: mat, chunks: [land],
     /** How much lying snow has covered the place tint over. */
     setSnow(v) { snowU.value = clamp(v, 0, 1); },
+    /** And how much another planet has. Same mechanism, same reason. */
+    setMars(v) { marsU.value = clamp(v, 0, 1); },
   };
 }
 

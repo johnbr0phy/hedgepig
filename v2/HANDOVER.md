@@ -835,6 +835,117 @@ below the noise. Note the interleaving: a straight A-then-B run in a hidden tab
 reported that *deleting* the moon cost 17 ms, which is §4's rule about
 measurements all over again.
 
+### The point of the game is to leave
+
+Find the Starship in the mire, press `E`, and go to Mars. `game/mission.js`
+owns the whole of it: countdown, ascent, hot-stage separation, coast, turn,
+entry, the belly-flop flip, the landing burn, and the hedgehog getting out
+onto another planet. Forty-two seconds, and the burrow loop still runs
+underneath it — what changed is what the compass points at.
+
+**Mars is this planet, re-dressed while you are not looking at it.** The
+alternative was a second body with a second radius and a second `heightAt`,
+and `planet.js` exports `R`, `CENTER` and `positionAt` as module constants
+that the ground, the grass, every prop, his feet, the camera and the weather
+all read directly — so making those switchable is a rewrite of everything, to
+arrive at a Mars that behaves exactly like the sphere already here. Instead
+the ship really does climb off the mount, the meadow really does shrink
+underneath it, and at five kilometres with the planet thirty pixels wide and
+the camera facing the other way, the palette ramps over two seconds and
+everything that grows is switched off. Then it turns round and comes down on
+a red world. Every frame is real geometry, nothing is a backdrop, and there is
+no cut — and **walking on Mars is free**, because it is the same sphere, so
+his feet, the horizon and the footprints all worked the day it arrived.
+
+The one thing you must never see is the swap. `TURN` is what pays for it.
+
+Things that bit, in the order they bit:
+
+- **The cutscene is a function of time, not an integration.** `tick()` clamps
+  `dt` to 0.05 and a phone genuinely sees that; a velocity integrated over
+  forty seconds lands the rocket somewhere else. The harness runs the whole
+  flight at 60 fps and at 20 and asserts it lands on the same rock.
+- **The stack's origin is the mount deck, not the vehicle's feet.** Flying it
+  from its own origin put the landed Starship 113 m above Mars on nothing.
+  `begin()` shifts the children down by `DECK` so the origin becomes the
+  bottom of what is flying, and staging sets `ship.position.y = 0` so the
+  ship becomes that in its turn.
+- **The plume fired out of the nose.** The cone's geometry occupies local
+  `-y`, so mapping local `+y` onto `-nose` — which is what "the flame points
+  backwards" sounds like — sends it forwards. It flew to Mars with a
+  hundred-metre torch coming out of its own front.
+- **The sky went Mars-coloured and the dome never saw it.** `sky.setColors`
+  is called from the *middle* of `climate.update`, well before the ground
+  palette is worked out, so a sky colour written with the rest of the Mars
+  blend arrives a whole function too late. It landed on a world with orange
+  fog under a blue sky.
+- **The ground kept its place tint.** The per-vertex colour says how much
+  greener than the meadow each place is, and it is still multiplied in — so
+  Mars had the ten places of the old world faintly showing through it in
+  green. Same fault as §4's snow, same one-line fix, same uniform.
+- **Hiding a group is not enough for anything that ranges off him.** The
+  critters, the residents and the hoglets all set their own `visible` from
+  how far off him they are, so they switched themselves back on the next
+  frame and followed him to Mars. They are not *run* there.
+- **The launch site came too.** The landing site is 31 m from the pad, which
+  is nothing on a planet 300 m round, so the tower and the tank farm were
+  still in frame at touchdown. He took the rocket and left the ground works.
+- **And everything the game had sown.** Seven separate `scene.add` calls in
+  `game.js` are one group now, for exactly this.
+
+**You cannot stand back far enough to watch a launch.** The horizon from a
+metre up is 11 m, and to hold 123 m of rocket in a 34° frame you need to be
+200 m out — at which point the pad is under the curve, because a viewpoint at
+ground distance `d` must be `d²/2R` up to see the pad at all, and that is
+400 m at 200. So the launch camera climbs with the rocket, from 12 m at the
+fence to 300. It is not a cheat; it is what this planet costs.
+
+### Rain was a colour grade, not weather
+
+Standing out in the heaviest weather this world can make, **you could not see
+a single drop** — and three things were stacked up to make that true.
+
+- **The box is a cube and the camera is a cone.** Counted at the frame:
+  eleven of a hundred and five active drops were inside the frustum. For snow
+  that hardly matters — you read it from the few flakes near your face — but
+  rain needs a *curtain*, and a curtain wants an order of magnitude more.
+- **A drop is a streak and a point cannot be one.** At 9.5 m/s a drop covers
+  16 cm in a frame and was drawn as a 5.5 cm dot, so even the eleven you
+  could theoretically see were strobing between positions a stride apart.
+- **Rain does not wobble.** The sine drift that is right for a petal made a
+  field of independently wandering drops, which reads as midges. Real rain
+  falls dead straight and the *wind* leans all of it at once.
+
+It is `LineSegments` now — 2 600 streaks, one draw call, one vertex where the
+drop is and one where it was a frame and a half ago, in a tighter box with a
+lower ceiling. Lines are always one pixel wide in WebGL and that is exactly
+right: a raindrop at four metres *is* about a pixel across.
+
+### Messages had no queue, and that was the whole fault
+
+`flash` wrote straight into the element and reset one timer, so two things
+happening on the same frame meant you read the second and the first never
+existed. With twenty-seven callers that is not a rare case — arriving at the
+burrow alone can fire the leg message, a journal first, a hoglet catching up
+and a resident's greeting within a few frames.
+
+Three rules, each of them a thing that was wrong: every message gets its own
+turn in the order it happened; nothing is on screen for less than can be read,
+and a long line gets longer, because none of the twenty-seven callers passed a
+duration; and there is a beat between them, spent faded out, because swapping
+the text under a panel that is already up reads as a glitch rather than as a
+second thing being said.
+
+The queue is capped at four, and past the cap the **oldest** go — the newest
+is the one you are still looking at the cause of. And it runs with no DOM at
+all, like `dialogue.js`, so the ordering is asserted rather than eyeballed.
+
+A standing instruction — "press E" — is deliberately **not** a flash. A toast
+is a thing that happened; a prompt is a thing that is true while he stands
+there, and putting it through the queue would either lose it while the offer
+was open or block the queue for as long as he loitered. They are two kinds of
+message and the fault the queue fixed was that they had been one.
+
 ## 5. Things that will bite the next change
 
 - **A pitched roof is `s * +angle`, not `s * -angle`.** Rotating about +x by a

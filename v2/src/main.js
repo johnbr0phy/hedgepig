@@ -11,7 +11,7 @@ import { createClimate } from './world/season.js';
 import { createWeather } from './world/weather.js';
 import { R, CENTER, basisAt, positionAt } from './world/planet.js';
 import { clamp, wrapAng } from './core/util.js';
-import { placeAt, placeKindAt, PLACE, WOOD, CIRC, CENTRES, bearing, distance } from './world/plan.js';
+import { placeAt, placeKindAt, PLACE, WOOD, CIRC, CENTRES, PAD, bearing, distance } from './world/plan.js';
 import { waterDepthAt } from './world/terrain.js';
 import { blobTex } from './core/textures.js';
 import { Hog } from './hog/hog.js';
@@ -22,6 +22,7 @@ import { createCharacters } from './world/characters.js';
 import { createDialogue } from './core/dialogue.js';
 import { createPuffs, createPrints } from './core/puffs.js';
 import { createHoglet } from './game/hoglet.js';
+import { createMission } from './game/mission.js';
 
 /* ------------------------------------------------------------------ *
  * the hedgepig adventure — v2.
@@ -124,6 +125,18 @@ const hoglet2 = createHoglet(scene, { seed: 331, phase: 87.3 });
  * of a hedgehog for another hoglet's purposes. */
 const hoglet1Leader = { x: 0, z: 0, hd: 0, gait: 0, speed: 0.85, shiver: 0, night: 0, wet: 0 };
 const game = createGame({ world, hog, hud, climate, audio });
+const mission = createMission({
+  scene, camera, chase, hog, world, hud, climate, sky, audio, game, puffs, renderer,
+});
+/* Nothing that flies, hops, or lives in the wood comes to Mars.  Every one of
+ * these ranges off *him* rather than off the camera — which is the invariant
+ * the whole world is built on — so left running they would all have followed
+ * him there and gone on being a robin in a butterscotch sky. */
+mission.leaveBehind(
+  scene.getObjectByName('critters'), characters.group,
+  hoglet.parts?.root, hoglet.parts?.shadow,
+  hoglet2.parts?.root, hoglet2.parts?.shadow,
+);
 
 /* The tap ripple: one ring, reused, spreading from wherever was called. */
 const ripple = new THREE.Mesh(
@@ -331,6 +344,18 @@ window.addEventListener('keydown', (e) => {
    * animal saying it. */
   if (e.code === 'Space') { if (!dialogue.advance()) hog.jump(); e.preventDefault(); }
   if (e.code === 'Escape') { hog.stop(); held.clear(); rollHeld = false; }
+  /* **E is the whole point of the game.**  Deliberately a key and not a walk
+   * -into-it trigger: everything else in this world happens by being near it,
+   * and leaving the planet is the one thing that should take a decision. */
+  if (e.code === 'KeyE' && !mission.active && !mission.onMars) {
+    if (distance(hog.x, hog.z, PAD.x, PAD.z) < SHIP_REACH) {
+      held.clear(); rollHeld = false;
+      hud.setPrompt('');
+      mission.begin();
+    } else {
+      hud.flash('the ship is in the mire, and it is the tallest thing in the world');
+    }
+  }
   if (e.code === 'KeyP') {
     setPlanetView(!planetView);
     hud.flash(planetView ? 'the whole of it · P to come back down' : 'back in the grass');
@@ -612,6 +637,33 @@ function meetResidents(dt, state) {
   if (near) { metResident = near; speakTo(near, state); }
 }
 
+/* ------------------------------- the aim -------------------------------- *
+ *
+ * There is a rocket in the mire and the point of the game is to get to it.
+ * The burrow loop is still underneath — legs still advance, brambles still
+ * thicken, he still sleeps at home after dark — but the *thing being aimed
+ * at*, on the compass and in the readout, is the ship.  One goal at a time,
+ * or a compass with two wedges on it is a compass you stop reading.
+ */
+const SHIP_REACH = 10.6;          // just outside the mount's own no-go
+let boardPrompt = false;
+
+function shipDistance() {
+  return distance(hog.x, hog.z, PAD.x, PAD.z);
+}
+
+function offerCockpit(dt) {
+  if (mission.active || mission.onMars) {
+    if (boardPrompt) { boardPrompt = false; hud.setPrompt(''); }
+    return;
+  }
+  const near = shipDistance() < SHIP_REACH && !hog.under && !hog.afloat;
+  if (near === boardPrompt) return;
+  boardPrompt = near;
+  hud.setPrompt(near ? '<kbd>E</kbd> climb aboard' : '');
+  if (near) hud.flash('the hatch is open. it is a very long way up.');
+}
+
 function frame() {
   /* Armed first, not last.  Re-arming at the end means any exception
    * anywhere in the frame stops the loop permanently — the game freezes and
@@ -681,17 +733,41 @@ function frame() {
   /* A good soaking earns a shake-off when the rain stops. */
   if (state.wet > 0.35) wetFor += dt;
   else if (wetFor > 5 && state.wet < 0.08) { hog.shake = Math.max(hog.shake, 1.1); wetFor = 0; }
+  /* **The flight owns everything while it is running.**  His legs, the game's
+   * hazards and the chase camera are all switched off rather than fighting
+   * it: a hedgehog is not walking anywhere from inside a rocket, and the two
+   * traps in HANDOVER §10 are both what happens when something that ranges
+   * off him keeps running while he is somewhere he cannot be. */
+  const flying = mission.update(dt);
+  game.state.goal = mission.onMars ? null : (mission.active ? undefined : PAD);
+  if (flying) {
+    hog.driveBy(0, 0, false);
+    world.update(dt, hog, state);
+    weather.update(dt, hog, camera, state);
+    puffs.update(dt, state.night);
+    hud.update(dt);
+    pipeline.render(dt);
+    return;
+  }
+  offerCockpit(dt);
+
   // the keys, read fresh each frame against wherever the camera has got to
   if (!planetView) driveHog(); else hog.driveBy(0, 0, false);
   hog.update(dt, acc);
   game.update(dt);
   world.update(dt, hog, state);
   weather.update(dt, hog, camera, state);
-  critters.update(dt, hog, state);
-  characters.update(dt, hog, state);
-  meetResidents(dt, state);
-  dialogue.update(dt);
-  if (hoglet.update(dt, hog, game.state.leg >= 3, acc) === 'arrived') {
+  /* **Not merely hidden — not run.**  Every one of these sets its own
+   * `visible` from how far off him it is, so hiding the parent group and
+   * letting the update carry on means the hoglet cheerfully switches itself
+   * back on the next frame.  On Mars they do not exist. */
+  if (!mission.onMars) {
+    critters.update(dt, hog, state);
+    characters.update(dt, hog, state);
+    meetResidents(dt, state);
+    dialogue.update(dt);
+  }
+  if (!mission.onMars && hoglet.update(dt, hog, game.state.leg >= 3, acc) === 'arrived') {
     hud.flash(`a hoglet has found him — ${hogletName}, and it will not be left behind`);
     game.note('hoglet');
   }
@@ -700,7 +776,8 @@ function frame() {
     x: h1.x, z: h1.z, hd: h1.hd, gait: h1.gait,
     speed: hog.speed, shiver: hog.shiver, night: hog.night, wet: hog.wet,
   });
-  if (hoglet2.update(dt, hoglet1Leader, game.state.leg >= 6 && h1.live, acc) === 'arrived') {
+  if (!mission.onMars
+      && hoglet2.update(dt, hoglet1Leader, game.state.leg >= 6 && h1.live, acc) === 'arrived') {
     hud.flash(`another hoglet — ${hoglet2Name}, behind ${hogletName}, a whole procession`);
     game.note('hoglet2');
   }
@@ -818,16 +895,21 @@ function frame() {
     // the ring turns with the camera, because the keys do too
     const view = Math.hypot(fe, fn) > 1e-3 ? Math.atan2(fn, fe) : chase.yaw;
     const rel = (x, z) => wrapAng(bearing(hog.x, hog.z, x, z).angle - view);
-    const bur = game.state.burrow;
+    /* **The wedge points at the ship, not at the burrow.**  The burrow loop
+     * is still running underneath and still advances legs; what changed is
+     * what the game is *for*.  Two wedges on one ring is a ring nobody
+     * reads, so there is one, and it is aimed at the thing you are trying
+     * to reach.  On Mars there is nothing left to point at. */
+    const goal = mission.onMars ? null : PAD;
     hud.setCompass({
       places: CENTRES.map((c) => ({ kind: c.kind, angle: rel(c.x, c.z) })),
       here: placeKindAt(hog.x, hog.z),
-      home: {
-        angle: rel(bur.x, bur.z),
+      home: goal ? {
+        angle: rel(goal.x, goal.z),
         /* 1 at the rim, 0 in the middle.  Half a lap is as far as anything can
          * be on a planet you can walk round, so that is the rim. */
-        near: clamp(distance(hog.x, hog.z, bur.x, bur.z) / (CIRC / 2), 0, 1),
-      },
+        near: clamp(distance(hog.x, hog.z, goal.x, goal.z) / (CIRC / 2), 0, 1),
+      } : null,
       /* The residents are read off their live positions, not their addresses:
        * the robin is the one that moves, and a dot that stayed on its perch
        * while the bird itself hopped along beside you would be the one blip
@@ -850,7 +932,7 @@ frame();
  * exists: a hidden tab has no rAF, so nothing that only ever runs inside
  * `frame()` can be exercised from a console — and the keys and the
  * conversation are exactly that. */
-window.__hedgepig = { scene, camera, renderer, pipeline, world, hog, chase, climate, weather, game, sky, sun, fill, hemi, audio, critters, characters, dialogue, hud, puffs, prints, hoglet, driveHog, meetResidents, THREE };
+window.__hedgepig = { scene, camera, renderer, pipeline, world, hog, chase, climate, weather, game, sky, sun, fill, hemi, audio, critters, characters, dialogue, hud, puffs, prints, hoglet, mission, driveHog, meetResidents, THREE };
 
 if (import.meta.env?.DEV) {
   /** Dev capture: render one frame at a fixed size and post it to the server. */

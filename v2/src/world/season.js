@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PAL, SEASONS, NIGHT } from '../core/palette.js';
+import { PAL, SEASONS, NIGHT, MARS } from '../core/palette.js';
 import { applyPalette, setShadowTint } from '../core/toon.js';
 import { setOutlineColor } from '../core/outline.js';
 import { clamp, lerp, damp, TAU, sstep } from '../core/util.js';
@@ -195,6 +195,10 @@ export function createClimate({
    * the same number was well past sunrise; a raw phase is no longer an hour. */
   startAt = 0.30, startHour = 0.915,
 }) {
+  /* How much of somewhere else this is.  0 is the meadow, 1 is Mars, and
+   * everything between is the two seconds it takes to become one from the
+   * other while you are five kilometres up and facing the wrong way. */
+  let marsAmt = 0;
   const state = {
     t: startAt * YEAR,
     dayT: startHour * DAY,
@@ -393,6 +397,18 @@ export function createClimate({
     _c.set(PAL.skyTop);
     skyTop.copy(skyMid).lerp(_c, 0.45);
 
+    /* Mars, for the sky — and it has to be **here**, not with the rest of the
+     * Mars blend two hundred lines down.  `sky.setColors` is called from the
+     * middle of this function, well before the ground palette is worked out,
+     * so a sky colour written after it is one the dome never sees.  That cost
+     * a landing on a world with orange fog under a blue sky, which is a
+     * combination nothing in nature makes. */
+    if (marsAmt > 0) {
+      _d.set(MARS.skyTop); skyTop.lerp(_d, marsAmt);
+      _d.set(MARS.sky);    skyMid.lerp(_d, marsAmt);
+      _d.set(MARS.haze);   skyHaze.lerp(_d, marsAmt);
+    }
+
     // night pulls everything toward the night palette
     if (dk > 0) {
       _d.set(NIGHT.skyTop); skyTop.lerp(_d, dk * 0.92);
@@ -528,6 +544,7 @@ export function createClimate({
     }
     // and it covers the place tint in the vertices, which the material cannot
     ground?.setSnow?.(state.snow);
+    ground?.setMars?.(marsAmt);
     /* Wet ground is darker ground.  Rain that changes nothing underfoot is
      * a particle system, not weather. */
     if (state.wet > 0) {
@@ -563,6 +580,36 @@ export function createClimate({
     _a.set(PAL.water);
     if (state.snow > 0.45) _a.lerp(_b.set(PAL.ice), clamp((state.snow - 0.45) / 0.4, 0, 1));
     if (dk > 0) _a.lerp(_b.set(0x2f4568), dk * 0.7);
+
+    /* ------------------------------- Mars -------------------------------- *
+     *
+     * Another world's colour goes in **here**, at the one place that decides
+     * this one's, and not by anybody reaching in and setting materials.  The
+     * season would repaint over them on the very next frame — this function
+     * runs every frame and writes the whole palette every time — so a Mars
+     * that lived anywhere else would flicker green once a frame and nobody
+     * would be able to see why.
+     *
+     * It is a *ramp*, not a switch, so the swap can happen over a couple of
+     * seconds while the planet behind you is thirty pixels wide and you are
+     * looking the other way.  See `mission.js`. */
+    if (marsAmt > 0) {
+      const m = clamp(marsAmt, 0, 1);
+      grassCol.lerp(_a.set(MARS.dust), m);
+      groundCol.lerp(_a.set(MARS.ground), m);
+      _c.lerp(_a.set(MARS.rock), m);
+      _d.lerp(_a.set(MARS.rock), m);
+      _e.lerp(_a.set(MARS.rock), m);
+      _a.set(MARS.ground);
+      // the sky itself is done much earlier — see the note by the night blend
+      fogCol.lerp(_b.set(MARS.haze), m);
+      if (scene.fog) {
+        scene.fog.color.copy(fogCol);
+        // thinner air, and a horizon you can see all the way to
+        scene.fog.near = lerp(scene.fog.near, 26, m);
+        scene.fog.far = lerp(scene.fog.far, 120, m);
+      }
+    }
 
     applyPalette({
       grass: grassCol,
@@ -617,5 +664,10 @@ export function createClimate({
     return state;
   }
 
-  return { state, update, DAY, YEAR };
+  return {
+    state, update, DAY, YEAR,
+    /** 0 the meadow, 1 Mars. Ramped, not switched — see the note in `update`. */
+    setMars(v) { marsAmt = clamp(v, 0, 1); state.mars = marsAmt; },
+    get mars() { return marsAmt; },
+  };
 }

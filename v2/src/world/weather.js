@@ -28,6 +28,12 @@ import { placeAmt, BGARD, WOOD, LAKE } from './plan.js';
 
 const BOX = 9;            // half-extent of the wrapping box, in metres
 
+/* Rain gets a tighter box and a lower ceiling than everything else: see
+ * `RainField`.  Nine metres of cube put ninety per cent of the drops out of
+ * frame, and rain you cannot see is not weather, it is a colour grade. */
+const RAIN_BOX = 4.2;
+const RAIN_TOP = 5.5;
+
 class Field {
   constructor(scene, { count, size, color, tex, opacity = 0.9, gravity, drift, spin = 0, blend = THREE.NormalBlending }) {
     this.count = count;
@@ -100,14 +106,129 @@ class Field {
   }
 }
 
+/* ------------------------------------------------------------------ *
+ * Rain, which is not a point field and never should have been.
+ *
+ * It was one: 420 round blobs in the same 18 m box everything else uses,
+ * with the same sideways sine wobble.  Standing out in the heaviest weather
+ * this world can make, **you could not see a single drop**, and three
+ * separate things were stacked up to make that true.
+ *
+ *  - **The box is a cube and the camera is a cone.**  Counted at the frame:
+ *    eleven of a hundred and five active drops were inside the frustum.  The
+ *    other ninety-four were behind you, above you, or off to the side.  For
+ *    snow that hardly matters, because snow drifts slowly and you read it
+ *    from the few flakes near your face; for rain you need a *curtain*, and
+ *    a curtain wants an order of magnitude more drops.
+ *  - **A drop is a streak, and a point cannot be one.**  At 9.5 m/s a drop
+ *    covers 16 cm in a frame and was being drawn as a 5.5 cm dot — so even
+ *    the eleven you could theoretically see were strobing between positions
+ *    a stride apart rather than drawing a line.  What reads as rain is the
+ *    smear, and the smear is the whole of it.
+ *  - **Rain does not wobble.**  The sine drift is right for a petal and
+ *    wrong for water: real rain falls dead straight and the *wind* leans the
+ *    entire field one way at once.  A field of independently wandering drops
+ *    reads as midges.
+ *
+ * So rain is `LineSegments` now: one vertex where the drop is and one where
+ * it was a frame and a half ago, which is a streak that automatically
+ * foreshortens to a dot when you look straight up it.  Lines are always one
+ * pixel wide in WebGL and that is exactly right here — a raindrop at four
+ * metres IS about a pixel across, and it costs one draw call for the lot.
+ * ------------------------------------------------------------------ */
+class RainField {
+  constructor(scene, { count, color, opacity, speed }) {
+    this.count = count;
+    this.speed = speed;
+    this.active = 0;
+    /* Two vertices a drop: the head, and the tail it has just come from. */
+    const pos = new Float32Array(count * 6);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setDrawRange(0, 0);
+    this.array = pos;
+    this.geo = geo;
+
+    const mat = new THREE.LineBasicMaterial({
+      color, transparent: true, opacity, depthWrite: false, fog: true,
+    });
+    this.material = mat;
+    this.lines = new THREE.LineSegments(geo, mat);
+    this.lines.frustumCulled = false;
+    this.lines.renderOrder = 6;
+    scene.add(this.lines);
+
+    /* Seeded down a **shorter** box than the rest of the weather.  Rain you
+     * can see is rain within a few metres of your eye; spreading it over the
+     * full 18 m cube is what put ninety per cent of it out of frame. */
+    const rng = rngKit(count * 17 + 3);
+    this.head = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      this.head[i * 3] = rng.range(-RAIN_BOX, RAIN_BOX);
+      this.head[i * 3 + 1] = rng.range(-1.2, RAIN_TOP);
+      this.head[i * 3 + 2] = rng.range(-RAIN_BOX, RAIN_BOX);
+    }
+  }
+
+  set(amount) {
+    const n = Math.floor(this.count * clamp(amount, 0, 1));
+    this.active = n;
+    this.geo.setDrawRange(0, n * 2);
+    this.lines.visible = n > 0;
+    return n;
+  }
+
+  /**
+   * `lean` is the wind, in metres per second sideways — applied to the whole
+   * field at once rather than per drop, because that is what wind is.
+   */
+  update(dt, origin, basis, lean, leanZ) {
+    const n = this.active | 0;
+    if (!n) return;
+    const h = this.head;
+    const p = this.array;
+    const fall = this.speed * dt;
+    /* The streak is how far it goes in about a frame and a half.  Tied to
+     * the real speed rather than a constant, so a heavier fall genuinely
+     * draws longer lines instead of the same lines moving faster. */
+    const sx = -lean / 30, sy = this.speed / 30, sz = -leanZ / 30;
+    for (let i = 0; i < n; i++) {
+      const k = i * 3;
+      h[k + 1] -= fall;
+      h[k] += lean * dt;
+      h[k + 2] += leanZ * dt;
+      if (h[k + 1] < -1.2) {
+        h[k + 1] += RAIN_TOP + 1.2;
+        // and re-drawn across the box, or a shower wears grooves in the air
+        h[k] = ((h[k] + RAIN_BOX * 3) % (RAIN_BOX * 2)) - RAIN_BOX;
+        h[k + 2] = ((h[k + 2] + RAIN_BOX * 3) % (RAIN_BOX * 2)) - RAIN_BOX;
+      }
+      if (h[k] > RAIN_BOX) h[k] -= RAIN_BOX * 2; else if (h[k] < -RAIN_BOX) h[k] += RAIN_BOX * 2;
+      if (h[k + 2] > RAIN_BOX) h[k + 2] -= RAIN_BOX * 2; else if (h[k + 2] < -RAIN_BOX) h[k + 2] += RAIN_BOX * 2;
+
+      const j = i * 6;
+      p[j] = h[k]; p[j + 1] = h[k + 1]; p[j + 2] = h[k + 2];
+      p[j + 3] = h[k] + sx; p[j + 4] = h[k + 1] + sy; p[j + 5] = h[k + 2] + sz;
+    }
+    this.geo.attributes.position.needsUpdate = true;
+    this.lines.position.copy(origin);
+    this.lines.quaternion.setFromRotationMatrix(
+      _m.makeBasis(basis.east, basis.up, basis.north)
+    );
+  }
+}
+
 const _m = new THREE.Matrix4();
 const _origin = new THREE.Vector3();
 const _flat = { x: 0, z: 0, y: 0 };
 
 export function createWeather(scene) {
-  const rain = new Field(scene, {
-    count: 420, size: 0.055, color: 0xbcd6e8, tex: starTex(), opacity: 0.55,
-    gravity: 9.5, drift: 0.5,
+  /* 2 200 streaks against the old 420 dots.  It sounds like a lot and is
+   * two draw calls' worth of nothing: 4 400 vertices in one `LineSegments`,
+   * against a frame that already pushes 1.9 M triangles.  The count is set
+   * by what a downpour has to LOOK like, which is a curtain. */
+  const rain = new RainField(scene, {
+    count: 2600, color: 0xc4dcee, opacity: 0.6, speed: 11,
   });
   const snow = new Field(scene, {
     count: 380, size: 0.075, color: 0xfdfdff, tex: starTex(), opacity: 0.92,
@@ -154,9 +275,14 @@ export function createWeather(scene) {
 
       const b = basisAt(hog.x, hog.z);
       positionAt(hog.x, hog.y + 1.2, hog.z, _origin);
-      for (const f of [rain, snow, leaves, petals, motes, flies]) {
+      for (const f of [snow, leaves, petals, motes, flies]) {
         f.update(dt, _origin, b, t);
       }
+      /* The rain leans instead of wobbling, and the lean is the real wind —
+       * gusting, so a squall visibly comes through rather than the whole
+       * shower sitting at one angle for its duration. */
+      const gust = (state.wind ?? 0.2) * (2.6 + Math.sin(t * 0.31) + 0.4 * Math.sin(t * 1.7));
+      rain.update(dt, _origin, b, gust, gust * 0.42);
     },
   };
 }

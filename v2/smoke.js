@@ -73,6 +73,8 @@ const rngSeq = (seed) => { const r = rngSeedKit(seed); return () => r.next(); };
 const { createCritters } = await import('./src/world/critters.js');
 const { createCharacters, WOOD_CHARACTERS } = await import('./src/world/characters.js');
 const { createDialogue } = await import('./src/core/dialogue.js');
+const { createHud } = await import('./src/core/hud.js');
+const { createMission } = await import('./src/game/mission.js');
 const { STACK } = await import('./src/world/places/starbase.js');
 
 /* ------------------------------- reporting ------------------------------- */
@@ -2008,6 +2010,189 @@ function sStarbase() {
   ok(inside === 0, 'and nothing of the mire is left growing through it', `${inside} found`);
 }
 
+/* -------------------------------- the toast ------------------------------- *
+ *
+ * Twenty-seven callers, no queue: `flash` wrote straight into the element and
+ * reset one timer, so two things happening on the same frame meant you read
+ * the second and the first never existed at all.  That is not a rare case —
+ * arriving at the burrow can fire the leg message, a journal first, a hoglet
+ * catching up and a resident's greeting within a few frames of each other.
+ */
+function sToast() {
+  const hud = createHud();
+  const step = (secs, dt = 1 / 60) => { for (let i = 0; i < secs / dt; i++) hud.update(dt); };
+
+  hud.flash('ow — brambles');
+  hud.flash('home. leg 2 — and the brambles are thicker');
+  hud.flash('a hoglet has found him');
+  hud.update(1 / 60);
+  let p = hud.pending();
+  ok(p.showing === 'ow — brambles', 'the first thing said is the first thing shown', p.showing);
+  ok(p.queued.length === 2, 'and the other two are waiting their turn, not lost',
+    `${p.queued.length} queued`);
+
+  /* The whole point: the one that fired first is still readable a second
+   * later.  Before the queue it was gone inside a frame. */
+  step(1.0);
+  ok(hud.pending().showing === 'ow — brambles', 'and it is still there a second later');
+
+  /* Run it right out and record what was on screen, in order.  Asserting the
+   * SEQUENCE rather than the clock is the point: the durations are tuned by
+   * eye and will be tuned again, and a test that has to be re-timed every
+   * time somebody adjusts a beat is a test nobody will keep. */
+  const seen = [];
+  for (let i = 0; i < 60 * 20; i++) {
+    hud.update(1 / 60);
+    const s = hud.pending().showing;
+    if (s !== seen[seen.length - 1]) seen.push(s);
+  }
+  const want = [
+    'ow — brambles', null,                                    // already up when we started
+    'home. leg 2 — and the brambles are thicker', null,       // the beat between each
+    'a hoglet has found him', null,
+  ];
+  ok(seen.join(' | ') === want.join(' | '),
+    'and every one of them gets its turn, in the order it happened',
+    seen.join(' | ') === want.join(' | ') ? `${seen.length} states` : `got ${seen.join(' | ')}`);
+
+  /* A long line is given longer, because none of the twenty-seven callers
+   * passed a duration and none of them was thinking about its own length. */
+  const upFor = (msg) => {
+    const h = createHud();
+    h.flash(msg);
+    let t = 0;
+    for (let i = 0; i < 60 * 20 && (i === 0 || h.pending().showing); i++) { h.update(1 / 60); t += 1 / 60; }
+    return t;
+  };
+  const shortFor = upFor('morning');
+  const longFor = upFor('he has stood in every place there is — the start of the world blooms for it');
+  ok(longFor > shortFor + 0.8, 'a long line is given longer to be read than a short one',
+    `${f(shortFor)}s against ${f(longFor)}s`);
+  ok(shortFor >= 1.9, 'and nothing at all is on screen for less than can be read',
+    `${f(shortFor)}s`);
+
+  /* The same thing twice running is one thing: `note()` and whatever earned
+   * it often both want to say so. */
+  hud.clearFlash();
+  hud.flash('under the road');
+  hud.flash('under the road');
+  hud.update(1 / 60);
+  ok(hud.pending().queued.length === 0, 'saying the same thing twice says it once');
+
+  /* And the queue is capped, or a burst of nine holds the last of them half
+   * a minute after the moment that earned it. */
+  hud.clearFlash();
+  for (let i = 0; i < 12; i++) hud.flash(`thing number ${i}`);
+  hud.update(1 / 60);
+  p = hud.pending();
+  ok(p.queued.length <= 4, 'a burst is capped rather than backing up for ever',
+    `${p.queued.length} still queued`);
+  ok(p.queued[p.queued.length - 1] === 'thing number 11',
+    'and it is the OLDEST that go — the newest is the one you just caused');
+
+  ok(hud.flash('') === undefined && hud.pending().showing !== null,
+    'an empty message changes nothing');
+}
+
+/* -------------------------------- the flight ------------------------------ *
+ *
+ * Forty seconds of cutscene that has to put a rocket on a particular patch of
+ * ground, so almost none of it is judged by eye.  The things that can go
+ * wrong here are all arithmetic: a ship that drifts, a landing that misses,
+ * a separation that fires twice, a frame that goes non-finite somewhere in
+ * the middle where nobody is looking.
+ */
+function sMission() {
+  const w = makeWorld();
+  const cam = new THREE.PerspectiveCamera(45, 1.5, 0.05, 400);
+  const build = () => createMission({
+    scene: w.scene, camera: cam, chase: { _seeded: true }, hog: w.hog,
+    world: w.world, hud: w.hud, climate: w.climate, sky: null, audio: null,
+    game: w.game, puffs: null,
+  });
+
+  const m = build();
+  const padD = plan.distance(w.hog.x, w.hog.z, plan.PAD.x, plan.PAD.z);
+  ok(m.TOTAL > 25 && m.TOTAL < 60, 'the flight is a watchable length', `${f(m.TOTAL, 1)} s`);
+
+  /* --- the shape of it --- */
+  const alts = [];
+  for (let t = 0; t <= m.TOTAL; t += 0.25) alts.push(m.altAt(t));
+  const top = Math.max(...alts);
+  ok(top > 3000, 'it genuinely leaves', `${Math.round(top)} m up at the top`);
+  ok(alts[0] === 20, 'it starts standing on the mount, not in the bog', `${alts[0]} m up`);
+  ok(alts[alts.length - 1] === 0, 'and it ends on the ground');
+  const topAt = alts.indexOf(top);
+  const upOk = alts.slice(0, topAt).every((v, i, a) => i === 0 || v >= a[i - 1] - 1e-9);
+  const downOk = alts.slice(topAt).every((v, i, a) => i === 0 || v <= a[i - 1] + 1e-9);
+  ok(upOk && downOk, 'up all the way up and down all the way down — no bobbing');
+
+  /* --- and where it puts it --- */
+  const p0 = m.shipAt(0, new THREE.Vector3());
+  const p1 = m.shipAt(m.TOTAL, new THREE.Vector3());
+  const padWorld = planet.positionAt(plan.PAD.x, terrain.heightAt(plan.PAD.x, plan.PAD.z), plan.PAD.z, new THREE.Vector3());
+  const siteWorld = planet.positionAt(m.site.x, terrain.heightAt(m.site.x, m.site.z), m.site.z, new THREE.Vector3());
+  ok(Math.abs(p0.distanceTo(padWorld) - 20) < 0.5, 'it starts on the mount deck, twenty metres up',
+    `${f(p0.distanceTo(padWorld))} m above the pad`);
+  ok(p1.distanceTo(siteWorld) < 0.5, 'and it comes down ON the landing site, not above it',
+    `${f(p1.distanceTo(siteWorld), 3)} m`);
+  ok(plan.distance(plan.PAD.x, plan.PAD.z, m.site.x, m.site.z) > 20,
+    'which is somewhere else entirely',
+    `${f(plan.distance(plan.PAD.x, plan.PAD.z, m.site.x, m.site.z))} m across the planet`);
+
+  /* --- nothing goes non-finite anywhere in the middle --- */
+  let bad = 0;
+  const _v = new THREE.Vector3();
+  for (let t = 0; t <= m.TOTAL; t += 0.05) {
+    m.shipAt(t, _v);
+    if (!Number.isFinite(_v.x + _v.y + _v.z)) bad++;
+    m.altAt(t);
+  }
+  ok(bad === 0, 'and no frame of it is non-finite', `${Math.round(m.TOTAL / 0.05)} sampled`);
+
+  /* --- **it is a function of time, not an integration.** ---
+   *
+   * A cutscene that integrates a velocity lands somewhere different when the
+   * frames are long, and `tick()` clamps dt to 0.05 — which is a frame rate
+   * this can genuinely see on a phone.  Running it at 60 fps and at 20 fps
+   * has to put the rocket on the same rock. */
+  let quiet = 0;
+  const run = (dt) => {
+    const mm = build();
+    w.put(plan.PAD.x, plan.PAD.z);
+    if (!mm.begin()) quiet++;
+    let guard = 0;
+    while (mm.active && guard++ < 20000) mm.update(dt);
+    return { x: w.hog.x, z: w.hog.z, onMars: mm.onMars };
+  };
+  const fast = run(1 / 60);
+  const slow = run(1 / 20);
+  ok(quiet === 0, 'the flight starts when he is at the ship');
+  ok(fast.onMars && slow.onMars, 'and both frame rates arrive');
+  ok(plan.distance(fast.x, fast.z, slow.x, slow.z) < 0.01,
+    'and a slow machine lands in the same place as a fast one',
+    `${f(plan.distance(fast.x, fast.z, slow.x, slow.z), 4)} m apart`);
+
+  /* --- he gets out, on Mars, and the meadow is gone --- */
+  const m2 = build();
+  w.hog.x = plan.PAD.x; w.hog.z = plan.PAD.z;
+  m2.begin();
+  let g = 0;
+  while (m2.active && g++ < 20000) m2.update(1 / 60);
+  ok(m2.onMars, 'he is on Mars');
+  ok(plan.distance(w.hog.x, w.hog.z, m2.site.x, m2.site.z) < 2,
+    'standing beside the ship he came in',
+    `${f(plan.distance(w.hog.x, w.hog.z, m2.site.x, m2.site.z))} m from it`);
+  ok(w.hog.root === null || w.hog.root.visible !== false, 'and visible again');
+  ok(!w.world.grass.group || w.world.grass.group.visible === false,
+    'and there is no grass on Mars');
+  ok(w.game.state.flags.mars === true, 'and the journal has it');
+
+  /* Landing twice is not a thing.  `begin` must refuse once he is there, or
+   * pressing the key on Mars flies him off a planet he is standing on. */
+  ok(m2.begin() === false, 'and there is no launching again from Mars');
+}
+
 function sNan() {
   /* v1's harness flagged any non-finite coordinate reaching the canvas, and
    * it is still the cheapest bug-per-line in either build.  The equivalent
@@ -2049,7 +2234,7 @@ const SCENARIOS = {
   plan: sPlan, terrain: sTerrain, planet: sPlanet, clock: sClock,
   open: sOpen, gait: sGait, roll: sRoll, face: sFace, walk: sWalk, idle: sIdle, back: sBack, water: sWater, boat: sBoat,
   road: sRoad, roadmiss: sRoadmiss, abandon: sAbandon,
-  burrow: sBurrow, grass: sGrass, solid: sSolid, persist: sPersist, palette: sPalette, weather: sWeather, sky: sSky, slow: sSlow, merge: sMerge, drive: sDrive, jump: sJump, voice: sVoice, critters: sCritters, characters: sCharacters, starbase: sStarbase, nan: sNan,
+  burrow: sBurrow, grass: sGrass, solid: sSolid, persist: sPersist, palette: sPalette, weather: sWeather, sky: sSky, slow: sSlow, merge: sMerge, drive: sDrive, jump: sJump, voice: sVoice, critters: sCritters, characters: sCharacters, starbase: sStarbase, toast: sToast, mission: sMission, nan: sNan,
 };
 
 const arg = process.argv[2] || 'all';
