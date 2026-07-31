@@ -75,6 +75,18 @@ const _srot = new THREE.Matrix4();
  * into.  He stops, complains, and you steer.  That is what an animal does. */
 const SLIDE = [0.42, -0.42, 0.85, -0.85, 1.28, -1.28];
 
+/* The hop.  `JUMP_V^2 / (2 G)` is the height, so these two give 0.42 m — one
+ * and a half times his own length, which is enough for a stump or a fallen
+ * trunk and not enough to be a platformer.  Gravity is well above 9.81 on
+ * purpose: at true gravity a jump this low hangs for a third of a second and
+ * reads as floating, and this world is small enough that everything in it is
+ * already slightly faster than life. */
+const JUMP_V = 2.4;
+const GRAV = 6.9;
+
+/** How far he can step up onto something without jumping at all. */
+const STEP_UP = 0.055;
+
 export class Hog {
   /**
    * `model: false` gives a hedgepig with no geometry — the walk, the gait,
@@ -141,6 +153,14 @@ export class Hog {
     /** The keys, when a hand is on them: a heading and a throttle. */
     this._drive = { angle: 0, throttle: 0, roll: false };
 
+    /* Jumping.  `vy` is metres a second upward, `air` is how long he has been
+     * off a surface, and `stood` is whatever he is standing on — null for the
+     * ground itself. */
+    this.vy = 0;
+    this.air = 0;
+    this.stood = null;
+    this.landed = 0;            // seconds since the last landing, for the squash
+
     this._idleTimer = 2;
     this._glanceTo = 0;          // where the idle glance is easing his heading
     /* His own seeded stream, not `Math.random`.  Everything else in this
@@ -178,6 +198,24 @@ export class Hog {
     this.target = null;
     this.arrived = true;
     this.rolling = false;
+  }
+
+  /**
+   * Up.
+   *
+   * A hedgehog is not a jumping animal, and this one is 26 cm long, so the
+   * hop is small and heavy: 0.42 m at the top, down in under a second. It is
+   * for getting onto a fallen trunk, not for crossing anything.
+   *
+   * Refused while curled, afloat or under the culvert — all three are states
+   * where he is not in charge of his own feet.
+   */
+  jump() {
+    if (this.air > 0.06 || this.curl > 0.2 || this.afloat || this.under) return false;
+    this.vy = JUMP_V;
+    this.air = 0.001;
+    this.onJump?.();
+    return true;
   }
 
   /**
@@ -354,7 +392,7 @@ export class Hog {
     this.ball = damp(this.ball, this.rolling && this.hurt <= 0 ? 1 : 0, 7, dt);
 
     const before = { x: this.x, z: this.z };
-    this.y = heightAt(this.x, this.z);
+    this.settle(dt);
     const ground = this.gait * this.speed * (1 + (this.rainHurry || 0)) * this.rollSpeed() * dt;
     this.stride += ground * 7.2 / this.speed;
     this.walked += ground;
@@ -483,9 +521,60 @@ export class Hog {
 
   canStand(x, z) {
     if (this.under) return true;
-    if (!walkableAt(x, z)) return false;
-    // where he is going, *from where he is* — see `world.blockedAt`
-    return !this.world?.blockedAt?.(x, z, this.x, this.z);
+    /* Up on something, the water below is not his problem — a trunk across a
+     * ditch is a bridge. */
+    if (!this.stood && !walkableAt(x, z)) return false;
+    // where he is going, from where he is, and at the height he is at
+    return !this.world?.blockedAt?.(x, z, this.x, this.z, this.y);
+  }
+
+  /**
+   * Put his feet on whatever is under them.
+   *
+   * **`heightAt` still owns the ground.**  Everything else in this world reads
+   * it and nothing here changes that; what this adds is that *his feet* may
+   * also rest on a registered platform, and only ever on one at or below where
+   * they already are plus a small step. That ceiling is what stops him being
+   * snapped onto a log he is walking past, and its absence is what would make
+   * a platform a second source of ground.
+   *
+   * Off the edge of one there is no platform at the new spot, the support
+   * falls back to the ground, and he falls. That is the whole mechanic.
+   */
+  settle(dt) {
+    const ground = heightAt(this.x, this.z);
+    const airborne = this.air > 0;
+    // while rising he may not catch on anything; on the way down, anything below
+    const ceil = airborne
+      ? (this.vy > 0 ? -Infinity : this.y)
+      : this.y + STEP_UP;
+    const plat = this.world?.platformAt?.(this.x, this.z, ceil) || null;
+    const support = Math.max(ground, plat ? plat.top : -Infinity);   // `top` is absolute
+
+    if (airborne) {
+      this.vy -= GRAV * dt;
+      this.y += this.vy * dt;
+      this.air += dt;
+      if (this.vy <= 0 && this.y <= support) {
+        this.y = support;
+        this.vy = 0;
+        this.air = 0;
+        this.landed = 0.001;
+        this.stood = plat;
+        this.onLand?.(plat);
+      } else {
+        this.stood = null;
+      }
+    } else if (this.y > support + 0.02) {
+      // walked off the edge of something: no jump, just gravity
+      this.air = 0.001;
+      this.vy = 0;
+      this.stood = null;
+    } else {
+      this.y = support;
+      this.stood = plat;
+    }
+    if (this.landed > 0) this.landed = Math.min(1, this.landed + dt);
   }
 
   /** Standing still is not standing still: he snuffles, and looks about. */

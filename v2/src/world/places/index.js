@@ -50,6 +50,7 @@ export function buildPlaces(root) {
 
   const shared = {
     blockers: [],
+    platforms: [],
     interactables: [],
     pickables: [],
     seasonal: [],
@@ -95,6 +96,30 @@ export function buildPlaces(root) {
       block(u, v, r) {
         const p = at(u, v);
         shared.blockers.push({ x: p.x, z: p.z, r });
+        return p;
+      },
+
+      /**
+       * Something he can get **on top of**: a disc of radius `r` whose walkable
+       * surface is `top` metres above the ground under it.  A fallen trunk, a
+       * stump, a boulder, a low wall.
+       *
+       * It registers a no-go as well, with the platform's height on it — so
+       * the log stops him at ground level and stops stopping him once he is
+       * standing on it.  Without that pairing a climbable log is either a wall
+       * you cannot get onto or a ghost you walk through.
+       */
+      stand(u, v, r, top) {
+        const p = at(u, v);
+        /* `top` comes in as a height above the ground, which is how a builder
+         * thinks about a log, and is stored as an **absolute** height, which
+         * is how his feet think about one.  Keeping both in the same record
+         * under the same name is how the first version of this snapped him
+         * onto everything he walked past: the ceiling test compared a relative
+         * 0.24 against an absolute 1.06 and let it through. */
+        const abs = heightAt(p.x, p.z) + top;
+        shared.platforms.push({ x: p.x, z: p.z, r, top: abs, rise: top });
+        shared.blockers.push({ x: p.x, z: p.z, r: r * 0.92, top: abs });
         return p;
       },
 
@@ -193,6 +218,7 @@ export function buildPlaces(root) {
 
   return {
     blockers,
+    platforms: shared.platforms,
     interactables: shared.interactables,
     pickables: shared.pickables,
     out: shared.out,

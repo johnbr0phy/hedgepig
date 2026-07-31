@@ -97,6 +97,7 @@ export function buildWorld(scene, { places = null, grass: withGrass = true } = {
    * meant, and the ground is a single mesh that covers the whole planet. */
   const pickables = [ground.land, ...(built.pickables || [])];
   const blockers = built.blockers || [];
+  const platforms = built.platforms || [];
   const _d = new THREE.Vector3();
   const _f = new THREE.Vector3();
 
@@ -150,11 +151,16 @@ export function buildWorld(scene, { places = null, grass: withGrass = true } = {
      * less — so both moves were refused and he was pinned between two things
      * he could have walked around.
      */
-    blockedAt(x, z, fx, fz) {
+    blockedAt(x, z, fx, fz, y) {
       dirAt(x, z, _d);
       const inside = fx !== undefined ? dirAt(fx, fz, _f) : null;
       for (const b of blockers) {
         if (b.enabled === false) continue;
+        /* A blocker with a `top` is something climbable, and it only blocks
+         * you while you are **below** its surface.  Standing on the log, the
+         * log is not in your way; the same record is a wall from the ground
+         * and a floor from above. */
+        if (b.top !== undefined && y !== undefined && y >= b.top - 0.04) continue;
         const d = _d.dot(b.dir);
         if (d <= b.cosR) continue;
         if (inside) {
@@ -164,6 +170,34 @@ export function buildWorld(scene, { places = null, grass: withGrass = true } = {
         return true;
       }
       return false;
+    },
+
+    platforms,
+
+    /**
+     * The highest thing he could be standing on at (x, z), or `null`.
+     *
+     * **This is not a second source of ground.**  `heightAt` still owns the
+     * terrain and everything else in the world still reads it — the globe
+     * mesh, every prop, every blade, the water.  A platform is consulted by
+     * exactly one thing, his feet, and only for a surface at or below where
+     * they already are: `ceil` is his current height plus a step, so he can
+     * walk up onto something low and cannot be teleported onto a log he is
+     * strolling past at ground level.
+     *
+     * Walk off the edge and there is no platform at the new spot, so the
+     * support drops to the ground and he falls, which is the whole mechanic
+     * and costs nothing to express.
+     */
+    platformAt(x, z, ceil) {
+      let best = null;
+      for (const p of platforms) {
+        if (p.top > ceil) continue;
+        if (best && p.top <= best.top) continue;
+        if (distance(x, z, p.x, p.z) > p.r) continue;
+        best = p;
+      }
+      return best;
     },
 
     /** Nearest interactable within reach of him, or null. */

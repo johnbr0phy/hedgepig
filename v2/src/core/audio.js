@@ -359,6 +359,25 @@ export function createAudio() {
     }
   }
 
+  /** The hop: a short rising scuff, all breath, no voice — he is not a bird. */
+  function hop() {
+    if (!ctx || muted) return;
+    puff(760, { dur: 0.09, vol: 0.038, q: 1.1, glide: 620 });
+    blip(210, { dur: 0.07, vol: 0.022, type: 'triangle', glide: 90 });
+  }
+
+  /** And the landing.  Wood is a knock; ground is a soft thud. */
+  function land(onWood = false) {
+    if (!ctx || muted) return;
+    if (onWood) {
+      blip(330, { dur: 0.07, vol: 0.05, type: 'triangle', glide: -120 });
+      puff(2100, { dur: 0.04, vol: 0.03, q: 1.4 });
+    } else {
+      puff(520, { dur: 0.08, vol: 0.045, q: 0.9, glide: -240 });
+      blip(96, { dur: 0.10, vol: 0.045, type: 'sine' });
+    }
+  }
+
   /** Put out: a low descending huff.  Balked at the water, or walled in. */
   function grumble() {
     if (!ctx || muted) return;
@@ -619,7 +638,7 @@ export function createAudio() {
   return {
     unlock, update, toggleMute,
     footfall, sow, hurt, home, hoot, plip, squawk, nom, lap, sneeze, thunder, creak, drip,
-    snuffle, chunter, peep, trill, grumble,
+    snuffle, chunter, peep, trill, grumble, hop, land,
     get muted() { return muted; },
   };
 }

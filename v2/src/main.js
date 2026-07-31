@@ -10,7 +10,8 @@ import { buildPlaces } from './world/places/index.js';
 import { createClimate } from './world/season.js';
 import { createWeather } from './world/weather.js';
 import { R, CENTER, basisAt, positionAt } from './world/planet.js';
-import { placeAt, placeKindAt, PLACE, WOOD, CIRC, CENTRES } from './world/plan.js';
+import { clamp, wrapAng } from './core/util.js';
+import { placeAt, placeKindAt, PLACE, WOOD, CIRC, CENTRES, bearing, distance } from './world/plan.js';
 import { waterDepthAt } from './world/terrain.js';
 import { blobTex } from './core/textures.js';
 import { Hog } from './hog/hog.js';
@@ -131,9 +132,13 @@ ripple.renderOrder = 4;
 scene.add(ripple);
 const rippleAt = { x: 0, z: 0, t: 0 };
 
-/* A tap sows, and only sows.  Where he goes is your hand's business now. */
+/* A tap sows **and sends him**, as it always did — and the keys still drive
+ * him, which is the point: a click is for "over there, while I watch", the
+ * keys are for steering.  They cannot fight, because a live throttle drops
+ * the target outright (see `hog.driveBy`), so whichever you touched last is
+ * the one in charge. */
 chase.onCall = (x, z) => {
-  game.sowAt(x, z);
+  game.call(x, z);
   rippleAt.x = x; rippleAt.z = z; rippleAt.t = 0.55;
 };
 
@@ -165,6 +170,7 @@ chase.onCall = (x, z) => {
  */
 const RIGHT_OF = Math.PI / 2;
 const _camFwd = new THREE.Vector3();
+let compassIn = 0;
 const DRIVE_KEYS = {
   KeyW: 'f', ArrowUp: 'f',
   KeyS: 'b', ArrowDown: 'b',
@@ -228,6 +234,13 @@ hog.onSniff = () => audio.snuffle();
 hog.onNuzzle = () => audio.chunter();
 hog.onPleased = () => audio.peep();
 hog.onGrumble = () => audio.grumble();
+hog.onJump = () => audio.hop();
+hog.onLand = (plat) => {
+  audio.land(!!plat);
+  const s = climate.state;
+  puffs.burst(hog.x, hog.y + 0.004, hog.z, { n: 5, up: 0.10, spread: 0.14, px: 16,
+    color: s.snow > 0.4 ? 0xe8eef4 : 0xcbb98e });
+};
 hog.onSneeze = () => {
   audio.sneeze();
   puffs.burst(hog.x, hog.y + 0.07, hog.z, { n: 3, up: 0.05, spread: 0.12, px: 12, color: 0xe8dcc8 });
@@ -304,7 +317,11 @@ window.addEventListener('keydown', (e) => {
     held.add(d);
   }
   if (e.repeat) return;
-  if (e.code === 'Space') { hog.stop(); held.clear(); rollHeld = false; hud.flash('he stops where he is'); e.preventDefault(); }
+  /* **Space is the hop.**  It used to stop him, which the keys now do by
+   * being let go of — a stop key made sense when a click sent him somewhere
+   * and you had no other way to change your mind. */
+  if (e.code === 'Space') { hog.jump(); e.preventDefault(); }
+  if (e.code === 'Escape') { hog.stop(); held.clear(); rollHeld = false; }
   if (e.code === 'KeyP') {
     setPlanetView(!planetView);
     hud.flash(planetView ? 'the whole of it · P to come back down' : 'back in the grass');
@@ -708,6 +725,29 @@ function frame() {
 
   sky.setWet(state.wet);
   sky.update(dt, camera, planetView ? null : state, planetView ? null : basisAt(hog.x, hog.z));
+  /* The compass, a few times a second rather than every frame — it is a
+   * canvas redraw and nothing on it moves fast enough to notice. */
+  compassIn -= dt;
+  if (compassIn <= 0 && !planetView) {
+    compassIn = 1 / 12;
+    const b = basisAt(hog.x, hog.z);
+    camera.getWorldDirection(_camFwd);
+    const fe = _camFwd.dot(b.east), fn = _camFwd.dot(b.north);
+    // the ring turns with the camera, because the keys do too
+    const view = Math.hypot(fe, fn) > 1e-3 ? Math.atan2(fn, fe) : chase.yaw;
+    const rel = (x, z) => wrapAng(bearing(hog.x, hog.z, x, z).angle - view);
+    const bur = game.state.burrow;
+    hud.setCompass({
+      places: CENTRES.map((c) => ({ kind: c.kind, angle: rel(c.x, c.z) })),
+      here: placeKindAt(hog.x, hog.z),
+      home: {
+        angle: rel(bur.x, bur.z),
+        /* 1 at the rim, 0 in the middle.  Half a lap is as far as anything can
+         * be on a planet you can walk round, so that is the rim. */
+        near: clamp(distance(hog.x, hog.z, bur.x, bur.z) / (CIRC / 2), 0, 1),
+      },
+    });
+  }
   hud.update(dt);
 
   pipeline.render(dt);

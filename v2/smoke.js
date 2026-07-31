@@ -1334,6 +1334,96 @@ function sDrive() {
     `${f(plan.distance(hog.x, hog.z, m.x, m.z), 2)} m on`);
 }
 
+function sJump() {
+  /* Up, onto things, and off them again.
+   *
+   * The thing this really guards is the invariant it sits next to:
+   * **`heightAt` is still the only source of ground.** A platform is consulted
+   * by his feet alone, and only for a surface at or below where they already
+   * are — without that ceiling he would be snapped up onto any log he walked
+   * past, which is a second source of ground wearing a disguise. */
+  const { hog, world, put, centre } = makeWorld();
+  const m = centre(plan.MEADOW);
+  let spot = null;
+  for (let i = 0; i < 96 && !spot; i++) {
+    const a = (i / 96) * Math.PI * 2;
+    const p = plan.offsetFrom(m, Math.cos(a) * 5, Math.sin(a) * 5);
+    if (!terrain.walkableAt(p.x, p.z)) continue;
+    if (world.blockers.some((b) => plan.distance(p.x, p.z, b.x, b.z) < 4)) continue;
+    spot = p;
+  }
+  ok(!!spot, 'open ground to jump about on');
+
+  /* Park him properly.  `put` clears the target but not the *keys* or the
+   * air, and the scenarios before this one leave both — driven, he walks
+   * while he is jumping and lands somewhere with a different ground height
+   * under it, which reads as the jump being broken. The same shared-world
+   * order dependence `roadmiss` has, in a new place. */
+  const park = (p) => {
+    put(p.x, p.z);
+    hog.driveBy(0, 0, false);
+    hog.stop();
+    hog.air = 0; hog.vy = 0; hog.stood = null; hog.curl = 0; hog.hurt = 0;
+    hog.y = terrain.heightAt(p.x, p.z);
+  };
+  park(spot);
+
+  const ground = terrain.heightAt(spot.x, spot.z);
+  const step = (n) => { for (let i = 0; i < n; i++) hog.update(1 / 60, i / 60); };
+
+  /* 1. He leaves the ground and comes back to it. */
+  ok(hog.jump() === true, 'he jumps');
+  let peak = 0;
+  for (let i = 0; i < 120; i++) { hog.update(1 / 60, i / 60); peak = Math.max(peak, hog.y - ground); }
+  ok(peak > 0.30 && peak < 0.60, 'about forty centimetres up — a hop, not a platformer',
+    `${f(peak, 2)} m`);
+  ok(Math.abs(hog.y - ground) < 1e-6 && hog.air === 0, 'and he comes back down to the ground',
+    `${f(hog.y - ground, 4)} m above it`);
+  ok(hog.jump() === true, 'and can go again once he has landed');
+  step(120);
+
+  /* 2. A platform: he can get on it, and it holds him. */
+  const plat = { x: spot.x, z: spot.z, r: 0.6, top: ground + 0.24 };
+  world.platforms.push(plat);
+  try {
+    hog.jump();
+    step(120);
+    ok(Math.abs(hog.y - plat.top) < 1e-6, 'jumped onto a log, he stands on the log',
+      `${f(hog.y - ground, 3)} m up`);
+    ok(hog.stood === plat, 'and he knows what he is standing on');
+
+    /* 3. **The ceiling.** Standing beside it on the ground, he is NOT snapped
+     *    up onto it — that is the difference between a platform and a second
+     *    source of ground. */
+    park(spot);
+    step(4);
+    ok(Math.abs(hog.y - ground) < 0.06, 'standing under one, he is not teleported on top of it',
+      `${f(hog.y - ground, 3)} m`);
+
+    /* 4. Off the edge, he falls — no jump needed. */
+    hog.y = plat.top;
+    hog.stood = plat;
+    hog.air = 0; hog.vy = 0;
+    const off = plan.towards(spot.x, spot.z, m.x, m.z, 1.4);
+    hog.x = off.x; hog.z = off.z;
+    step(90);
+    ok(Math.abs(hog.y - terrain.heightAt(hog.x, hog.z)) < 1e-6,
+      'and walking off the end of it, he falls back to the ground');
+    ok(hog.stood === null, 'and is standing on nothing again');
+  } finally {
+    const i = world.platforms.indexOf(plat);
+    if (i >= 0) world.platforms.splice(i, 1);
+  }
+
+  /* 5. Refused where he is not in charge of his own feet. */
+  hog.curl = 1;
+  ok(hog.jump() === false, 'curled up, he does not jump');
+  hog.curl = 0;
+  hog.under = true;
+  ok(hog.jump() === false, 'and not in the culvert either');
+  hog.under = false;
+}
+
 function sVoice() {
   /* **An animation rate is not an utterance rate.**  `anim.js` twitches his
    * nose every half-second to two seconds, which is right to look at, and
@@ -1619,7 +1709,7 @@ const SCENARIOS = {
   plan: sPlan, terrain: sTerrain, planet: sPlanet, clock: sClock,
   open: sOpen, gait: sGait, roll: sRoll, face: sFace, walk: sWalk, idle: sIdle, back: sBack, water: sWater, boat: sBoat,
   road: sRoad, roadmiss: sRoadmiss, abandon: sAbandon,
-  burrow: sBurrow, grass: sGrass, solid: sSolid, persist: sPersist, palette: sPalette, weather: sWeather, sky: sSky, slow: sSlow, merge: sMerge, drive: sDrive, voice: sVoice, critters: sCritters, nan: sNan,
+  burrow: sBurrow, grass: sGrass, solid: sSolid, persist: sPersist, palette: sPalette, weather: sWeather, sky: sSky, slow: sSlow, merge: sMerge, drive: sDrive, jump: sJump, voice: sVoice, critters: sCritters, nan: sNan,
 };
 
 const arg = process.argv[2] || 'all';

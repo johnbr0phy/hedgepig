@@ -40,6 +40,14 @@
       #place b { display: block; font-size: 0.98rem; font-weight: 600; }
       #place small { opacity: 0.62; font-size: 0.72rem; }
       #clock  { top: 1rem; right: 1rem; text-align: right; }
+      /* The compass sits under the clock, same corner, same panel treatment —
+         it is a readout, not an instrument panel. */
+      #compass {
+        top: 4.3rem; right: 1rem;
+        padding: 0.4rem;
+        line-height: 0;
+      }
+      #compass canvas { width: 84px; height: 84px; display: block; }
       #keys   { bottom: 1rem; left: 1rem; opacity: 0.72; font-size: 0.72rem; line-height: 1.5; }
       #keys kbd {
         font: inherit; font-weight: 600;
@@ -97,6 +105,7 @@
       <div class="panel" id="hearts">♥ ♥ ♥</div>
       <div class="panel" id="place"><b>the long meadow</b><small>spring · morning</small></div>
       <div class="panel" id="clock">leg 1<br /><small>0 m walked</small></div>
+      <div class="panel" id="compass"><canvas width="168" height="168"></canvas></div>
       <div class="panel" id="keys">
         <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk him ·
         <kbd>double-tap</kbd> a direction and he rolls, twice as fast<br />
