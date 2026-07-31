@@ -187,3 +187,13 @@ Newest last. One line each: date, workstream, what landed, what the sweep found.
   the road as a featureless mass, which is the largest single thing in frame
   from the town; no aerial perspective in the far field; and the mire, hen run
   and farmyard reading as one brown wash at ground level.
+- **2026-07-31 — his voice (interactive session).** 136/136. Five utterances,
+  all synthesised: a snuffle, a chunter for nose-down foraging, a peep when
+  pleased, a soft burr of a purr for standing about half asleep, and a huff
+  when he is put out. Each is breath plus a little voicing. The work was in
+  how seldom he uses them: the nose twitches 62 times a minute and used to
+  fire a sound every time, so `createVoiceGate` now holds one shared clock
+  across every kind of utterance and each asks with its own odds — 5.5
+  audible noises a minute, nine twitches in ten silent. The gate is exported
+  and the harness asserts the rate off the `VOICE` table rather than a copy
+  of it.
