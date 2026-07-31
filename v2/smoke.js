@@ -1090,6 +1090,75 @@ function sPalette() {
     '— the pumpkin-stem bug, locked out');
 }
 
+function sWeather() {
+  /* The whole climate, driven for a year, with the light rig stubbed.  What
+   * this is guarding is that weather is *weather*: it arrives, it sits, it
+   * clears, and none of that is a fixed point on the calendar. */
+  const scene = new THREE.Scene();
+  const light = () => ({ color: new THREE.Color(), intensity: 1, groundColor: new THREE.Color() });
+  const climate = season.createClimate({
+    scene,
+    sun: light(), fill: light(), bounce: light(), hemi: light(),
+    sky: { setColors() {} },
+    grass: { setSeason() {}, setWind() {} },
+    pipeline: {
+      ink: { mat: { uniforms: { uInk: { value: new THREE.Color() } } } },
+      grade: {
+        mat: {
+          uniforms: {
+            uShadowTint: { value: new THREE.Color() }, uLightTint: { value: new THREE.Color() },
+            uSaturation: { value: 1 }, uWarmth: { value: 0 }, uVignette: { value: 0 },
+          },
+        },
+      },
+    },
+  });
+
+  const dt = 1 / 12;
+  const log = [];
+  for (let i = 0; i < (season.YEAR * 2) / dt; i++) {
+    const s = climate.update(dt);
+    log.push({ t: s.t, wet: s.wet, snow: s.snow, snowFall: s.snowFall, w: s.w.slice(), season: s.season });
+  }
+
+  /* 1. It rains, and it stops raining.  As a pure function of the season it
+   *    did both, but at exactly one moment of the year each. */
+  const spells = [];
+  let inSpell = false;
+  for (const r of log) {
+    if (!inSpell && r.wet > 0.35) { inSpell = true; spells.push(1); }
+    else if (inSpell && r.wet < 0.08) inSpell = false;
+  }
+  ok(spells.length >= 3, 'a couple of years bring several separate spells of rain',
+    `${spells.length} in two years`);
+  const dry = log.filter((r) => r.wet < 0.05).length / log.length;
+  ok(dry > 0.15 && dry < 0.85, 'and it is neither always raining nor never',
+    `dry ${f(dry * 100, 0)} % of the time`);
+
+  /* 2. The season biases it without dictating it: there is rain in summer and
+   *    dry weather in autumn, but autumn is much the wetter. */
+  const wetIn = (k) => {
+    const rows = log.filter((r) => r.w[k] > 0.75);
+    return rows.reduce((a, r) => a + r.wet, 0) / Math.max(1, rows.length);
+  };
+  ok(wetIn(2) > wetIn(1) * 1.8, 'autumn is far wetter than summer, without either being fixed',
+    `summer ${f(wetIn(1), 2)}, autumn ${f(wetIn(2), 2)}`);
+
+  /* 3. Snow lies and melts.  It was a direct function of the winter weight,
+   *    so you could stand in a blizzard on bare grass and in bright sun on
+   *    deep snow — the ground and the sky disagreed all winter. */
+  const snowy = log.filter((r) => r.snow > 0.25);
+  ok(snowy.length > 20, 'snow lies for a good stretch of winter', `${snowy.length} samples`);
+  let roseWithoutFalling = 0;
+  for (let i = 1; i < log.length; i++) {
+    if (log[i].snow > log[i - 1].snow + 1e-9 && log[i].snowFall <= 0) roseWithoutFalling++;
+  }
+  ok(roseWithoutFalling === 0, 'and it never deepens except while it is falling');
+  const lag = log.filter((r) => r.snow > 0.2 && r.snowFall < 0.02).length;
+  ok(lag > 5, 'it also outlasts the storm that made it, which is what snow does',
+    `${lag} samples of lying snow under a clear sky`);
+}
+
 function sCritters() {
   const scene = new THREE.Scene();
   const c = createCritters(scene);
@@ -1157,7 +1226,7 @@ const SCENARIOS = {
   plan: sPlan, terrain: sTerrain, planet: sPlanet, clock: sClock,
   open: sOpen, gait: sGait, roll: sRoll, face: sFace, walk: sWalk, idle: sIdle, back: sBack, water: sWater, boat: sBoat,
   road: sRoad, roadmiss: sRoadmiss, abandon: sAbandon,
-  burrow: sBurrow, grass: sGrass, solid: sSolid, persist: sPersist, palette: sPalette, critters: sCritters, nan: sNan,
+  burrow: sBurrow, grass: sGrass, solid: sSolid, persist: sPersist, palette: sPalette, weather: sWeather, critters: sCritters, nan: sNan,
 };
 
 const arg = process.argv[2] || 'all';

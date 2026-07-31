@@ -117,6 +117,32 @@ export function buildGround(scene) {
     role: 'groundTint',
   });
 
+  /* **Snow has to reach the vertex colours, not just the material.**
+   *
+   * The place tint lives in the vertices as a multiplier around white, which
+   * is the rule that keeps the season's real colour on the material — and it
+   * means whitening the material does not whiten the *hue*. Under deep snow
+   * the material is very nearly white, so the vertex multiplier becomes the
+   * only colour left in the ground; in sunlight the top toon band clips it
+   * away and you cannot see it, and in **shadow** it is all there is. What
+   * that produced was a white field with a bright green hedgehog-shaped hole
+   * in it, and it read as a shading bug rather than as an unpainted tint.
+   *
+   * One uniform, one line of vertex shader: snow lerps the whole multiplier
+   * to one. Rewriting 20 000 vertex colours per frame was the alternative. */
+  const snowU = { value: 0 };
+  const prevCompile = mat.onBeforeCompile;
+  mat.onBeforeCompile = (shader, renderer) => {
+    prevCompile?.call(mat, shader, renderer);
+    shader.uniforms.uSnow = snowU;
+    shader.vertexShader = 'uniform float uSnow;\n' + shader.vertexShader.replace(
+      '#include <color_vertex>',
+      '#include <color_vertex>\n\tvColor = mix( vColor, vec3( 1.0 ), uSnow );'
+    );
+  };
+  const prevKey = mat.customProgramCacheKey?.bind(mat);
+  mat.customProgramCacheKey = () => `ground|${prevKey ? prevKey() : ''}`;
+
   const land = new THREE.Mesh(geo, mat);
   land.receiveShadow = true;
   /* Must NOT cast: a closed sphere renders its far hemisphere into the
@@ -127,7 +153,11 @@ export function buildGround(scene) {
   group.add(land);
 
   scene.add(group);
-  return { group, land, material: mat, chunks: [land] };
+  return {
+    group, land, material: mat, chunks: [land],
+    /** How much lying snow has covered the place tint over. */
+    setSnow(v) { snowU.value = clamp(v, 0, 1); },
+  };
 }
 
 /* --------------------------------- water --------------------------------- */

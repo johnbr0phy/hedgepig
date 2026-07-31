@@ -189,7 +189,7 @@ function seasonNumber(key, w) {
 }
 
 export function createClimate({
-  scene, sun, fill, bounce, hemi, sky, grass, pipeline,
+  scene, sun, fill, bounce, hemi, sky, grass, ground = null, pipeline,
   /* 0.915 of a day is mid-morning *after the warp* — the light is off the
    * vertical, which is when a cel ramp has the most to say.  Before the warp
    * the same number was well past sunrise; a raw phase is no longer an hour. */
@@ -207,6 +207,8 @@ export function createClimate({
     leafFall: 0,
     wind: 0.16,
     wet: 0,
+    /** 0 clear, 1 a front sitting right over him. */
+    front: 0,
     /** The true sun, which goes below the horizon. */
     sunDir: new THREE.Vector3(-0.4, 0.8, 0.45),
     /** The true moon, wherever its phase has put it. */
@@ -259,20 +261,55 @@ export function createClimate({
     w[(i + 1) % 4] = t;
     state.season = t < 0.5 ? SEASONS[i].name : SEASONS[(i + 1) % 4].name;
 
-    /* v1's derived weights, unchanged in shape: snow lies once winter is
-     * properly in, and it lags the first flakes. */
-    state.snowFall = clamp((w[3] - 0.08) / 0.5, 0, 1);
-    state.snow = clamp((w[3] - 0.16) / 0.5, 0, 1);
-    state.leafFall = clamp((w[2] - 0.25) / 0.45, 0, 1);
-    // rain sits between autumn and winter, and a little in spring
-    state.wet = clamp(w[2] * 0.5 + w[3] * 0.25 + w[0] * 0.22 - 0.18, 0, 1);
+    /* ------------------------------ the weather ------------------------------ *
+     *
+     * It used to be a **pure function of the season weights**, which is to say
+     * it was not weather at all: at a given point in the year it always
+     * rained, exactly as hard, and between those points it never did.  Nothing
+     * ever arrived and nothing ever cleared, so the one event the sky can give
+     * you — the rain stopping — could only happen at one fixed moment of the
+     * year, and the rainbow that is earned by it with it.
+     *
+     * A front is a slow wander put through a threshold.  The wander is two
+     * sines at periods that do not divide each other, so it does not repeat
+     * on any timescale you will sit through; the threshold is what makes it
+     * *weather* rather than a breathing amplitude, because a threshold has a
+     * before and an after.  The season moves the threshold, not the rain: a
+     * wet season is one where the front gets over the bar often and stays,
+     * and summer is one where it rarely does.
+     */
+    const wander = 0.5
+      + 0.34 * Math.sin(state.t * 0.0197)
+      + 0.22 * Math.sin(state.t * 0.0071 + 2.3)
+      + 0.10 * Math.sin(state.t * 0.0523 + 5.1);
+    // how much of the year's weather this season is inclined to give
+    const damp = 0.30 * w[0] + 0.02 * w[1] + 0.46 * w[2] + 0.34 * w[3];
+    state.front = sstep(0.72 - damp * 0.52, 0.94 - damp * 0.52, wander);
+    state.wet = state.front * (0.45 + 0.55 * damp);
+
+    /* Snow is rain that is cold enough, and **it lies and it melts**.  As a
+     * direct function of the winter weight it appeared and vanished on the
+     * calendar with no relation to whether anything was falling — you could
+     * stand in a blizzard on bare grass, and in bright sun on deep snow. */
+    const cold = clamp((w[3] - 0.10) / 0.45, 0, 1);
+    state.snowFall = state.wet * cold;
+    const melt = 0.004 + 0.030 * (1 - cold);
+    state.snow = clamp(state.snow + (state.snowFall * 0.045 - melt) * dt, 0, 1);
+
     /* Wind is weather, not a constant: a slow swell and an occasional gust
      * front laid over the seasonal base, so the meadow breathes in waves
-     * instead of shimmering at one fixed amplitude forever. */
+     * instead of shimmering at one fixed amplitude forever.  It also **gets
+     * up before the rain does** — `front` leads `wet`, because the threshold
+     * is lower for the wind — which is the cheapest possible way to make the
+     * weather feel like it is coming from somewhere. */
     const base = 0.10 + 0.14 * w[2] + 0.10 * w[3] + 0.05 * w[0];
     const swell = 0.6 + 0.4 * Math.sin(state.t * 0.11 + Math.sin(state.t * 0.043) * 2.1);
     const gust = Math.max(0, Math.sin(state.t * 0.31) - 0.82) * 3.4;    // brief, a few times a minute
-    state.wind = base * (swell + gust);
+    const blow = sstep(0.58 - damp * 0.42, 0.88 - damp * 0.42, wander);
+    state.wind = base * (swell + gust) * (1 + blow * 1.15);
+
+    // leaves come down with the season, and far faster when it blows
+    state.leafFall = clamp((w[2] - 0.25) / 0.45, 0, 1) * (0.45 + 0.9 * blow);
 
     /* --- the day --- */
     const sp = solarPhase(dp) % 1;
@@ -357,6 +394,17 @@ export function createClimate({
       _d.set(NIGHT.haze);   skyHaze.lerp(_d, dk * 0.85);
     }
 
+    /* Overcast.  A front is cloud, and cloud is what actually makes a rainy
+     * day look rainy — not the drops, which are four pixels each and mostly
+     * behind the grass.  The sky flattens toward a wet grey, the difference
+     * between its three stops closes up, and the sunset behind it is muted
+     * rather than cancelled: a red sky through cloud is the good kind. */
+    if (state.front > 0) {
+      _d.set(0xa8b0bb);
+      const oc = state.front * 0.62;
+      skyTop.lerp(_d, oc); skyMid.lerp(_d, oc * 0.86); skyHaze.lerp(_d, oc * 0.62);
+    }
+
     /* The horizon glow.
      *
      * The dome was a function of *height only*, so a sunset looked exactly
@@ -368,7 +416,8 @@ export function createClimate({
      * sun is going down, violet-blue away from it. */
     glowAt(alt, skyGlow);
     counterAt(alt, skyCounter);
-    const glowAmt = clamp(state.golden * 0.92 + state.twilight * 0.55, 0, 1);
+    const glowAmt = clamp(state.golden * 0.92 + state.twilight * 0.55, 0, 1)
+      * (1 - state.front * 0.45);
 
     sky.setColors({
       top: skyTop, mid: skyMid, haze: skyHaze, night: dk,
@@ -399,8 +448,10 @@ export function createClimate({
       fogCol.copy(skyHaze).lerp(skyMid, 0.35)
         .lerp(skyGlow, state.golden * 0.45 + state.twilight * 0.30);
       scene.fog.color.copy(fogCol);
-      scene.fog.near = lerp(11, 7, dk) * lerp(1, 0.72, state.snowFall);
-      scene.fog.far = lerp(40, 26, dk) * lerp(1, 0.62, state.snowFall);
+      /* Weather closes the world in.  Snow does it hardest — it is the one
+       * kind of weather that is genuinely opaque — and rain does it too. */
+      scene.fog.near = lerp(11, 7, dk) * lerp(1, 0.72, state.snowFall) * lerp(1, 0.86, state.wet);
+      scene.fog.far = lerp(40, 26, dk) * lerp(1, 0.62, state.snowFall) * lerp(1, 0.78, state.wet);
     } else {
       fogCol.copy(skyHaze).lerp(skyMid, 0.35)
         .lerp(skyGlow, state.golden * 0.45 + state.twilight * 0.30);
@@ -438,11 +489,26 @@ export function createClimate({
     /* --- the world's own colours --- */
     seasonColor('grass', w, grassCol);
     seasonColor('ground', w, groundCol);
-    // snow lies over both, and does not tint them — it replaces them
+    /* Snow lies over both, and does not tint them — it **replaces** them.
+     * At 0.72 and 0.86 it did not replace them either: deep snow came out as
+     * a pale mint field that read as grass in bad weather, because a 60 %
+     * lerp from green still has a lot of green in it.  Snow is white. */
     if (state.snow > 0) {
-      _a.set(0xe6eef2);
-      grassCol.lerp(_a, state.snow * 0.72);
-      groundCol.lerp(_a, state.snow * 0.86);
+      /* Not pure white.  A snowfield lit at 2.15 intensity clips every
+       * channel and comes out as a flat sheet of paper with no form in it at
+       * all; the shading has to have somewhere to go. */
+      _a.set(0xdfe9f1);
+      grassCol.lerp(_a, state.snow * 0.93);
+      groundCol.lerp(_a, state.snow * 0.97);
+    }
+    // and it covers the place tint in the vertices, which the material cannot
+    ground?.setSnow?.(state.snow);
+    /* Wet ground is darker ground.  Rain that changes nothing underfoot is
+     * a particle system, not weather. */
+    if (state.wet > 0) {
+      _a.set(0x3c4436);
+      grassCol.lerp(_a, state.wet * 0.22 * (1 - state.snow));
+      groundCol.lerp(_a, state.wet * 0.30 * (1 - state.snow));
     }
     // and the whole lot cools off after dark
     if (dk > 0) {

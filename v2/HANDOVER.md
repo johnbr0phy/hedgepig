@@ -287,6 +287,46 @@ and was still a cage: with a second blocker in front of him the only way out is
 both moves were refused and he was pinned between two things he could have
 walked around. The harness has that case, and it caught it.
 
+### Weather that is a function of the season is not weather
+
+Rain, snowfall and leaf-fall were each a pure function of the season weights.
+That is not a small stylisation — it means at a given point in the year it
+always rained, exactly as hard, and between those points it never did. Nothing
+ever *arrived* and nothing ever *cleared*, so the one event a sky can give you
+— the rain stopping — could only happen at one fixed moment of the year, and
+the rainbow that is earned by it with it.
+
+A front is a slow wander put through a threshold, and the threshold is what
+makes it weather: a threshold has a before and an after, where an amplitude
+only has a size. The season moves the *threshold*, not the rain — a wet season
+is one where the front gets over the bar often and stays. Wind uses the same
+wander at a lower bar, so it gets up before the rain does, which is the
+cheapest possible way to make weather feel like it comes from somewhere.
+
+And lying snow now accumulates and melts instead of being read off the
+calendar. As a direct function of the winter weight you could stand in a
+blizzard on bare grass, and in bright sun on deep snow: the ground and the sky
+disagreed all winter.
+
+### Snow could not cover the place tint, because the tint is in the vertices
+
+The rule from §3 — the material carries the real colour, the vertices carry a
+multiplier around white — has a consequence nobody had hit yet. Whitening the
+*material* for snow does not whiten the *hue*: under deep snow the material is
+very nearly white, so the vertex multiplier is the only colour left in the
+ground. In sunlight the top toon band clips it away and you cannot see it; in
+**shadow** it is all there is.
+
+What that produced was a white field with a bright green hedgehog-shaped hole
+in it — and it reads as a shading bug, which is what half an hour went on
+before the multiplier was the suspect. `buildGround` now takes one uniform and
+one line of vertex shader that lerps the whole multiplier to one. The
+alternative was rewriting 20 000 vertex colours per frame.
+
+While proving it: **a snowfield at 2.15 key intensity clips every channel** and
+comes out as a flat sheet of paper. The snow colour is 0xdfe9f1, not white, so
+the shading has somewhere to go.
+
 ## 5. Things that will bite the next change
 
 - **A pitched roof is `s * +angle`, not `s * -angle`.** Rotating about +x by a
