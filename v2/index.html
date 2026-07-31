@@ -59,6 +59,19 @@
       }
       #toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+      /* A lost or regained heart is felt, not just redrawn. */
+      #hearts.beat { animation: heartbeat 520ms ease; }
+      @keyframes heartbeat {
+        0% { transform: scale(1); }
+        30% { transform: scale(1.22); }
+        60% { transform: scale(0.94); }
+        100% { transform: scale(1); }
+      }
+
+      /* Photo mode: the world, and nothing else. */
+      .panel, #toast { transition: opacity 320ms ease; }
+      body.photo .panel { opacity: 0; }
+
       /* The title card doubles as the click that starts the audio context and
        * takes the first frame's cost out of the opening view. */
       #start {
@@ -87,7 +100,8 @@
       <div class="panel" id="keys">
         <kbd>click</kbd> call him there · <kbd>double-click</kbd> he rolls, twice as fast<br />
         <kbd>drag</kbd> look · <kbd>scroll</kbd> close in ·
-        <kbd>space</kbd> he stops · <kbd>P</kbd> see the whole planet · <kbd>O</kbd> ink · <kbd>G</kbd> grade
+        <kbd>space</kbd> he stops · <kbd>P</kbd> see the whole planet · <kbd>M</kbd> sound ·
+        <kbd>C</kbd> photo · <kbd>O</kbd> ink · <kbd>G</kbd> grade
       </div>
       <div id="toast"></div>
     </div>

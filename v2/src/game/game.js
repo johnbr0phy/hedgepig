@@ -38,7 +38,7 @@ const BLOOMS = [
   0xe8a0d0, 0xa8e0c4, 0xf0c060, 0xd8f0a0, 0xc9a0f0,
 ];
 
-export function createGame({ world, hog, hud, climate }) {
+export function createGame({ world, hog, hud, climate, audio = null }) {
   const rng = rngKit(90210);
   const scene = world.root.parent;
 
@@ -49,7 +49,42 @@ export function createGame({ world, hog, hud, climate }) {
     burrow: { x: 0, z: 0, kind: 0 },
     invuln: 0,
     sown: 0,
+    found: 0,                  // golden thistles, ever
   };
+
+  /* ------------------------------ persistence ------------------------------ *
+   * The world remembers you were there — the backlog's oldest complaint
+   * about both builds.  A save is a handful of numbers, written at quiet
+   * moments; the harness runs in Node where there is no localStorage, and
+   * the guard means it simply never persists there. */
+  const store = (() => { try { return globalThis.localStorage || null; } catch { return null; } })();
+  let saveT = 6;
+  function save() {
+    if (!store) return;
+    try {
+      store.setItem('hedgepig.save', JSON.stringify({
+        leg: state.leg, hearts: state.hearts, walked: hog.walked, found: state.found,
+        x: hog.x, z: hog.z, hd: hog.hd,
+      }));
+    } catch { /* a full or refused store is not worth a crash */ }
+  }
+  if (store) {
+    try {
+      const s = JSON.parse(store.getItem('hedgepig.save') || 'null');
+      if (s && Number.isFinite(s.x)) {
+        state.leg = Math.max(1, s.leg | 0);
+        state.hearts = clamp(s.hearts ?? MAX_HEARTS, 1, MAX_HEARTS);
+        state.found = s.found | 0;
+        state.thornDensity = Math.min(0.88, 0.18 + state.leg * 0.11);
+        hog.walked = s.walked || 0;
+        hog.speed = HOG_SPD * (1 + 0.08 * (state.leg - 1));
+        if (walkableAt(s.x, s.z) && !world.blockedAt?.(s.x, s.z)) {
+          hog.x = s.x; hog.z = s.z; hog.hd = s.hd || 0;
+          hog.y = heightAt(s.x, s.z);
+        }
+      }
+    } catch { /* an unreadable save is a fresh start, not an error */ }
+  }
 
   world.setFlash?.((m) => hud.flash(m));
 
@@ -93,6 +128,62 @@ export function createGame({ world, hog, hud, climate }) {
     seat(burrowObj, x, z, heightAt(x, z), rng.range(0, TAU));
   }
   placeBurrow();
+
+  /* --------------------------- the golden thistle -------------------------- *
+   * One per leg, off the straight line, never announced.  Found, it plants a
+   * ring of flowers that is NOT in the recycling pool: the one thing in the
+   * world that stays.  A reason to wander an open planet, at the price of a
+   * detour — quiet, not a quest log. */
+  const thistle = { obj: null, x: 0, z: 0, live: false };
+  function placeThistle() {
+    if (thistle.obj) {
+      scene.remove(thistle.obj);
+      thistle.obj.traverse((o) => o.geometry?.dispose?.());
+    }
+    const here = ORDER.indexOf(placeKindAt(hog.x, hog.z));
+    const kind = ORDER[(here + 1 + rng.int(0, 1)) % COUNT];
+    let x = 0, z = 0, ok = false;
+    for (let i = 0; i < 200 && !ok; i++) {
+      const a = rng.range(0, TAU);
+      const d = 3 + Math.sqrt(rng.next()) * 9;
+      const p = offsetFrom(CENTRE[kind], Math.cos(a) * d, Math.sin(a) * d);
+      x = p.x; z = p.z;
+      ok = walkableAt(x, z) && hardAt(x, z) < 0.2 && !world.blockedAt(x, z);
+    }
+    const obj = flowerClump({ seed: 71 + state.leg, n: 3, color: 0xf2c53d, h: 0.34 });
+    obj.matrixAutoUpdate = false;
+    scene.add(obj);
+    seat(obj, x, z, heightAt(x, z), rng.range(0, TAU));
+    thistle.obj = obj; thistle.x = x; thistle.z = z; thistle.live = true;
+  }
+  placeThistle();
+
+  function checkThistle() {
+    if (!thistle.live) return;
+    if (distance(hog.x, hog.z, thistle.x, thistle.z) > 0.5) return;
+    thistle.live = false;
+    state.found++;
+    audio?.home();
+    hud.flash(state.found === 1
+      ? 'a golden thistle — the meadow will remember this spot'
+      : `a golden thistle — ${state.found} remembered`);
+    // the permanent ring: five clumps round where it stood, in the wild colours
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * TAU + rng.range(-0.3, 0.3);
+      const f = flowerClump({
+        seed: 500 + state.found * 7 + i, n: rng.int(4, 7),
+        color: rng.pick(BLOOMS), h: rng.range(0.14, 0.24),
+      });
+      f.matrixAutoUpdate = false;
+      scene.add(f);
+      const fx = thistle.x + Math.cos(a) * 0.4 / Math.max(0.08, Math.cos(thistle.z / 47.746));
+      const fz = thistle.z + Math.sin(a) * 0.4;
+      seat(f, fx, fz, heightAt(fx, fz), rng.range(0, TAU));
+    }
+    if (thistle.obj) scene.remove(thistle.obj);
+    thistle.obj = null;
+    save();
+  }
 
   /* --------------------------------- sowing -------------------------------- */
   /* A pool of what you have sown, recycled oldest first.  Everything here is
@@ -278,6 +369,7 @@ export function createGame({ world, hog, hud, climate }) {
     seat(obj, x, z, rec.y, rec.yaw, 0.001);
     sown.push(rec);
     state.sown++;
+    audio?.sow(kind);
 
     if (sown.length > POOL) {
       const old = sown.shift();
@@ -391,6 +483,7 @@ export function createGame({ world, hog, hud, climate }) {
     if (!hog.hit(x, z)) return;
     state.invuln = 1.6;
     state.hearts--;
+    audio?.hurt();
     hud.setHearts(Math.max(0, state.hearts));
     hud.flash(what === 'thorns' ? 'ow — brambles' : 'a car! back to the verge');
 
@@ -485,7 +578,8 @@ export function createGame({ world, hog, hud, climate }) {
     hudT = 0.25;
     const kind = placeKindAt(hog.x, hog.z);
     const s = climate.state;
-    let weather = `${s.season} · ${s.hour}`;
+    const glyph = s.snowFall > 0.3 ? '❄' : s.wet > 0.35 ? '🌧' : s.night > 0.5 ? '🌙' : '☀';
+    let weather = `${glyph} ${s.season} · ${s.hour}`;
     if (s.snowFall > 0.3) weather += ' · snow';
     else if (s.wet > 0.35) weather += ' · rain';
     hud.setPlace(PLACE[kind].name, weather);
@@ -516,11 +610,18 @@ export function createGame({ world, hog, hud, climate }) {
       state.thornDensity = Math.min(0.88, 0.18 + state.leg * 0.11);
       applyThorns();
       state.hearts = Math.min(MAX_HEARTS, state.hearts + 1);
+      audio?.home();
       hud.setHearts(state.hearts);
       hud.flash(`home. leg ${state.leg} — and the brambles are thicker`);
       hog.stop();
       placeBurrow();
+      placeThistle();
+      save();
     }
+
+    checkThistle();
+    saveT -= dt;
+    if (saveT <= 0) { saveT = 6; save(); }
 
     readouts(dt);
   }

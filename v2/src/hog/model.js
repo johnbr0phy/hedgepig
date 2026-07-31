@@ -61,6 +61,22 @@ export function buildHog() {
   const root = new THREE.Group();
   root.name = 'hedgepig';
 
+  /* --------------------------------- the trunk ------------------------------ *
+   * Everything that IS his body — the cream mass, the dark mantle, the coats
+   * of quills, and the ears — rides ONE group, centred on his middle.
+   *
+   * It was not one group, and that was the flashing: the walk bobbed and
+   * swayed the cream body while the mantle and the quills stood still in
+   * root space, and the mantle is only a millimetre proud of the skin it
+   * covers — so twice a stride the body surfaced through its own coat as a
+   * cream flash.  And the mantle, animated by nobody, stayed a rigid
+   * ellipsoid while the tuck squashed the body into a sphere inside it.
+   * Anything that shows his surface moves with his surface, structurally,
+   * or the animation is a set of parts trying to agree by arithmetic. */
+  const trunk = new THREE.Group();
+  trunk.position.y = BODY_Y;
+  root.add(trunk);
+
   /* --------------------------- the one cream mass -------------------------- */
   const creamMat = cel({
     color: PAL.hogCream,
@@ -71,11 +87,17 @@ export function buildHog() {
 
   const bodyGeo = new THREE.SphereGeometry(1, 26, 18);
   bodyGeo.scale(A, B, C);
-  const body = new THREE.Mesh(bodyGeo, creamMat);
-  body.position.y = BODY_Y;
+  /* The body's material is his own, NOT the shared cream: the tuck tints his
+   * skin toward quill brown so the ball reads coated between the reserve
+   * quills — the mantle's own rule, that a gap in a coat must be darker than
+   * the needles standing in it or it reads as a bald patch.  Tinting the
+   * cached cream would tint the snout and every other cream thing with it. */
+  const body = new THREE.Mesh(bodyGeo, cel({
+    color: PAL.hogCream, bands: 'soft3', tint: 0x9a86a8, flat: false, cache: false,
+  }));
   body.castShadow = true;
   body.receiveShadow = true;
-  root.add(body);
+  trunk.add(body);
   hullOutline(body, { thickness: 0.0042 });
 
   /* The snout is not a head — it is where the one mass narrows.
@@ -118,14 +140,17 @@ export function buildHog() {
 
   const eyeMat = cel({ color: PAL.hogEye, bands: 2, tint: 0x4a4058, flat: false });
   const noseMat = cel({ color: PAL.hogNose, bands: 2, tint: 0x4a4058, flat: false });
-  const blushMat = flat({ color: PAL.hogBlush, transparent: true, opacity: 0.5, depthWrite: false });
+  const blushMat = flat({ color: PAL.hogBlush, transparent: true, opacity: 0.55, depthWrite: false });
 
-  /* High on the front and well forward.  The first pass had them at 0.030
-   * and A*0.42, which is anatomically about right and reads as a face
-   * printed low on a large cream balloon — the mass above the eyes becomes a
-   * forehead, and a hedgehog does not have one. */
-  const EYE = { x: A * 0.56, y: 0.044, z: C * 0.56 };
-  const EYE_R = 0.0132;
+  /* Well forward, low, and **near the nose**.  At A*0.56 and y 0.044 they
+   * sat halfway up the front of him and read as a face printed on a balloon;
+   * everything appealing about a hedgehog's face is that the eyes crowd in
+   * against the snout.  The z is *derived* from his surface at that spot —
+   * placed by eye it was the buried-catchlight fault a third time, an eye
+   * either sunk in his cheek or hanging beside it. */
+  const EYE = { x: A * 0.74, y: 0.022, z: 0 };
+  EYE.z = surfaceZ(EYE.x, EYE.y) - 0.004;
+  const EYE_R = 0.014;
   const eyes = [];
   const blushes = [];
   for (const s of [-1, 1]) {
@@ -157,7 +182,7 @@ export function buildHog() {
      * was never once visible.  Same fault as the catchlight, same fix. */
     const bx = EYE.x - 0.020;
     const by = EYE.y - 0.026;
-    const bl = new THREE.Mesh(new THREE.CircleGeometry(0.018, 14), blushMat);
+    const bl = new THREE.Mesh(new THREE.CircleGeometry(0.020, 14), blushMat);
     bl.position.set(bx, by, (surfaceZ(bx, by) + 0.001) * s);
     bl.rotation.y = s * Math.PI * 0.5;
     bl.renderOrder = 3;
@@ -195,7 +220,10 @@ export function buildHog() {
     face.add(mouth);
   }
 
-  // whiskers: four fine lines, hung off the snout like everything else
+  // whiskers: four fine lines, hung off the snout like everything else —
+  // kept in a list so a sniff can twitch them, because a nose that works
+  // while the whiskers hang dead is half a sniff
+  const whiskers = [];
   {
     const wmat = flat({ color: 0x6b5a4a, transparent: true, opacity: 0.55 });
     for (const s of [-1, 1]) {
@@ -207,7 +235,10 @@ export function buildHog() {
         w.rotation.z = -Math.PI / 2 + 0.35;
         w.rotation.y = s * (0.5 + i * 0.28);
         w.userData.noOutline = true;
+        w.userData.restZ = w.rotation.z;
+        w.userData.ph = i * 2.1 + (s > 0 ? 0 : 1.3);
         face.add(w);
+        whiskers.push(w);
       }
     }
   }
@@ -221,10 +252,11 @@ export function buildHog() {
     g.scale(0.5, 1, 0.9);
     const ear = new THREE.Mesh(g, earMat);
     // low and at the coat's front edge — on the badge they are barely two
-    // notches in the mantle line, and set high they read as a rabbit
-    ear.position.set(A * 0.30, BODY_Y + 0.030, C * 0.72 * s);
+    // notches in the mantle line, and set high they read as a rabbit.
+    // Trunk children, in trunk space: they ride the bob with the coat.
+    ear.position.set(A * 0.30, 0.030, C * 0.72 * s);
     ear.rotation.z = -0.3;
-    root.add(ear);
+    trunk.add(ear);
     ears.push(ear);
   }
 
@@ -273,6 +305,7 @@ export function buildHog() {
    * mantle side of the same plane the quills test against, and the boundary
    * is a real plane section — a diagonal from the brow down behind the front
    * leg, which is what the badge shows and what an ellipse never gives. */
+  let mantle;
   {
     const shell = new THREE.SphereGeometry(1, 64, 44).toNonIndexed();
     const pos = shell.attributes.position;
@@ -303,18 +336,25 @@ export function buildHog() {
     geo.setAttribute('position', new THREE.Float32BufferAttribute(keep, 3));
     geo.computeVertexNormals();
     geo.scale(A * 1.012, B * 1.012, C * 1.012);
-    const mantle = new THREE.Mesh(
+    mantle = new THREE.Mesh(
       geo,
       cel({ color: PAL.hogQuill, bands: 3, tint: 0x574a70, flat: false, side: THREE.DoubleSide })
     );
-    mantle.position.y = BODY_Y;
     mantle.castShadow = true;
     mantle.receiveShadow = true;
     mantle.userData.noOutline = true;
-    root.add(mantle);
+    trunk.add(mantle);
   }
 
   const quills = [];
+  /* The reserve coat, for the ball.  His front is bare cream by design — and
+   * on the *ball* that bare front is a third of the surface, so the roll
+   * read as an egg with a mohawk going end over end.  A real hedgehog's
+   * orbicularis pulls the coat over everything as it curls, so these are the
+   * quills for the cream region, held under the skin and grown out by the
+   * tuck — `anim.js` scales them from nothing, and because that scaling is
+   * toward his centre they literally emerge *through* the skin as he curls. */
+  const tuckQuills = [];
   const N = 620;
   /* Fibonacci sphere: even coverage without clumps.  Random placement leaves
    * bald patches at this count and they read as mange. */
@@ -327,12 +367,20 @@ export function buildHog() {
     const th = golden * i;
     const u = new THREE.Vector3(Math.cos(th) * r, y, Math.sin(th) * r);
 
-    // only the mantle: everything outside the front-and-down cone
-    if (u.dot(FRONT) > FRONT_CUT) continue;
-
     p.set(u.x * A, u.y * B, u.z * C);
     // ellipsoid normal, which is not the radial direction
     nrm.set(p.x / (A * A), p.y / (B * B), p.z / (C * C)).normalize();
+
+    // inside the front-and-down cone: bare while he walks, coat when he curls
+    if (u.dot(FRONT) > FRONT_CUT) {
+      tuckQuills.push({
+        pos: p.clone().addScaledVector(nrm, -0.004),
+        dir: nrm.clone(),          // radial: a ball is the one shape that wants a sunburst
+        len: rng.range(0.020, 0.032),
+        tip: rng.chance(0.15),
+      });
+      continue;
+    }
 
     const world = p.clone().add(new THREE.Vector3(0, BODY_Y, 0));
     // the face wins: no quill within a radius of an eye.  The radius shrinks
@@ -355,7 +403,9 @@ export function buildHog() {
     if (dir.x > 0.06) continue;
 
     quills.push({
-      pos: world.clone().addScaledVector(nrm, -0.004),   // rooted just under the skin
+      // rooted just under the skin, in TRUNK space — body-centred, so the
+      // one trunk transform squashes and rocks them with the skin they stand on
+      pos: p.clone().addScaledVector(nrm, -0.004),
       dir,
       len: rng.range(0.024, 0.042) * (1 + 0.28 * clamp(-u.x, 0, 1)),   // longest at the rump
       tip: rng.chance(0.19),
@@ -398,14 +448,19 @@ export function buildHog() {
   };
 
   const coatDark = mkCoat(quills, PAL.hogQuill, 0, 1);
-  root.add(coatDark);
+  trunk.add(coatDark);
   // a middle tone through a third of them, so the coat has depth rather than
   // being one flat brown mass with a light on it
   const coatMid = mkCoat(quills.filter((_, i) => i % 3 === 1), PAL.hogQuillLight, 0.10, 0.68);
-  root.add(coatMid);
+  trunk.add(coatMid);
   // and the pale tips: the last third of about one needle in five
   const coatPale = mkCoat(quills.filter((q) => q.tip), PAL.hogQuillTip, 0.66, 0.36);
-  root.add(coatPale);
+  trunk.add(coatPale);
+  // the reserve coat over the cream, grown out by the tuck and never else
+  const coatTuck = mkCoat(tuckQuills, PAL.hogQuill, 0, 1);
+  coatTuck.scale.setScalar(0.0001);
+  coatTuck.visible = false;
+  trunk.add(coatTuck);
 
   /* -------------------------------- the legs ------------------------------- */
   const legMat = cel({ color: PAL.hogCreamShade, bands: 'soft', tint: 0x8a7594, flat: false });
@@ -487,8 +542,10 @@ export function buildHog() {
   }
 
   return {
-    root, body, face, snout, nose, eyes, ears, blushes, legs, shadow, setLook, lookParts,
+    root, trunk, body, mantle, face, snout, nose, eyes, ears, blushes, whiskers,
+    legs, shadow, setLook, lookParts,
     coats: [coatDark, coatPale, coatMid],
+    coatTuck,
     materials: { cream: creamMat, quill: coatDark.material },
     quillCount: quills.length,
   };

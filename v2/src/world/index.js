@@ -53,6 +53,7 @@ export function buildWorld(scene, { places = null, grass: withGrass = true } = {
     /** Named things the game needs: the thorns, the traffic, the boat, the culvert. */
     out: built.out || {},
     setFlash: (fn) => built.setFlash?.(fn),
+    setSound: (fn) => built.setSound?.(fn),
     heightAt,
 
     /**

@@ -101,25 +101,25 @@ export const SEASONS = [
      * than brown: v1 could get away with true soil colours because its
      * blades covered the field completely, and here they do not. */
     ground: 0x6f7c48, sky: 0x8fc0e2, haze: 0xf0f3e4, sun: 0xfff4d8,
-    fill: 0xa6c0ea, len: 0.86, den: 0.94, leaf: 0x8fc46a, canopy: 0x77ae5c,
+    fill: 0xa6c0ea, len: 0.86, den: 0.94, leaf: 0x8fc46a, stem: 0x6f9c56, canopy: 0x77ae5c,
   },
   {
     name: 'summer',
     grass: 0x79b055, grassDark: 0x4a7d3c, grassDry: 0xc9c069,
     ground: 0x74804a, sky: 0x6fb0dd, haze: 0xf4f2df, sun: 0xfff0c6,
-    fill: 0x94b4e6, len: 1.10, den: 1.06, leaf: 0x63a24f, canopy: 0x4f8a45,
+    fill: 0x94b4e6, len: 1.10, den: 1.06, leaf: 0x63a24f, stem: 0x6f9152, canopy: 0x4f8a45,
   },
   {
     name: 'autumn',
     grass: 0xa6ab5c, grassDark: 0x76773f, grassDry: 0xc79a52,
     ground: 0x7d6f3c, sky: 0x8fb6d0, haze: 0xf2e8d2, sun: 0xffe6b4,
-    fill: 0xb2b0dc, len: 1.00, den: 0.96, leaf: 0xd08840, canopy: 0xc07a3c,
+    fill: 0xb2b0dc, len: 1.00, den: 0.96, leaf: 0xd08840, stem: 0x8f9150, canopy: 0xc07a3c,
   },
   {
     name: 'winter',
     grass: 0x9aa382, grassDark: 0x6c7362, grassDry: 0xb0a888,
     ground: 0x6e6a54, sky: 0xa8c4d8, haze: 0xeef2f4, sun: 0xf0eef0,
-    fill: 0xb4c4e4, len: 0.58, den: 0.55, leaf: 0xa8a894, canopy: 0x8e9384,
+    fill: 0xb4c4e4, len: 0.58, den: 0.55, leaf: 0xa8a894, stem: 0x9a9a80, canopy: 0x8e9384,
   },
 ];
 

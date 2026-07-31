@@ -13,6 +13,10 @@ import { R, CENTER, basisAt, positionAt } from './world/planet.js';
 import { placeAt, PLACE, CIRC } from './world/plan.js';
 import { Hog } from './hog/hog.js';
 import { createGame } from './game/game.js';
+import { createAudio } from './core/audio.js';
+import { createCritters } from './world/critters.js';
+import { createPuffs } from './core/puffs.js';
+import { createHoglet } from './game/hoglet.js';
 
 /* ------------------------------------------------------------------ *
  * the hedgepig adventure — v2.
@@ -93,9 +97,48 @@ const pipeline = new Pipeline(renderer, scene, camera);
 const hud = createHud();
 const weather = createWeather(scene);
 const climate = createClimate({ scene, sun, fill, bounce, hemi, sky, grass: world.grass, pipeline });
-const game = createGame({ world, hog, hud, climate });
+const audio = createAudio();
+const critters = createCritters(scene, { plip: () => audio.plip(), hoot: () => audio.hoot() });
+const puffs = createPuffs(scene);
+const hoglet = createHoglet(scene);
+const game = createGame({ world, hog, hud, climate, audio });
 
-chase.onCall = (x, z, roll) => game.call(x, z, roll);
+/* The tap ripple: one ring, reused, spreading from wherever was called. */
+const ripple = new THREE.Mesh(
+  new THREE.RingGeometry(0.84, 0.92, 40).rotateX(-Math.PI / 2),
+  new THREE.MeshBasicMaterial({ color: 0xfff8e8, transparent: true, opacity: 0, depthWrite: false, fog: false })
+);
+ripple.matrixAutoUpdate = false;
+ripple.visible = false;
+ripple.renderOrder = 4;
+scene.add(ripple);
+const rippleAt = { x: 0, z: 0, t: 0 };
+
+chase.onCall = (x, z, roll) => {
+  game.call(x, z, roll);
+  rippleAt.x = x; rippleAt.z = z; rippleAt.t = 0.55;
+};
+
+/* Sound: unlocked by the first gesture (the autoplay rule and also simply
+ * polite), fed by the same edges the animation runs on. */
+window.addEventListener('pointerdown', audio.unlock, { once: true });
+window.addEventListener('keydown', audio.unlock, { once: true });
+world.setSound?.((name) => audio[name]?.());
+hog.onFootfall = () => {
+  const s = climate.state;
+  audio.footfall(s.wet);
+  /* Dust off a dry scurry, splash off a wet one, powder in snow — spawned
+   * at the place the foot planted, where it stays as he runs on. */
+  if (hog.gait > 0.45) {
+    const kind = s.snow > 0.5
+      ? { n: 2, up: 0.10, spread: 0.05, px: 18, color: 0xeef4fa }
+      : s.wet > 0.3
+        ? { n: 2, up: 0.14, spread: 0.05, px: 13, color: 0xb8cfdd }
+        : { n: 2, up: 0.07, spread: 0.06, px: 16, color: 0xc9ba90 };
+    puffs.burst(hog.x, hog.y + 0.004, hog.z, kind);
+  }
+};
+hog.onSniff = () => audio.sniff();
 
 /* ------------------------------- the frame ------------------------------- */
 function resize() {
@@ -148,6 +191,11 @@ window.addEventListener('keydown', (e) => {
   // two quiet toggles, for seeing what the ink and the grade actually do
   if (e.code === 'KeyO') pipeline.enabled.ink = !pipeline.enabled.ink;
   if (e.code === 'KeyG') pipeline.enabled.grade = !pipeline.enabled.grade;
+  if (e.code === 'KeyM') hud.flash(audio.toggleMute() ? 'sound off' : 'sound on');
+  if (e.code === 'KeyC') {
+    const on = document.body.classList.toggle('photo');
+    if (!on) hud.flash('back to the panels');
+  }
 });
 
 hud.onStart = () => {};
@@ -174,6 +222,11 @@ function seatLight(light, local, basis, origin, dist) {
 /* --------------------------------- loop --------------------------------- */
 const clock = new THREE.Clock();
 let acc = 0;
+let wetFor = 0;
+let rollPuffT = 0;
+let prevBallFx = 0;
+const _rippleM = new THREE.Matrix4();
+const _rippleS = new THREE.Vector3();
 
 function frame() {
   /* Armed first, not last.  Re-arming at the end means any exception
@@ -189,10 +242,48 @@ function frame() {
   const state = climate.update(dt);
 
   hog.shiver = state.snow * 0.9;
+  hog.night = state.night;
+  hog.rainHurry = state.wet * 0.18;    // rain hurries him along
+  /* A good soaking earns a shake-off when the rain stops. */
+  if (state.wet > 0.35) wetFor += dt;
+  else if (wetFor > 5 && state.wet < 0.08) { hog.shake = Math.max(hog.shake, 1.1); wetFor = 0; }
   hog.update(dt, acc);
   game.update(dt);
   world.update(dt, hog, state);
   weather.update(dt, hog, camera, state);
+  critters.update(dt, hog, state);
+  if (hoglet.update(dt, hog, game.state.leg >= 3, acc) === 'arrived') {
+    hud.flash('a hoglet has found him — it will not be left behind');
+  }
+  audio.update(dt, hog, state, world);
+
+  /* The dust of the roll, and the thump of arriving out of it. */
+  rollPuffT -= dt;
+  if (hog.ball > 0.7 && hog.gait > 0.4 && rollPuffT <= 0) {
+    rollPuffT = 0.09;
+    puffs.burst(hog.x, hog.y + 0.01, hog.z, { n: 2, up: 0.12, spread: 0.15, px: 20, color: 0xc6b490 });
+  }
+  if (prevBallFx > 0.35 && hog.ball <= 0.35) {
+    puffs.burst(hog.x, hog.y + 0.01, hog.z, { n: 6, up: 0.15, spread: 0.18, px: 22, color: 0xc9ba90 });
+  }
+  prevBallFx = hog.ball;
+  puffs.update(dt);
+
+  // the tap ripple spreading from the call
+  if (rippleAt.t > 0) {
+    rippleAt.t -= dt;
+    const k = 1 - rippleAt.t / 0.55;
+    const b = basisAt(rippleAt.x, rippleAt.z);
+    _rippleM.makeBasis(b.east, b.up, b.north);
+    _rippleM.setPosition(positionAt(rippleAt.x, world.heightAt(rippleAt.x, rippleAt.z) + 0.015, rippleAt.z, _origin));
+    _rippleM.scale(_rippleS.setScalar(0.22 + k * 0.55));
+    ripple.matrix.copy(_rippleM);
+    ripple.matrixWorldNeedsUpdate = true;
+    ripple.material.opacity = (1 - k) * 0.55;
+    ripple.visible = true;
+  } else {
+    ripple.visible = false;
+  }
 
   if (planetView) {
     orbit += dt * 0.10;
@@ -217,6 +308,7 @@ function frame() {
     hemi.position.copy(b.up);
   }
 
+  sky.setWet(state.wet);
   sky.update(dt, camera, planetView ? null : state.sunDir);
   hud.update(dt);
 
@@ -225,7 +317,7 @@ function frame() {
 frame();
 
 /* a little exposed for tuning from the console */
-window.__hedgepig = { scene, camera, renderer, pipeline, world, hog, chase, climate, weather, game, sky, sun, fill, hemi, THREE };
+window.__hedgepig = { scene, camera, renderer, pipeline, world, hog, chase, climate, weather, game, sky, sun, fill, hemi, audio, critters, puffs, hoglet, THREE };
 
 if (import.meta.env?.DEV) {
   /** Dev capture: render one frame at a fixed size and post it to the server. */

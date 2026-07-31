@@ -67,12 +67,50 @@ export function buildSky(scene, radius = 300) {
   dome.renderOrder = -10;
   group.add(dome);
 
-  /* --- the light in the sky: sun by day, moon by night, one disc --- */
-  const discMat = flat({
-    color: 0xfff6de, transparent: true, opacity: 0.95,
-    depthWrite: false, fog: false, cache: false,
+  /* --- the light in the sky: sun by day, moon by night, one disc ---
+   *
+   * The moon has a **phase**, carved by a second circle sliding across the
+   * first, and the phase runs off the year clock — thirteen lunations a
+   * year, so a night sky two evenings apart is visibly a different moon.
+   * By day the same disc is the sun and the shader leaves it whole. */
+  const discMat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    fog: false,
+    uniforms: {
+      uColor: { value: new THREE.Color(0xfff6de) },
+      uNight: { value: 0 },
+      uBite: { value: 3.0 },
+      uOpacity: { value: 0.95 },
+    },
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uColor;
+      uniform float uNight, uBite, uOpacity;
+      varying vec2 vUv;
+      void main() {
+        vec2 c = vUv * 2.0 - 1.0;
+        float r = length( c );
+        float disc = 1.0 - smoothstep( 0.86, 0.98, r );
+        // the phase: a bite of sky slid across the moon by the year clock
+        float bite = 1.0 - smoothstep( 0.80, 1.04, length( c - vec2( uBite, 0.20 ) ) );
+        float a = disc * ( 1.0 - bite * uNight );
+        // three seas, faint, and only by night
+        float cr = 1.0 - smoothstep( 0.10, 0.26, length( c - vec2( -0.26, 0.12 ) ) );
+        cr += 1.0 - smoothstep( 0.06, 0.18, length( c - vec2( 0.22, -0.30 ) ) );
+        cr += 1.0 - smoothstep( 0.05, 0.14, length( c - vec2( 0.04, 0.44 ) ) );
+        vec3 col = uColor * ( 1.0 - cr * 0.09 * uNight );
+        gl_FragColor = vec4( col, a * uOpacity );
+      }
+    `,
   });
-  const disc = new THREE.Mesh(new THREE.CircleGeometry(radius * 0.052, 28), discMat);
+  const disc = new THREE.Mesh(new THREE.PlaneGeometry(radius * 0.104, radius * 0.104), discMat);
   disc.renderOrder = -9;
   disc.frustumCulled = false;
   group.add(disc);
@@ -143,33 +181,74 @@ export function buildSky(scene, radius = 300) {
     g.position.set(Math.cos(a) * r, y, Math.sin(a) * r);
     g.lookAt(0, y * 0.55, 0);
     g.renderOrder = -9;
-    g.userData.drift = crng.range(0.004, 0.014);
+    g.userData = { ang: a, rad: r, baseY: y, drift: crng.range(0.004, 0.014) * crng.sign(), bob: crng.range(0, Math.PI * 2) };
     clouds.add(g);
     puffs.push(g);
   }
   clouds.frustumCulled = false;
   group.add(clouds);
 
+  /* --- one shooting star, for the deepest part of the night --- */
+  const shootMat = new THREE.MeshBasicMaterial({
+    color: 0xeef2ff, transparent: true, opacity: 0,
+    depthWrite: false, fog: false, blending: THREE.AdditiveBlending,
+  });
+  const shoot = new THREE.Mesh(new THREE.PlaneGeometry(radius * 0.085, radius * 0.0035), shootMat);
+  shoot.renderOrder = -9;
+  shoot.frustumCulled = false;
+  shoot.visible = false;
+  group.add(shoot);
+  const meteor = { life: 0, wait: 8, dir: new THREE.Vector3() };
+
+  /* --- the rainbow: five arcs opposite the sun, earned by rain --- */
+  const rainbow = new THREE.Group();
+  {
+    const BANDS = [0xe86a5a, 0xf0b05a, 0xf0e07a, 0x7ac088, 0x7a9ae0];
+    BANDS.forEach((c, i) => {
+      const r0 = radius * (0.52 - i * 0.012);
+      const arc = new THREE.Mesh(
+        new THREE.RingGeometry(r0 - radius * 0.010, r0, 64, 1, 0, Math.PI),
+        new THREE.MeshBasicMaterial({
+          color: c, transparent: true, opacity: 0, depthWrite: false,
+          fog: false, side: THREE.DoubleSide,
+        })
+      );
+      rainbow.add(arc);
+    });
+    rainbow.visible = false;
+    rainbow.renderOrder = -9;
+    group.add(rainbow);
+  }
+  const bow = { life: 0, wasWet: false };
+
   scene.add(group);
 
   const _c = new THREE.Color();
   const _sunDir = new THREE.Vector3(0, 1, 0);
+  const _anti = new THREE.Vector3();
+  let skyT = 0;
+  let nightNow = 0;
+  let wetNow = 0;
 
   return {
     group, dome, clouds, stars, disc, halo,
 
     /** Sky colours for the hour. `night` is 0 by day, 1 at full dark. */
-    setColors({ top, mid, haze, night = 0, cloud, cloudShade }) {
+    setColors({ top, mid, haze, night = 0, cloud, cloudShade, moonPhase = 0.5 }) {
       domeMat.uniforms.uTop.value.set(top);
       domeMat.uniforms.uMid.value.set(mid);
       domeMat.uniforms.uHaze.value.set(haze);
+      nightNow = night;
       starMat.opacity = clamp((night - 0.18) / 0.55, 0, 1) * 0.9;
       stars.visible = starMat.opacity > 0.01;
-      // the disc cools and shrinks into a moon
+      // the disc cools and shrinks into a moon, and takes its phase
       _c.set(0xfff6de).lerp(new THREE.Color(0xe9eeff), night);
-      discMat.color.copy(_c);
+      discMat.uniforms.uColor.value.copy(_c);
+      discMat.uniforms.uNight.value = night;
+      const fullness = 0.5 - 0.5 * Math.cos(moonPhase * Math.PI * 2);   // 0 new, 1 full
+      discMat.uniforms.uBite.value = fullness * 2.6;
       disc.scale.setScalar(1 - 0.34 * night);
-      haloMat.opacity = 0.30 * (1 - night) + 0.10 * night;
+      haloMat.opacity = (0.30 * (1 - night) + 0.10 * night) * (0.4 + 0.6 * fullness);
       if (cloud) matA.color.set(cloud);
       if (cloudShade) matB.color.set(cloudShade);
       matA.opacity = 0.66 - 0.22 * night;
@@ -181,17 +260,84 @@ export function buildSky(scene, radius = 300) {
      * The dome has to trail the camera because it is centred on the flat
      * origin, and on a planet you walk a long way from that.
      */
+    /** How wet the sky is, fed once a frame; rain that clears earns a bow. */
+    setWet(wet) {
+      if (bow.wasWet && wet < 0.08 && nightNow < 0.4) bow.life = 26;
+      bow.wasWet = wet > 0.4;
+      wetNow = wet;
+    },
+
     update(dt, camera, sunDir) {
+      skyT += dt;
       group.position.copy(camera.position);
+
+      /* The rainbow stands opposite the sun, feet on the horizon, and
+       * fades over half a minute — long enough to walk toward, short
+       * enough to be an event. */
+      if (bow.life > 0) {
+        bow.life -= dt;
+        const a = Math.min(1, bow.life / 6) * Math.min(1, (26 - bow.life) / 3) * 0.34;
+        rainbow.visible = a > 0.005;
+        if (sunDir && rainbow.visible) {
+          _anti.set(-sunDir.x, 0, -sunDir.z).normalize();
+          rainbow.position.copy(_anti).multiplyScalar(radius * 0.62);
+          rainbow.position.y = -radius * 0.06;
+          rainbow.lookAt(group.position);      // face the camera, feet level
+          rainbow.children.forEach((m) => { m.material.opacity = a; });
+        }
+      } else {
+        rainbow.visible = false;
+      }
       if (sunDir) {
+        /* Whichever of sun and anti-sun is above the horizon is the disc:
+         * the sun goes down and the moon comes up **opposite it**, which is
+         * both roughly the astronomy and the only way the night sky ever
+         * actually contains the moon — following the sun's own direction
+         * put the "moon" under the planet all night, every night. */
         _sunDir.copy(sunDir).normalize();
+        if (_sunDir.y < 0) _sunDir.negate();
         disc.position.copy(_sunDir).multiplyScalar(radius * 0.9);
         disc.lookAt(camera.position);
         halo.position.copy(_sunDir).multiplyScalar(radius * 0.88);
         halo.lookAt(camera.position);
       }
-      for (const p of puffs) p.rotation.y += 0; // clouds drift with the group
-      clouds.rotation.y += dt * 0.0032;
+
+      /* Each cloud on its own ring at its own pace, some against the rest —
+       * one shared rotation reads as the *sky* turning, which it does anyway
+       * at dusk, and two of the same motion is a turntable. */
+      for (const p of puffs) {
+        const u = p.userData;
+        u.ang += dt * u.drift;
+        p.position.set(
+          Math.cos(u.ang) * u.rad,
+          u.baseY + Math.sin(skyT * 0.05 + u.bob) * 1.6,
+          Math.sin(u.ang) * u.rad
+        );
+        p.lookAt(0, u.baseY * 0.55, 0);
+      }
+
+      /* A shooting star, once in a while, in the deepest dark. */
+      if (meteor.life > 0) {
+        meteor.life -= dt;
+        shoot.position.addScaledVector(meteor.dir, dt * radius * 0.30);
+        shootMat.opacity = Math.sin(clamp(meteor.life / 0.9, 0, 1) * Math.PI) * 0.8 * nightNow;
+        if (meteor.life <= 0) shoot.visible = false;
+      } else if (nightNow > 0.85) {
+        meteor.wait -= dt;
+        if (meteor.wait <= 0) {
+          meteor.wait = 6 + Math.random() * 14;
+          meteor.life = 0.9;
+          const a = Math.random() * Math.PI * 2;
+          const y = 0.45 + Math.random() * 0.3;
+          const r = Math.sqrt(1 - y * y);
+          shoot.position.set(Math.cos(a) * r, y, Math.sin(a) * r).multiplyScalar(radius * 0.92);
+          // falling across the sky: sideways, and down
+          meteor.dir.set(-Math.sin(a), -0.55 - Math.random() * 0.3, Math.cos(a)).normalize();
+          shoot.lookAt(0, shoot.position.y * 0.4, 0);
+          shoot.rotation.z = Math.atan2(-meteor.dir.y, 0.8) * (Math.random() < 0.5 ? 1 : -1);
+          shoot.visible = true;
+        }
+      }
     },
 
     /** Orbit view wants the sky where it actually is, not on the camera. */

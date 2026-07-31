@@ -3,7 +3,7 @@ import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { cel } from '../core/toon.js';
 import { PAL } from '../core/palette.js';
 import { rippleTex } from '../core/textures.js';
-import { TAU, clamp } from '../core/util.js';
+import { TAU, clamp, noise2 } from '../core/util.js';
 import { R, CENTRE, LAKE, LAKE_R, PLACE, COUNT, placeWeights, lakeAt, offsetFrom, flatOf } from './plan.js';
 import { CENTER, positionAt } from './planet.js';
 import { heightAt, WATER_Y } from './terrain.js';
@@ -80,6 +80,23 @@ export function buildGround(scene) {
       _c.g += _cb.g * weights[k];
       _c.b += _cb.b * weights[k];
     }
+    /* A second signal at a smaller scale than a place: patches of moss in
+     * the damp and dry bare soil, a few metres across.  Ten place colours
+     * blended over a whole sphere average out to one olive wash; this is
+     * the variation that makes the ground read as ground and not as paint.
+     * And the places themselves pushed a little apart from their mean, so
+     * crossing a boundary is something you can see underfoot. */
+    _c.r = MEAN.r + (_c.r - MEAN.r) * 1.22;
+    _c.g = MEAN.g + (_c.g - MEAN.g) * 1.22;
+    _c.b = MEAN.b + (_c.b - MEAN.b) * 1.22;
+    const moss = noise2(flat.x * 0.31, flat.z * 0.31, 401);         // damp green, ~3 m
+    const soil = noise2(flat.x * 0.13 + 40, flat.z * 0.13, 977);    // dry pale, ~8 m
+    const mossy = clamp((moss - 0.62) * 2.2, 0, 1) * 0.14;
+    const dry = clamp((soil - 0.66) * 2.4, 0, 1) * 0.12;
+    _c.r *= 1 - mossy * 0.5 + dry * 0.9;
+    _c.g *= 1 + mossy * 0.25 + dry * 0.55;
+    _c.b *= 1 - mossy * 0.4 + dry * 0.15;
+
     // damp and darken where the lake has soaked it
     const wet = clamp(lakeAt(flat.x, flat.z) * 1.5, 0, 1);
     cols[i * 3] = (_c.r / MEAN.r) * (1 - wet * 0.30);

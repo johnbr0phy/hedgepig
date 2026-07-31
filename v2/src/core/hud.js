@@ -35,7 +35,15 @@ export function createHud() {
     },
 
     setHearts(n, max = 3) {
+      const before = last.hearts;
       set(el.hearts, 'hearts', '♥ '.repeat(n) + '♡ '.repeat(Math.max(0, max - n)));
+      /* A heart that changes beats once.  Class off, reflow, class on is the
+       * one dance that restarts a CSS animation reliably. */
+      if (before !== undefined && before !== last.hearts && el.hearts) {
+        el.hearts.classList.remove('beat');
+        void el.hearts.offsetWidth;
+        el.hearts.classList.add('beat');
+      }
     },
 
     setPlace(name, weather) {

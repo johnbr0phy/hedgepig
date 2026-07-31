@@ -77,3 +77,27 @@ Newest last. One line each: date, workstream, what landed, what the sweep found.
   produced the open world, the streaming meadow, the rebuilt gait and the
   sown-flower growth. 65/65 in the harness at `3a2f12e`. No unattended run has
   happened yet.
+- **2026-07-30 — the big pass (interactive session).** Landed, 83/83 green:
+  animation rebuild (one trunk for body/mantle/coats/ears — the flashing was
+  them disagreeing by the mantle's own clearance; a reserve coat that grows
+  through the skin as he curls, so the ball is spiky all over; spin settles
+  to the nearest whole turn instead of unwinding ten revolutions; pivots
+  step the feet; eyes in against the nose; near-constant sniffing and
+  ground-nuzzles; doze/yawn/scratch/shake/arrival-wiggle). Sound: all of
+  `core/audio.js`, synthesised, gait-driven footfalls, clock-driven beds,
+  him-ranged lake/traffic, music box, `M` mute. Sky: phased moon (13
+  lunations/year, risen opposite the sun — it had been under the planet all
+  night, every night), shooting stars, per-cloud drift, a rainbow when rain
+  clears. Critters: butterflies/bees/birds/frogs/fish/owl, hens that
+  scatter. Feel: world-anchored dust puffs (footsteps, roll trail, unfurl),
+  tap ripple, camera out a fifth while rolling, tremble on a hit. Ground:
+  place contrast + moss/soil mottle, stems get their own colour role. Quiet
+  rewards: localStorage persistence, the golden thistle that plants a
+  permanent ring, rain hurries him, and the hoglet that follows from leg 3.
+  HUD: heartbeat on change, weather glyph, `C` photo mode. Frame measured:
+  1 104 calls / 1.33 M tris — see HANDOVER §7; prop merge is the lever if a
+  focused frame is slow.
+  **Sweep found / still open:** post-rain glints on the quills; the orbit
+  far side is still bare of props; interactables still say one line;
+  footprints and trampled-grass memory; merging the ~830 rigid props by
+  material (draw-call bulk).

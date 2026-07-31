@@ -92,6 +92,7 @@ export class Hog {
     this.gait = 0;               // 0 standing, 1 walking
     this.speed = HOG_SPD;
     this.legSpeed = 1;
+    this.turning = 0;            // rad/s of heading actually applied, smoothed
 
     /** The one live target, or null.  v1 called this the crumb. */
     this.target = null;
@@ -118,10 +119,16 @@ export class Hog {
     this.lookYawTarget = 0;
     this.lookLock = 0;
     this.snuffle = 0;
+    this.celebrate = 0;          // seconds of arrival wiggle left
+    this.shake = 0;              // seconds of shake-off left (rain, the boat)
+    this.night = 0;              // fed by the clock, for the doze
+    this._aimTurn = 0;           // how much turning is left, for the glance
+    this._wasAfloat = false;
     this.walked = 0;             // metres, for the HUD
     this.blocked = 0;            // how long he has been unable to move
 
     this._idleTimer = 2;
+    this._glanceTo = 0;          // where the idle glance is easing his heading
     /* His own seeded stream, not `Math.random`.  Everything else in this
      * world is deterministic on purpose — v1's meadow is the same meadow on
      * every load — and his idle glancing was the one thing that was not,
@@ -205,6 +212,11 @@ export class Hog {
 
     if (this.hurt > 0) this.hurt = Math.max(0, this.hurt - dt);
     if (this.repel > 0) this.repel = Math.max(0, this.repel - dt);
+    if (this.celebrate > 0) this.celebrate = Math.max(0, this.celebrate - dt);
+    if (this.shake > 0) this.shake = Math.max(0, this.shake - dt);
+    // stepping off the boat earns a shake, like any wet dog would
+    if (this._wasAfloat && !this.afloat) this.shake = Math.max(this.shake, 1.0);
+    this._wasAfloat = !!this.afloat;
     this.curl = damp(this.curl, this.hurt > 0 ? 1 : 0, this.hurt > 0 ? 18 : 6, dt);
 
     let want = 0;              // desired gait this frame
@@ -212,6 +224,8 @@ export class Hog {
     if (this.afloat) {
       // the boat has him; it drives his position and heading
       this.gait = damp(this.gait, 0, 8, dt);
+      this.roll = damp(this.roll, 0, 8, dt);
+      this.turning = damp(this.turning, 0, 10, dt);
     } else if (this.target && this.hurt <= 0) {
       /* **Great-circle, not flat.**  With content spread over the whole
        * planet, `hypot(Δx, Δz)` is wrong by a factor of `cos(latitude)` in
@@ -232,22 +246,39 @@ export class Hog {
         /* **Rolling costs him his steering.**  Twice the speed for less than
          * half the turn rate, so the double tap is a decision — commit to a
          * line and take it — rather than a free speed button.  A ball with
-         * the agility of a walk would make walking pointless. */
-        const rate = (3.2 - this.shiver * 1.4) * (0.35 + 0.65 * this.gait)
+         * the agility of a walk would make walking pointless.
+         *
+         * The standing floor is high: at v1's 3.2 × 0.35 an about-face was
+         * two and a half seconds of creeping round on the spot before the
+         * walk was allowed to start, which read as him refusing to come. */
+        const rate = (4.6 - this.shiver * 1.8) * (0.55 + 0.45 * this.gait)
           * (1 - 0.58 * this.ball);
-        this.hd = wrapAng(this.hd + clamp(turn, -rate * dt, rate * dt));
+        const tStep = clamp(turn, -rate * dt, rate * dt);
+        this.hd = wrapAng(this.hd + tStep);
+        this.turning = damp(this.turning, tStep / Math.max(dt, 1e-6), 10, dt);
+        this._glanceTo = this.hd;     // a walk spends any idle glance
+        this._aimTurn = turn;         // and his eyes lead his feet round it
+
+        /* He banks into the turn — inside shoulder down, eased both ways.
+         * The amount tracks how much turning is left, so it fades to level
+         * on its own as he comes round onto his line. */
+        this.roll = damp(this.roll, clamp(turn * 0.4, -0.2, 0.2) * this.gait * (1 - this.ball), 5, dt);
 
         // he sets off in roughly the right direction before committing to speed
         const facing = clamp(1 - Math.abs(turn) / 1.9, 0.15, 1);
         this.gait = damp(this.gait, want * facing, 3.4, dt);
 
         /* Clamp the step to what is left, or the easing overshoots the
-         * target and he jitters on the spot for as long as you watch him. */
-        const step = Math.min(this.speed * this.rollSpeed() * this.gait * dt, dist);
+         * target and he jitters on the spot for as long as you watch him.
+         * Rain hurries him — a hedgehog in the wet has somewhere to be. */
+        const hurry = 1 + (this.rainHurry || 0);
+        const step = Math.min(this.speed * hurry * this.rollSpeed() * this.gait * dt, dist);
         this.tryStep(step, dt);
       }
     } else {
       this.gait = damp(this.gait, 0, 5, dt);
+      this.roll = damp(this.roll, 0, 5, dt);
+      this._aimTurn = damp(this._aimTurn, 0, 6, dt);
       this.idle(dt);
     }
 
@@ -258,7 +289,7 @@ export class Hog {
 
     const before = { x: this.x, z: this.z };
     this.y = heightAt(this.x, this.z);
-    const ground = this.gait * this.speed * this.rollSpeed() * dt;
+    const ground = this.gait * this.speed * (1 + (this.rainHurry || 0)) * this.rollSpeed() * dt;
     this.stride += ground * 7.2 / this.speed;
     this.walked += ground;
 
@@ -266,8 +297,20 @@ export class Hog {
      * divided by its own radius, which is the same rule that keeps his feet
      * from sliding when he walks — and it is just as visible when it is
      * wrong: a ball turning at any other rate reads as a beachball being
-     * dragged. */
-    this.spin += ground / BALL_R;
+     * dragged.  Scaled by the tuck, so a half-formed ball is not already
+     * tumbling head over heels with his face still out. */
+    this.spin += (ground / BALL_R) * this.ball;
+
+    /* **And it does not unwind.**  The applied roll used to be `spin × ball`,
+     * so easing out of the tuck swept the angle back through every turn the
+     * roll had accumulated — a six-metre roll is ten revolutions, replayed
+     * backwards in the half second of standing up, which was the whole of
+     * "unfurls really weirdly".  Once he is no longer rolling, the spin
+     * settles to the nearest whole turn instead: half a revolution of motion
+     * at the very most, and a whole turn is the right way up. */
+    if (!this.rolling) {
+      this.spin = damp(this.spin, Math.round(this.spin / TAU) * TAU, 12, dt);
+    }
 
     this.animate(dt, now);
     this.seat();
@@ -282,6 +325,10 @@ export class Hog {
     this.rolling = false;
     // he stops, and then he snuffles about where he was called to
     this._idleTimer = 0.6;
+    /* Getting there is worth a wiggle.  The flower was sown for him; an
+     * arrival that looks exactly like running out of road reads as a
+     * machine reaching a coordinate. */
+    this.celebrate = 1.1;
   }
 
   /**
@@ -339,9 +386,18 @@ export class Hog {
       this._idleTimer = this.rng.range(1.6, 4.8);
       if (this.lookLock <= 0) {
         // a small glance, never a turn: turning is for being called
-        this.hd = wrapAng(this.hd + this.rng.range(-0.55, 0.55));
+        this._glanceTo = wrapAng(this.hd + this.rng.range(-0.55, 0.55));
       }
     }
+    /* **Eased, never snapped.**  Assigned directly, the glance teleported
+     * his whole heading in one frame — a quarter-turn flick with nothing in
+     * between, which read as a glitch every few seconds for as long as you
+     * watched him stand there.  The feet report the turn so they shuffle
+     * round with it, rather than the statue rotating under a still animal. */
+    const t = wrapAng(this._glanceTo - this.hd);
+    const step = clamp(t, -1.4 * dt, 1.4 * dt);
+    this.hd = wrapAng(this.hd + step);
+    this.turning = damp(this.turning, step / Math.max(dt, 1e-6), 10, dt);
   }
 
   /* ----------------------------- the animation ----------------------------- */
@@ -353,7 +409,13 @@ export class Hog {
    */
   animate(dt, now) {
     if (this.lookLock > 0) this.lookLock -= dt;
-    else this.lookYawTarget = damp(this.lookYawTarget, 0, 1.2, dt);
+    else {
+      /* His eyes lead his feet: walking, the features swing toward where
+       * the turn is going, which is what any animal's face does through a
+       * corner.  A player's drag (lookLock) still outranks it. */
+      const lead = clamp(this._aimTurn * 0.55, -0.5, 0.5) * this.gait;
+      this.lookYawTarget = damp(this.lookYawTarget, lead, 3, dt);
+    }
     this.lookYaw = damp(this.lookYaw, this.lookYawTarget, 6, dt);
 
     this.anim?.update(this, dt, now);
@@ -380,7 +442,7 @@ export class Hog {
     if (this.ball > 0.001) {
       _rot.makeTranslation(0, BALL_R * this.ball, 0);
       _m.multiply(_rot);
-      _rot.makeRotationZ(-this.spin * this.ball);
+      _rot.makeRotationZ(-this.spin);
       _m.multiply(_rot);
       _rot.makeTranslation(0, -BALL_R * this.ball, 0);
       _m.multiply(_rot);

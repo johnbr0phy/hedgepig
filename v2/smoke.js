@@ -417,6 +417,20 @@ function sGait() {
   }
   ok(worstDown >= 2, 'and he always has at least two feet on the ground',
     `worst ${worstDown} — a hedgehog has no suspension phase`);
+
+  /* Turning on the spot is still stepping.  With the legs keyed to gait
+   * alone he pivoted like a statue on a turntable, and every turn — called
+   * or idle glance — read as weird. */
+  const pv = createAnimator(buildHog(), 2);
+  const pivot = { gait: 0, speed: HOG_SPD, curl: 0, shiver: 0, lookYaw: 0, turning: 3 };
+  const c0 = pv.state.cycle;
+  let lifted = false;
+  for (let i = 0; i < 120; i++) {
+    pv.update(pivot, 1 / 60, i / 60);
+    if (pv.legs.some((l) => l.lift > 0.005)) lifted = true;
+  }
+  ok(pv.state.cycle !== c0 && lifted, 'and turning on the spot steps the feet round',
+    'a pivot is a shuffle, not a turntable');
 }
 
 function sRoll() {
@@ -506,16 +520,30 @@ function sRoll() {
     parts.root.traverse((o) => { if (o === parts.shadow) underRoot = true; });
     ok(!underRoot, 'his shadow is not parented to him, so the spin cannot roll it');
 
-    /* **The coat stays concentric with the body.**  Instanced quills live in
-     * root space, so scaling them straight — rather than about his middle —
-     * put the shell 4 mm off the body it stands on and squashed it along him
-     * while the body went spherical underneath. */
-    const { BODY_Y } = HOG_BODY;
-    const coat = parts.coats[0];
-    const coatCentre = coat.position.y + BODY_Y * coat.scale.y;
-    ok(Math.abs(coatCentre - parts.body.position.y) < 1e-9,
-      'and his coat squashes about his middle, not about his feet',
-      `coat centre ${f(coatCentre, 6)} against body ${f(parts.body.position.y, 6)}`);
+    /* **The coat cannot part from the body, structurally.**  Kept as
+     * siblings in root space and matched by arithmetic, they disagreed by a
+     * millimetre — the mantle's whole clearance over the skin — and the body
+     * flashed cream through its own coat twice a stride; and the mantle,
+     * animated by nobody, stood off the ball as a rigid ellipsoid while he
+     * rolled.  Now everything that shows his surface is a child of the one
+     * trunk, so the bob, the sway and the tuck land on all of it at once. */
+    const surface = [parts.body, parts.mantle, ...parts.coats, parts.coatTuck, ...parts.ears];
+    ok(surface.every((o) => o.parent === parts.trunk),
+      'and his body, mantle, coat and ears all ride the one trunk',
+      `${surface.length} pieces, one transform`);
+
+    /* And the ball is coated all over: the bare cream front that is right on
+     * his feet is a third of the ball's surface, and unpatched it rolled as
+     * an egg with a mohawk.  The reserve coat must be out when he is tucked
+     * and gone when he is not. */
+    ok(parts.coatTuck.visible && parts.coatTuck.scale.x > 0.95,
+      'and the reserve coat is grown out over his front while he is tucked',
+      `scale ${f(parts.coatTuck.scale.x)}`);
+    const walkerParts = buildHog();
+    const walker = createAnimator(walkerParts, 7);
+    walker.update({ gait: 1, speed: HOG_SPD, curl: 0, shiver: 0, lookYaw: 0 }, 1 / 60, 0);
+    ok(!walkerParts.coatTuck.visible,
+      'and put away again the moment he is on his feet');
 
     /* **Nothing walks inside the ball.**  A ball that is also bobbing and
      * swaying is a ball with something loose in it. */
@@ -524,9 +552,10 @@ function sRoll() {
     ok(still < 1e-9, 'and the walk stops entirely once he is tucked',
       `bob+roll+pitch+sway = ${still.toExponential(1)}`);
 
-    /* And he is a sphere, not an egg. */
+    /* And he is a sphere, not an egg — measured off the trunk, which is
+     * where the tuck lives now. */
     const { A, B, C } = HOG_BODY;
-    const r = [A * parts.body.scale.x, B * parts.body.scale.y, C * parts.body.scale.z];
+    const r = [A * parts.trunk.scale.x, B * parts.trunk.scale.y, C * parts.trunk.scale.z];
     ok(Math.max(...r) - Math.min(...r) < 1e-9, 'and he is a sphere while he rolls',
       `${r.map((v) => f(v, 4)).join(' × ')} m`);
   }
@@ -537,6 +566,25 @@ function sRoll() {
   step(400);
   ok(!hog.rolling && hog.ball < 0.1, 'and he uncurls when he gets there',
     `ball ${f(hog.ball)}`);
+
+  /* **And uncurling does not unwind.**  The applied roll used to be
+   * `spin × ball`, so easing out of the tuck swept the angle back through
+   * every accumulated turn — a six-metre roll replayed backwards as ten
+   * revolutions in the half second of standing up.  Now the spin itself
+   * settles to the nearest whole turn: half a revolution of motion at most,
+   * and he ends the right way up. */
+  put(c.x, c.z);
+  hog.hd = plan.bearing(c.x, c.z, to.x, to.z).angle;
+  game.call(to.x, to.z, true);
+  let n2 = 0;
+  while (hog.target && n2 < 2000) { hog.update(1 / 60, n2 / 60); game.update(1 / 60); n2++; }
+  const spinAtArrival = hog.spin;
+  step(180);
+  const settled = Math.abs(hog.spin - spinAtArrival);
+  ok(settled < Math.PI + 0.01, 'and standing up costs half a revolution at most',
+    `${f(settled, 2)} rad of settling, against ${f(spinAtArrival, 0)} rad rolled`);
+  ok(Math.abs(wrapAng(hog.spin)) < 0.05, 'and he ends a roll the right way up',
+    `${f(wrapAng(hog.spin), 3)} rad from upright`);
 }
 
 function sFace() {
@@ -579,6 +627,40 @@ function sFace() {
   hog.lookAtScreen(1);
   ok(Math.abs(hog.lookYawTarget) <= 0.5 + 1e-9, 'and the glance is a glance, not a turn',
     `${f(hog.lookYawTarget, 2)} rad at full deflection`);
+
+  /* His eyes crowd in against the snout — that closeness is most of the
+   * charm of a hedgehog's face, and at A*0.56 they sat halfway up the front
+   * of him like a face printed on a balloon. */
+  const gap = parts.eyes[0].position.distanceTo(parts.nose.position);
+  ok(gap < 0.095, 'his eyes sit close in against his nose', `${(gap * 1000).toFixed(0)} mm apart`);
+
+  /* And the nose is a working nose: standing about, he is sniffing at
+   * something most of the time — read off the nostril flare, which is the
+   * animation's own output rather than its internals. */
+  const p2 = buildHog();
+  const a2 = createAnimator(p2, 3);
+  const st = { gait: 0, speed: 0, curl: 0, shiver: 0, lookYaw: 0 };
+  let sniffing = 0;
+  const N = 1200;
+  for (let i = 0; i < N; i++) {
+    a2.update(st, 1 / 60, i / 60);
+    if (p2.nose.scale.x > 1.02) sniffing++;
+  }
+  ok(sniffing / N > 0.35, 'and standing about, he sniffs nearly all the time',
+    `nose working ${Math.round((100 * sniffing) / N)}% of twenty seconds`);
+
+  /* Deep night stands him down: left alone in the dark he dozes off, and a
+   * dozing animal's eyes are shut.  They reopen the moment he moves. */
+  const p3 = buildHog();
+  const a3 = createAnimator(p3, 5);
+  const nightSt = { gait: 0, speed: 0, curl: 0, shiver: 0, lookYaw: 0, night: 1 };
+  for (let i = 0; i < 60 * 12; i++) a3.update(nightSt, 1 / 60, i / 60);
+  ok(p3.eyes[0].scale.y < 0.15, 'deep night stands him down: he dozes, eyes shut',
+    `lid at ${f(p3.eyes[0].scale.y, 2)} after twelve dark seconds`);
+  nightSt.gait = 1; nightSt.speed = HOG_SPD;
+  for (let i = 0; i < 40; i++) a3.update(nightSt, 1 / 60, 12 + i / 60);
+  ok(p3.eyes[0].scale.y > 0.8, 'and wakes the moment he is called',
+    `lid back to ${f(p3.eyes[0].scale.y, 2)}`);
 }
 
 function sWalk() {

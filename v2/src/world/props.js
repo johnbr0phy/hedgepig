@@ -193,7 +193,9 @@ export function bramble({ seed = 9, r = 0.42 } = {}) {
 export function flowerClump({ seed = 11, n = 7, color = PAL.bloomYellow, h = 0.16 } = {}) {
   const rng = rngKit(seed * 5501);
   const g = new THREE.Group();
-  const stemMat = cel({ color: 0x6f9152, bands: 3, tint: 0x55668c, role: 'leaf' });
+  /* Its own role, not `leaf`: a stem is not a leaf, and sharing the role
+   * turned every flower stem pumpkin-orange each autumn. */
+  const stemMat = cel({ color: 0x6f9152, bands: 3, tint: 0x55668c, role: 'stem' });
   const headMat = flat({
     color, map: petalTex(), transparent: true, alphaTest: 0.35,
     side: THREE.DoubleSide, cache: false,

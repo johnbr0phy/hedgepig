@@ -161,20 +161,39 @@ export function buildHens(root, ctx) {
     const rot = new THREE.Matrix4();
     const pos = new THREE.Vector3();
 
-    ctx.updaters.push((dt) => {
+    ctx.updaters.push((dt, hog) => {
       for (const f of flock) {
+        /* **A hedgehog in the run scatters the flock** — ranged off him, as
+         * everything is.  A hen that ignores an animal barrelling through
+         * her pen at ball speed is furniture with feathers. */
+        const at = ctx.at(f.u, f.v);
+        if (hog && !(f.flee > 0)) {
+          const dx = hog.x - at.x, dz = hog.z - at.z;
+          const d2 = dx * dx + dz * dz;
+          const scare = 1.0 + (hog.ball || 0) * 0.8;
+          if (d2 < scare * scare) {
+            f.flee = 1.3;
+            f.peck = 0;
+            f.hd = Math.atan2(at.z - hog.z, at.x - hog.x) + rng.range(-0.4, 0.4);
+            f.squawked = false;
+          }
+        }
+        f.flee = Math.max(0, (f.flee || 0) - dt);
+        if (f.flee > 0 && !f.squawked) { f.squawked = true; ctx.sound?.('squawk'); }
+
         f.wait -= dt;
         if (f.wait <= 0) {
           f.wait = rng.range(1.4, 4.5);
           f.hd = rng.range(0, TAU);
-          f.peck = rng.chance(0.6) ? 1.2 : 0;
+          f.peck = f.flee > 0 ? 0 : (rng.chance(0.6) ? 1.2 : 0);
         }
-        if (f.peck > 0) {
+        if (f.peck > 0 && f.flee <= 0) {
           f.peck -= dt;
           f.obj.userData.neck.rotation.z = -1.0 * Math.abs(Math.sin(f.peck * 9));
         } else {
-          f.obj.userData.neck.rotation.z = damp(f.obj.userData.neck.rotation.z, 0, 6, dt);
-          const sp = 0.22 * dt;
+          // a fleeing hen runs neck-up, four times her strolling pace
+          f.obj.userData.neck.rotation.z = damp(f.obj.userData.neck.rotation.z, f.flee > 0 ? 0.35 : 0, 6, dt);
+          const sp = (f.flee > 0 ? 0.95 : 0.22) * dt;
           let nu = f.u + Math.cos(f.hd) * sp;
           let nv = f.v + Math.sin(f.hd) * sp;
           if (Math.hypot(nu, nv) > PEN - 0.7) { f.hd += Math.PI; }
@@ -183,7 +202,9 @@ export function buildHens(root, ctx) {
         const p = ctx.at(f.u, f.v);
         const b = basisAt(p.x, p.z);
         mm.makeBasis(b.east, b.up, b.north);
-        mm.setPosition(positionAt(p.x, heightAt(p.x, p.z), p.z, pos));
+        // a fleeing hen bounces; a strolling one only bobs with her step
+        const hop = f.flee > 0 ? Math.abs(Math.sin(f.flee * 22)) * 0.03 : 0;
+        mm.setPosition(positionAt(p.x, heightAt(p.x, p.z) + hop, p.z, pos));
         rot.makeRotationY(-f.hd);
         mm.multiply(rot);
         f.obj.matrix.copy(mm);

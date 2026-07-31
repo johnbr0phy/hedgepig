@@ -46,7 +46,7 @@ export const PLACE_R = 21;
 const THORN_POOL = 260;
 
 export function buildPlaces(root) {
-  const hooks = { flash: () => {} };
+  const hooks = { flash: () => {}, sound: () => {} };
 
   const shared = {
     blockers: [],
@@ -57,6 +57,7 @@ export function buildPlaces(root) {
     post: [],
     out: {},
     flash: (m) => hooks.flash(m),
+    sound: (name) => hooks.sound(name),
   };
 
   for (const [kind, build] of BUILDERS) {
@@ -186,6 +187,7 @@ export function buildPlaces(root) {
     out: shared.out,
 
     setFlash(fn) { hooks.flash = fn; },
+    setSound(fn) { hooks.sound = fn; },
 
     /** Movers are built after the bake, so they keep their own pivots. */
     postBake(scene) {

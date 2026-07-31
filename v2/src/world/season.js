@@ -52,6 +52,7 @@ const _a = new THREE.Color();
 const _b = new THREE.Color();
 const _c = new THREE.Color();
 const _d = new THREE.Color();
+const _e = new THREE.Color();
 
 /** Blend a named colour across the four season palettes. */
 function seasonColor(key, w, out = new THREE.Color()) {
@@ -130,7 +131,13 @@ export function createClimate({
     state.leafFall = clamp((w[2] - 0.25) / 0.45, 0, 1);
     // rain sits between autumn and winter, and a little in spring
     state.wet = clamp(w[2] * 0.5 + w[3] * 0.25 + w[0] * 0.22 - 0.18, 0, 1);
-    state.wind = 0.10 + 0.14 * w[2] + 0.10 * w[3] + 0.05 * w[0];
+    /* Wind is weather, not a constant: a slow swell and an occasional gust
+     * front laid over the seasonal base, so the meadow breathes in waves
+     * instead of shimmering at one fixed amplitude forever. */
+    const base = 0.10 + 0.14 * w[2] + 0.10 * w[3] + 0.05 * w[0];
+    const swell = 0.6 + 0.4 * Math.sin(state.t * 0.11 + Math.sin(state.t * 0.043) * 2.1);
+    const gust = Math.max(0, Math.sin(state.t * 0.31) - 0.82) * 3.4;    // brief, a few times a minute
+    state.wind = base * (swell + gust);
 
     /* --- the day --- */
     state.night = nightAt(dp);
@@ -163,6 +170,8 @@ export function createClimate({
       top: skyTop, mid: skyMid, haze: skyHaze, night: n,
       cloud: _a.set(PAL.cloud).lerp(_b.set(0x8f9ac4), n).getHex(),
       cloudShade: _a.set(PAL.cloudShade).lerp(_b.set(0x5c648e), n).getHex(),
+      // thirteen lunations a year, so two evenings apart is a different moon
+      moonPhase: (state.yearPhase * 13) % 1,
     });
 
     /* Fog takes the horizon colour, so the world dissolves into its own sky.
@@ -220,10 +229,12 @@ export function createClimate({
 
     seasonColor('canopy', w, _c);
     seasonColor('leaf', w, _d);
+    seasonColor('stem', w, _e);
     if (n > 0) {
       _a.set(0x46527e);
       _c.lerp(_a, n * 0.55);
       _d.lerp(_a, n * 0.55);
+      _e.lerp(_a, n * 0.55);
     }
 
     _a.set(PAL.water);
@@ -235,6 +246,7 @@ export function createClimate({
       groundTint: groundCol,
       canopy: _c,
       leaf: _d,
+      stem: _e,
       water: _a,
       far: _b.copy(groundCol).lerp(fogCol, 0.35),
     });

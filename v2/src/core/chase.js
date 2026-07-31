@@ -180,6 +180,7 @@ export class Chase {
 
   update(dt) {
     const hog = this.hog;
+    this._t = (this._t || 0) + dt;
     const b = basisAt(hog.x, hog.z, _up, _east, _north);
 
     // where he is, a little above his feet: the camera looks at his shoulders
@@ -190,11 +191,24 @@ export class Chase {
       .addScaledVector(_east, Math.cos(this.yaw))
       .addScaledVector(_north, Math.sin(this.yaw));
 
+    /* Rolling pulls the camera out a fifth: speed reads as speed only if
+     * the frame opens up for it.  Rides the eased ball, so it breathes in
+     * and out with the tuck rather than stepping. */
+    const dist = this.dist * (1 + (hog.ball || 0) * 0.2);
+
     const cp = Math.cos(this.pitch);
     const sp = Math.sin(this.pitch);
     _want.copy(_target)
-      .addScaledVector(_fwd, -this.dist * cp)
-      .addScaledVector(_up, this.dist * sp + 0.06);
+      .addScaledVector(_fwd, -dist * cp)
+      .addScaledVector(_up, dist * sp + 0.06);
+
+    /* And a hit is felt in the hands: a tiny two-axis tremble over the
+     * first quarter-second of the hurt, and nothing after. */
+    const tremble = clamp(((hog.hurt || 0) - 0.95) / 0.25, 0, 1) * 0.022;
+    if (tremble > 0) {
+      _want.addScaledVector(_up, Math.sin(this._t * 75) * tremble)
+        .addScaledVector(_east, Math.cos(this._t * 63) * tremble);
+    }
 
     if (!this._seeded) {
       this.pos.copy(_want);

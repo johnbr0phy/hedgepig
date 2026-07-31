@@ -258,14 +258,32 @@ across 250 instanced chunks.
 
 ## 7. Not done
 
-- **Nothing measures frame rate.** Every frame observed so far has been a
-  background-tab frame, so the cost of 100 k grass tufts and 2 876 meshes is
-  genuinely unknown. The harness covers correctness and says nothing at all
-  about speed.
-- **No sound.**
-- The orbit view's far side is bare — 4-band toon shading over an icosphere,
-  with nothing on it. It is a thing you look at once.
-- Butterflies and bees are named in `weather.js` and are still only motes.
-- Footprints, and grass parting as he pushes through it. v1 had both and they
-  are a real part of why he felt like an animal rather than a token.
-- He does not shelter, and the weather does not push him about.
+- **Frame rate, measured at last (2026-07-30):** one `pipeline.render` frame
+  at 1260×693 CSS (scale 2 → 3.5 M px) issues **1 104 draw calls and 1.33 M
+  triangles** through 48 programs — the scene once for shadows, once for the
+  ink's depth source, and the post passes on top. The wall time measured was
+  81 ms/frame, but from a *hidden* tab, which Chrome GPU-throttles, so treat
+  it as an upper bound, not a number. The draw-call bulk is the ~830 rigid
+  props each being its own mesh; if a focused frame is ever actually slow,
+  the lever is merging those by material after the bake (`bake` in `util.js`
+  already does the geometry work), which would take the call count down by
+  an order of magnitude. The `pixelBudget` guard (4.6 M px) already caps
+  resolution on dense screens.
+- ~~No sound~~ — `core/audio.js` (2026-07-30): everything synthesised, nothing
+  sampled. Footfalls come off the real gait (`anim.js` reports the frame a
+  foot plants — the audio runs on that edge, not a timer), the beds follow
+  the clock (birds by day, crickets by night, silence with the snow, which
+  ducks everything because that is what snow does), and the lake and the
+  traffic range off *him*. `M` mutes, persisted. No audio before a gesture.
+- ~~Butterflies and bees are only motes~~ — `world/critters.js`: butterflies
+  anchored to the garden that flee him, bees orbiting blooms, bird flyovers,
+  frogs that plop off the bank with a ring when he comes too close, fish
+  rises, and an owl in the wood at night. All ranged off him, never the
+  camera — a bird spawned off the camera is the invincibility bug wearing
+  feathers.
+- The orbit view's far side is still mostly bare, though the ground now
+  carries moss/soil mottling at a few-metre scale everywhere.
+- Footprints, and grass parting as he pushes through it (the shader push
+  exists; the memory of it does not).
+- He does not shelter. Rain now *hurries* him (`rainHurry`), which is half
+  of it.
