@@ -997,6 +997,90 @@ than of what is pointing at it — a narrow desktop window has the same problem
 and no thumbs. `touch.js` only injects its stylesheet on the first touch, so
 anything in there would never reach that window.
 
+### The grass was 57 % of the frame, and half of it was behind you
+
+Reported as "feels a bit laggy on desktop", and it was: **15 ms of GPU per
+frame on an M1** at 1400×723, which is a 67 fps ceiling before a line of
+JavaScript runs.
+
+Measured with `EXT_disjoint_timer_query_webgl2` rather than a wall clock, and
+that matters — §4's rule about measurements applies here twice over. A
+`performance.now()` loop round `pipeline.render` reported the *same*
+configuration at 45.8 ms and then 88.5 ms, and reported deleting work as
+making it slower; back-to-back renders with no frame pacing peg the GPU and
+it clocks around underneath you. A timer query measures the GPU's own
+elapsed time and is immune to all of it.
+
+The finding: **grass was 1.5 M of the frame's 1.96 M triangles**, and
+`frustumCulled = false` on every chunk, so all 75 live ones drew whether the
+camera could see them or not.
+
+They are culled by distance off *him* — which is right, and is the same
+streaming rule the insects and the residents use — but **distance off him is
+a disc and a camera is a cone**. §5 says instanced meshes must be culled by
+hand because "their bound comes from the source blade, not the instance
+cloud". That is true of the *geometry's* bounding sphere. It is not true of
+`InstancedMesh.boundingSphere`, which three.js tests first and which nothing
+was setting. So `fill()` now gathers the real extent of each chunk as it
+places the instances and hands the frustum an honest sphere.
+
+- 1 957 k triangles → 1 143 k, and 75 chunks drawn → 34.
+- Grass 8.1 ms → 1.8 ms; the whole frame 14.2 ms → 8.6 ms.
+- **Nothing changed about what you see.** Swept the camera through 18 bearings
+  and at most 45 % of live chunks are ever drawn, with the field still full to
+  the horizon and both edges.
+
+The margin on the sphere matters: it is gathered from the instance *roots*,
+and a blade stands up out of its root and the wind leans it further. Too big
+only ever draws a chunk you could not quite see; too small pops one out at the
+edge of frame, which is the fault everybody notices.
+
+Shadows and the post chain both measured at nothing, which is worth writing
+down so nobody optimises them: the shadow pass is cheap because grass does not
+cast, and the M1 eats three full-screen passes without noticing.
+
+**And there is an adaptive scaler again.** v1 had one and v2 had lost it, so
+the game was simply whatever speed your machine made it. It gives up
+*supersampling* first — the 1.5× scale on a low-DPI screen exists so the ink
+pass has clean edges, and dropping it to 1.0 still renders every blade, prop
+and shadow at native resolution. Thinning the grass or pulling the draw
+distance in would be visible as a worse world, which is the thing worth
+protecting. Note that **`dt` can only tell you that you are slow, never that
+you are fast**: with vsync it sits at 16.7 ms whatever headroom there is, so it
+drives the fall only and the recovery is a periodic attempt to step back up.
+
+### The tower is Mechazilla, and it needed to look like it
+
+It was a generic lattice mast with two boxes stuck on the side — which is a
+pylon, and the thing it is meant to be is one of the most recognisable
+structures ever built. What actually names it:
+
+| | |
+|---|---|
+| height | ~146 m, and a lightning rod above that |
+| section | roughly 12 m square, the same all the way up |
+| built from | **nine** stacked steel truss sections |
+| bracing | **X** on every face of every section |
+| arms | **two catch arms**, and a stabiliser above them |
+| arms ride | a carriage on rails down ONE face, hauled from the top |
+
+Three of those carry the whole silhouette and the old one had none. Nine
+sections means eight visible bands, which is what gives it a scale you can
+count — an evenly rung mast reads as a transmission tower. Both diagonals
+crossing, not one alternating, is the difference between this and a crane
+boom. And the arms are open trusses on a carriage rather than slabs: a top
+and bottom chord with verticals between, splayed slightly in plan, which is
+the pose everybody has seen.
+
+**It is seated in the PAD's tangent frame, not its own** — the one place in
+this file that breaks rule 2. Seated at its own foot like everything else it
+stood square to the ground *under it*, which seventeen metres away on a
+47.75 m planet is **twenty degrees** off square to the rocket. It read as
+falling over and the catch arms pointed into the sky beside the vehicle. A
+fence post may lean; a machine built to grip a rocket shares its vertical.
+The cost is `d²/2R` — three metres at seventeen — and the columns run down
+through it.
+
 ## 5. Things that will bite the next change
 
 - **A pitched roof is `s * +angle`, not `s * -angle`.** Rotating about +x by a

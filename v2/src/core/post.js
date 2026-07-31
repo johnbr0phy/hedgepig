@@ -282,10 +282,56 @@ export class Pipeline {
     this._t = 0;
   }
 
+  /* -------------------------- the adaptive scaler -------------------------- *
+   *
+   * v1 had one of these and v2 lost it: "an adaptive scaler in `tick()` thins
+   * blade density if frames drop below 44fps".  Without it the game simply is
+   * whatever speed it is on your machine, and the only person who finds out
+   * is you.
+   *
+   * **Supersampling is the right thing to give up first.**  The scale is 1.5
+   * on a low-DPI screen purely so the ink pass has clean edges to work with —
+   * it is a bonus, not the picture.  Dropping it to 1.0 renders at native
+   * resolution: the world still has every blade of grass, every prop and
+   * every shadow in it, and the only thing lost is the extra anti-aliasing.
+   * Thinning the grass or pulling the draw distance in would be visible as a
+   * *worse world*, which is the one thing worth protecting.
+   *
+   * **`dt` can only tell you that you are slow, never that you are fast.**
+   * With vsync it sits at 16.7 ms whatever headroom there is, so it is used
+   * as the fall signal only; the recovery is a periodic attempt to step back
+   * up, which falls again if it was not warranted.  Down fast, up slow, and
+   * a long cooldown after a fall so a stutter cannot start it oscillating.
+   */
+  adapt(dtMs) {
+    if (!(dtMs > 0) || dtMs > 400) return;      // a tab coming back is not a frame
+    this._ema = this._ema ? this._ema * 0.9 + dtMs * 0.1 : dtMs;
+    this._cool = Math.max(0, (this._cool || 0) - dtMs);
+    if (this._cool > 0) return;
+    const q = this._quality ?? 1;
+    if (this._ema > 19 && q > 0.6) {
+      this._quality = Math.max(0.6, q - 0.12);
+      this._cool = 1800;
+      this._resize();
+    } else if (this._ema < 15.5 && q < 1) {
+      this._quality = Math.min(1, q + 0.06);
+      this._cool = 5000;                        // and give it a long time to prove it
+      this._resize();
+    }
+  }
+
+  _resize() {
+    if (this._w) this.setSize(this._w, this._h);
+  }
+
   /** Resolution scale: supersample a little on low-DPI screens for clean ink. */
   setSize(w, h) {
+    this._w = w; this._h = h;
     const dpr = window.devicePixelRatio || 1;
-    let scale = this.forceScale || (dpr < 1.5 ? 1.5 : Math.min(dpr, 2));
+    let scale = this.forceScale
+      || (dpr < 1.5 ? 1.5 : Math.min(dpr, 2)) * (this._quality ?? 1);
+    // never below native: past that it is not anti-aliasing, it is a blur
+    if (!this.forceScale) scale = Math.max(1, scale);
     if (w * h * scale * scale > this.pixelBudget) {
       scale = Math.max(1, Math.sqrt(this.pixelBudget / (w * h)));
     }

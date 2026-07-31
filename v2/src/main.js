@@ -704,8 +704,13 @@ function frame() {
    * a stutter and a console error. */
   requestAnimationFrame(frame);
 
-  const dt = Math.min(clock.getDelta(), 1 / 20);
+  const raw = clock.getDelta();
+  const dt = Math.min(raw, 1 / 20);
   acc += dt;
+  /* Fed the **unclamped** delta: `dt` is capped at a twentieth of a second so
+   * the physics cannot tunnel, and a scaler that only ever saw 50 ms would
+   * never learn that the machine is doing 12 fps. */
+  pipeline.adapt(raw * 1000);
 
   const state = climate.update(dt);
 

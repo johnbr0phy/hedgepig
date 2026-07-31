@@ -69,8 +69,11 @@ last run did *not* touch.
 1. **Instanced brambles.** 260 thorn meshes are the remaining draw-call bulk;
    they are excluded from the static merge because they toggle visibility, and
    instancing solves both at once.
-2. **Grass chunk LOD.** 250 chunks culled by hand off him; a coarser ring
-   beyond ~8 m would halve what is left after the brambles.
+2. **Grass chunk LOD** *— the frustum half of this is done: chunks carry a
+   real `boundingSphere` now and only ~45 % of the live ones are ever drawn,
+   which took the grass from 8.1 ms to 1.8. What is left is genuine LOD: the
+   far ring is still full-detail tufts, and a coarser one beyond ~8 m would
+   halve it again.*
 3. **Place boundaries are invisible.** Ten 30 m places blend by weight and you
    cannot tell you have left the mire. A signal at the seam — reeds thinning,
    soil changing — at a scale smaller than a place.
@@ -429,3 +432,32 @@ Newest last. One line each: date, workstream, what landed, what the sweep found.
   not for anything faster. And **none of this has run on a real device**:
   it is resized desktop Chrome with synthetic pointer events, which gets the
   geometry right and says nothing at all about frame rate on a phone.
+- **2026-07-31 — the grass was 57 % of the frame (interactive session, two
+  asks).** 269/269, deployed. Reported as "feels a bit laggy on desktop" and
+  it was: **15 ms of GPU a frame on an M1**, a 67 fps ceiling before any JS.
+  Measured with `EXT_disjoint_timer_query_webgl2`, which mattered — a
+  `performance.now()` loop reported the same configuration at 45.8 ms and
+  then 88.5 ms and had deleting work making it *slower*. The cause: grass was
+  1.5 M of 1.96 M triangles with `frustumCulled = false`, so all 75 live
+  chunks drew whether the camera could see them or not. They stream by
+  distance off *him*, which is a disc, and a camera is a cone.
+  `InstancedMesh.boundingSphere` is what three.js tests first and nothing was
+  setting it; `fill()` now gathers each chunk's real extent as it places the
+  instances. **1 957 k tris → 1 143 k, 75 chunks drawn → 34, grass 8.1 ms →
+  1.8, frame 14.2 → 8.6, and nothing changed about what you see** — swept 18
+  bearings and the field is still full to the horizon. Shadows and the post
+  chain both measure at nothing; do not optimise them. And the adaptive
+  scaler is back, giving up supersampling first, because that is the only
+  thing it can drop without the world itself getting worse.
+  **The tower is Mechazilla now**: nine X-braced sections rather than an
+  evenly rung mast, a rail spine and carriage down one face, **two open-truss
+  catch arms** with end pads and a stabiliser above them, and a lightning rod.
+  It is seated in the pad's frame — the one place in that file that breaks
+  rule 2 — because at seventeen metres its own vertical is twenty degrees off
+  the rocket's, and it stood there visibly falling over with its arms pointing
+  into empty sky.
+  **Sweep found / still open:** 923 draw calls is now the bulk of what is
+  left, and most of them are props the static merge could not take because
+  they toggle visibility. And the frame has only ever been measured on one
+  machine, an M1 — the scaler is what covers everything else, and it has
+  never been seen to fire.

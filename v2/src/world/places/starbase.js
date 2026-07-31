@@ -264,42 +264,144 @@ function launchMount() {
  * A square lattice with two arms on it.  It is drawn as one baked geometry
  * because it is otherwise a hundred and eighty draw calls standing in a bog.
  */
-function catchTower() {
+/* ------------------------------- the tower -------------------------------- *
+ *
+ * The Orbital Launch and Integration Tower at Starbase — "Mechazilla".  The
+ * first version of this was a generic lattice mast with two boxes stuck on
+ * the side of it, which is a pylon, and the thing it is meant to be is one of
+ * the most recognisable structures ever built.  What actually names it:
+ *
+ * | | |
+ * |---|---|
+ * | height | ~146 m, and a lightning rod above that |
+ * | section | roughly 12 m square, the same all the way up |
+ * | built from | **nine** stacked steel truss sections |
+ * | bracing | **X** on every face of every section |
+ * | arms | **two catch arms**, plus a stabiliser above them |
+ * | arms ride | a carriage on rails down ONE face, hauled from the top |
+ *
+ * Three of those are the whole silhouette and the old one had none of them.
+ *
+ * **The section joints.**  Nine sections means eight visible horizontal bands
+ * up the tower, and they are what give it a scale you can count.  An evenly
+ * rung mast reads as a transmission tower; a banded one reads as something
+ * that was stacked.
+ *
+ * **X bracing, not a single diagonal.**  One diagonal per bay alternating
+ * hand is what a crane boom looks like.  Both diagonals, crossing, is what
+ * this looks like, and it costs one extra box per face.
+ *
+ * **The arms hang off a carriage on one face, and they are open trusses.**
+ * They are the reason the tower exists.  Drawn as two solid slabs they read
+ * as scaffolding planks; drawn as frames with a top and bottom chord and
+ * verticals between, at a slight open angle in plan, they read as chopsticks
+ * about to take hold of something.
+ */
+function catchTower(offset = 0) {
   const g = new THREE.Group();
   const h = TOWER_SEC / 2;
-  const sink = SINK(h * Math.SQRT2);
+  /* **The tower is seated in the PAD's frame, not its own**, so it stands
+   * parallel to the rocket — and that is why it has to reach so far down.
+   *
+   * Seated at its own foot, like every other rigid thing here, it stood
+   * square to the ground *under it* — which on a 47.75 m planet is twenty
+   * degrees off square to the rocket seventeen metres away.  It read as
+   * falling over, and the catch arms, whose entire job is to reach the
+   * vehicle, pointed off into the sky beside it.  Rule 2 in the file header
+   * is about things standing on their own ground; a tower and the rocket it
+   * catches are one machine and must share a vertical.
+   *
+   * The cost is the whole of `d²/2R` at the offset — three metres at
+   * seventeen — and that is what the columns run down through. */
+  const sink = SINK(h * Math.SQRT2) + (offset * offset) / (2 * 47.75);
   const steel = [];
+
+  // the four corner columns, run into the ground — see SINK
   for (const sx of [-1, 1]) {
     for (const sz of [-1, 1]) {
-      steel.push(part(new THREE.CylinderGeometry(0.55, 0.55, TOWER + sink, 8),
+      steel.push(part(new THREE.CylinderGeometry(0.5, 0.5, TOWER + sink, 8),
         sx * h, (TOWER + sink) / 2 - sink, sz * h));
     }
   }
-  const LEVELS = 20;
-  const rise = TOWER / LEVELS;
-  for (let i = 1; i <= LEVELS; i++) {
-    const y = i * rise;
+
+  /* Nine sections, each braced with an X on all four faces and closed with a
+   * band at the top.  The band is a deeper beam than the bracing, because on
+   * the real thing it is the flange the next section bolts to. */
+  const SECTIONS = 9;
+  const sec = TOWER / SECTIONS;
+  const diag = Math.hypot(TOWER_SEC, sec);
+  const lean = Math.atan2(sec, TOWER_SEC);
+  for (let i = 0; i < SECTIONS; i++) {
+    const y0 = i * sec;
     for (let f = 0; f < 4; f++) {
       const a = (f / 4) * TAU;
       const cx = Math.cos(a) * h, cz = Math.sin(a) * h;
-      // the rung along this face
-      steel.push(part(new THREE.BoxGeometry(TOWER_SEC, 0.38, 0.38), cx, y, cz, 0, -a, 0));
-      // and one diagonal across the bay below it, alternating hand each level
-      const len = Math.hypot(TOWER_SEC, rise);
-      steel.push(part(new THREE.BoxGeometry(len, 0.3, 0.3), cx, y - rise / 2, cz,
-        0, -a, (i % 2 ? 1 : -1) * Math.atan2(rise, TOWER_SEC)));
+      // the joint band closing this section
+      steel.push(part(new THREE.BoxGeometry(TOWER_SEC, 0.5, 0.34), cx, y0 + sec, cz, 0, -a, 0));
+      // and the X across it
+      for (const s of [1, -1]) {
+        steel.push(part(new THREE.BoxGeometry(diag, 0.26, 0.26),
+          cx, y0 + sec / 2, cz, 0, -a, s * lean));
+      }
     }
   }
+  // the lightning rod, which is the only thing above the top of it
+  steel.push(part(new THREE.CylinderGeometry(0.16, 0.09, 9, 6), 0, TOWER + 4.5, 0));
 
-  /* The chopsticks, out at the height they would be holding a booster's
-   * catch pins.  Drawn open and reaching over the pad, which is the pose
+  /* ------------------------------- the rails ------------------------------- *
+   * Two of them, up the face the arms are on, with the sheave housing at the
+   * top that the hoist cables run over.  It is the one asymmetry on an
+   * otherwise four-fold structure and it is what tells you which side the
+   * arms live on even when they are down. */
+  const RAIL_X = -h - 0.9;
+  for (const s of [-1, 1]) {
+    steel.push(part(new THREE.BoxGeometry(0.7, TOWER, 0.7), RAIL_X, TOWER / 2, s * 4.2));
+  }
+  steel.push(part(new THREE.BoxGeometry(3.4, 4.2, TOWER_SEC), RAIL_X - 0.6, TOWER - 3, 0));
+
+  /* ------------------------------- the arms -------------------------------- *
+   * Two catch arms and the stabiliser above them, out at the height they
+   * would be holding a booster's catch pins — which is why the pins are on
+   * the booster in the first place.  Open frames: a top and a bottom chord,
+   * verticals between, and a slight opening angle in plan, which is the pose
    * everybody has seen and the only one that says what they are for. */
   const armY = BOOSTER + MOUNT - 8.5;
-  const reach = TOWER_OUT + 6;
+  const REACH = TOWER_OUT + 7;
+  const OPEN = 0.13;                      // radians each arm swings off the axis
+  // the carriage they hang from, riding the rails
+  steel.push(part(new THREE.BoxGeometry(3.0, 6.0, TOWER_SEC + 3), RAIL_X - 0.8, armY, 0));
+
   for (const s of [-1, 1]) {
-    steel.push(part(new THREE.BoxGeometry(reach, 1.5, 2.1), -reach / 2 - h, armY, s * 3.4));
+    const ang = s * OPEN;
+    const cos = Math.cos(ang), sin = Math.sin(ang);
+    const rootZ = s * 3.2;
+    const at = (t) => [RAIL_X - 1.6 - cos * REACH * t, sin * REACH * t + rootZ];
+    // two chords, one over the other, which is what makes it a truss
+    for (const [dy, thick] of [[1.5, 0.55], [-1.5, 0.7]]) {
+      const [mx, mz] = at(0.5);
+      steel.push(part(new THREE.BoxGeometry(REACH, thick, 0.8),
+        mx, armY + dy, mz, 0, -ang, 0));
+    }
+    // verticals and diagonals between them
+    for (let k = 0; k <= 6; k++) {
+      const [px, pz] = at(k / 6);
+      steel.push(part(new THREE.BoxGeometry(0.34, 3.0, 0.34), px, armY, pz));
+      if (k < 6) {
+        const [qx, qz] = at((k + 0.5) / 6);
+        steel.push(part(new THREE.BoxGeometry(Math.hypot(REACH / 6, 3), 0.24, 0.24),
+          qx, armY, qz, 0, -ang, (k % 2 ? 1 : -1) * Math.atan2(3, REACH / 6)));
+      }
+    }
+    /* The pad at the business end: the flat face that actually takes the
+     * booster's weight, and the only part of an arm that is not a frame. */
+    const [tx, tz] = at(0.86);
+    steel.push(part(new THREE.BoxGeometry(REACH * 0.3, 2.2, 1.9), tx, armY, tz, 0, -ang, 0));
   }
-  steel.push(part(new THREE.BoxGeometry(3.2, 5.0, TOWER_SEC + 2), -h - 1.4, armY, 0));
+
+  /* And the stabiliser arm above them — shorter, on the same carriage, and
+   * the thing that actually steadies a ship while it is being stacked. */
+  steel.push(part(new THREE.BoxGeometry(REACH * 0.62, 1.6, 1.4),
+    RAIL_X - 1.6 - REACH * 0.31, armY + 12, 0));
 
   g.add(new THREE.Mesh(bake(steel), MAT.steel()));
   return g;
@@ -416,7 +518,15 @@ export function buildStarbase(root, ctx, { u = PAD_U, v = PAD_V } = {}) {
   const mount = launchMount();
   stand(stack, 0, 0);
   stand(mount, 0, 0);
-  stand(catchTower(), TOWER_OUT, 0);
+  /* The tower goes in a group seated at the PAD and then stepped sideways in
+   * that group's own local space — which is what shares the rocket's
+   * vertical.  Seated at its own foot it leaned twenty degrees away from the
+   * thing it is built to catch. */
+  const tower = new THREE.Group();
+  const towerRig = catchTower(TOWER_OUT);
+  towerRig.position.x = TOWER_OUT;
+  tower.add(towerRig);
+  stand(tower, 0, 0);
 
   const tanks = [];
   for (let i = 0; i < 4; i++) {
@@ -454,7 +564,7 @@ export function buildStarbase(root, ctx, { u = PAD_U, v = PAD_V } = {}) {
   /* `booster` and `ship` come out separately because hot-stage separation
    * needs to take one away from the other — see `game/mission.js`. */
   return {
-    apron, stack, booster, ship, mount, tower: rigid[2], tanks,
+    apron, stack, booster, ship, mount, tower, tanks,
     apronR: APRON_R, at: centre, base, height: MOUNT + STACK,
   };
 }
