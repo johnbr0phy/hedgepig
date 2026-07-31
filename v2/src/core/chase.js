@@ -60,14 +60,28 @@ export class Chase {
     this._lastTap = null;
     this._pointers = new Map();
     this._pinch = 0;
+    this._filter = null;
 
     this.bind();
   }
+
+  /**
+   * Hand a predicate that says which pointers are the camera's.  Returning
+   * false means somebody else owns that finger and the camera must not see
+   * it at all — not its drag, not its tap.
+   */
+  setPointerFilter(fn) { this._filter = fn; }
 
   bind() {
     const c = this.canvas;
 
     c.addEventListener('pointerdown', (e) => {
+      /* **One owner per finger.**  The touch stick wants `pointerdown` on
+       * this same canvas, and two handlers both deciding what a finger meant
+       * is a race whose outcome depends on the order they were bound in.
+       * The filter lets the other one claim its own pointers outright, so
+       * dragging the stick never also swings the camera. */
+      if (this._filter && !this._filter(e)) return;
       c.setPointerCapture?.(e.pointerId);
       this._pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (this._pointers.size === 1) {

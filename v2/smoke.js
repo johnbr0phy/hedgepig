@@ -75,6 +75,7 @@ const { createCharacters, WOOD_CHARACTERS } = await import('./src/world/characte
 const { createDialogue } = await import('./src/core/dialogue.js');
 const { createHud } = await import('./src/core/hud.js');
 const { createMission } = await import('./src/game/mission.js');
+const { createTouch } = await import('./src/core/touch.js');
 const { STACK } = await import('./src/world/places/starbase.js');
 
 /* ------------------------------- reporting ------------------------------- */
@@ -2193,6 +2194,123 @@ function sMission() {
   ok(m2.begin() === false, 'and there is no launching again from Mars');
 }
 
+/* -------------------------------- the thumbs ------------------------------ *
+ *
+ * Before this you could look around a phone, pinch, and tap to sow — and you
+ * could not walk, hop, roll or get into the rocket, because all four were on
+ * keys.  None of that is visible from a desktop, which is exactly why it
+ * survived: the game looked finished and was unplayable.
+ */
+function sTouch() {
+  /** A canvas that records its listeners, so gestures can be played into it. */
+  const make = () => {
+    const on = {};
+    const canvas = { addEventListener: (k, fn) => { (on[k] ||= []).push(fn); } };
+    let filter = null;
+    const acted = [];
+    const chase = {
+      setPointerFilter: (fn) => { filter = fn; },
+      callAt: (x, y) => acted.push(`sow ${Math.round(x)},${Math.round(y)}`),
+    };
+    const t = createTouch({
+      canvas, chase, onHop: () => acted.push('hop'), onAct: () => acted.push('act'),
+    });
+    const send = (k, e) => (on[k] || []).forEach((fn) => fn(e));
+    return { t, send, acted, claims: (e) => filter(e) };
+  };
+  const W = 1280;                          // the harness window's own width
+  const finger = (x, y, id = 1) => ({ pointerId: id, pointerType: 'touch', clientX: x, clientY: y });
+
+  const a = make();
+  ok(a.t.drive() === null, 'a thumb that is not on the glass asks for nothing');
+
+  /* **The zone is decided on touch-down and never revisited.**  Dragging the
+   * stick past the middle must not hand the finger to the look camera in the
+   * middle of a walk. */
+  ok(a.claims(finger(W * 0.2, 400)) === false, 'the left half is the stick\'s');
+  ok(a.claims(finger(W * 0.8, 400)) === true, 'and the right half is the camera\'s');
+
+  a.send('pointerdown', finger(300, 400));
+  ok(a.t.drive() === null, 'a thumb resting still is a dead zone, not a crawl');
+
+  /* Screen +y is down and down-screen is *toward* the camera, so pushing the
+   * stick up the screen has to come out as forward.  Getting this backwards
+   * walks him at you when you push away and is invisible in the code. */
+  a.send('pointermove', finger(300, 340));
+  let d = a.t.drive();
+  ok(d && d.f > 0.99 && Math.abs(d.r) < 0.01, 'pushing up the screen is forward',
+    d ? `f ${f(d.f)} r ${f(d.r)}` : 'nothing');
+  a.send('pointermove', finger(360, 400));
+  d = a.t.drive();
+  ok(d && d.r > 0.99 && Math.abs(d.f) < 0.01, 'and pushing right is right');
+  a.send('pointermove', finger(300, 460));
+  ok(a.t.drive().f < -0.99, 'and pushing down is back');
+
+  /* The throttle ramps out of the dead zone and pins at the ring, so a small
+   * push is a saunter and the edge is a walk rather than a cliff. */
+  a.send('pointermove', finger(300, 400 - 20));
+  const slow = a.t.drive().throttle;
+  a.send('pointermove', finger(300, 400 - 60));
+  const fast = a.t.drive().throttle;
+  ok(slow > 0.05 && slow < 0.35 && fast > 0.95,
+    'a little push is a saunter and a full one is a walk', `${f(slow)} then ${f(fast)}`);
+
+  /* Past the ring the stick FOLLOWS the thumb.  Without that your thumb
+   * wanders off it during any real walk and the throttle silently pins in a
+   * direction you can no longer steer. */
+  a.send('pointermove', finger(300, 400 - 400));
+  const far = a.t.drive();
+  ok(far.throttle > 0.99 && far.f > 0.99, 'and dragging beyond it keeps steering',
+    `throttle ${f(far.throttle)}`);
+  a.send('pointermove', finger(340, 400 - 400));
+  ok(a.t.drive().r > 0.1, 'because the ring comes with the thumb');
+
+  a.send('pointerup', finger(340, 0));
+  ok(a.t.drive() === null, 'lifting off stops him');
+
+  /* ---------------------------- double tap rolls --------------------------- *
+   * The same gesture the keys use: two taps, the second one held.  The first
+   * has already set him walking, so the second is an upgrade rather than a
+   * fresh start, which is why it feels immediate. */
+  const b = make();
+  b.send('pointerdown', finger(300, 400));
+  b.send('pointermove', finger(300, 340));
+  ok(b.t.drive().roll === false, 'one tap and a push is a walk');
+  b.send('pointerup', finger(300, 340));
+  b.send('pointerdown', finger(300, 400));
+  b.send('pointermove', finger(300, 340));
+  ok(b.t.drive().roll === true, 'two taps and a push is a roll');
+  b.send('pointerup', finger(300, 340));
+
+  /* And a slow second tap is not a double.  Without a window on it, every
+   * separate walk after the first would come out as a roll. */
+  const c = make();
+  c.send('pointerdown', finger(300, 400));
+  c.send('pointerup', finger(300, 400));
+  const t0 = Date.now();
+  while (Date.now() - t0 < 420) { /* longer than the double-tap window */ }
+  c.send('pointerdown', finger(300, 400));
+  c.send('pointermove', finger(300, 340));
+  ok(c.t.drive().roll === false, 'but two taps a moment apart are two walks');
+
+  /* **A tap on the stick's side still sows.**  The stick claimed the whole
+   * left half of the screen and took the tap that puts a flower down with
+   * it, so half the world quietly became unsowable on a phone. */
+  const s = make();
+  s.send('pointerdown', finger(200, 500));
+  s.send('pointerup', finger(200, 500));
+  ok(s.acted.some((x) => x.startsWith('sow')), 'a tap on the stick side still sows',
+    s.acted.join(' '));
+  s.acted.length = 0;
+  s.send('pointerdown', finger(200, 500));
+  s.send('pointermove', finger(200, 420));
+  s.send('pointerup', finger(200, 420));
+  ok(!s.acted.some((x) => x.startsWith('sow')), 'but a walk does not plant one where it started');
+
+  /* The buttons are the other half of what was keyboard-only. */
+  ok(a.acted.length === 0, 'nothing fires on its own');
+}
+
 function sNan() {
   /* v1's harness flagged any non-finite coordinate reaching the canvas, and
    * it is still the cheapest bug-per-line in either build.  The equivalent
@@ -2234,7 +2352,7 @@ const SCENARIOS = {
   plan: sPlan, terrain: sTerrain, planet: sPlanet, clock: sClock,
   open: sOpen, gait: sGait, roll: sRoll, face: sFace, walk: sWalk, idle: sIdle, back: sBack, water: sWater, boat: sBoat,
   road: sRoad, roadmiss: sRoadmiss, abandon: sAbandon,
-  burrow: sBurrow, grass: sGrass, solid: sSolid, persist: sPersist, palette: sPalette, weather: sWeather, sky: sSky, slow: sSlow, merge: sMerge, drive: sDrive, jump: sJump, voice: sVoice, critters: sCritters, characters: sCharacters, starbase: sStarbase, toast: sToast, mission: sMission, nan: sNan,
+  burrow: sBurrow, grass: sGrass, solid: sSolid, persist: sPersist, palette: sPalette, weather: sWeather, sky: sSky, slow: sSlow, merge: sMerge, drive: sDrive, jump: sJump, voice: sVoice, critters: sCritters, characters: sCharacters, starbase: sStarbase, toast: sToast, mission: sMission, touch: sTouch, nan: sNan,
 };
 
 const arg = process.argv[2] || 'all';

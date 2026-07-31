@@ -59,10 +59,23 @@
         position: absolute;
         left: 50%;
         bottom: 22%;
+        width: max-content;
+        max-width: min(34rem, 82vw);
         transform: translateX(-50%) translateY(0.4rem);
         opacity: 0;
         transition: opacity 260ms ease, transform 260ms ease;
         font-size: 1.02rem;
+        text-align: center;
+      }
+      /* **The panel inside the toast must not be absolutely positioned.**
+         `.panel` sets `position: absolute` for the six readouts that are
+         placed by corner, and the toast's own span was inheriting it — so it
+         was out of flow, its container collapsed to no width at all, and
+         every message rendered as a vertical strip one word wide.  It had
+         been doing that since the panel treatment was shared. */
+      #toast > .panel {
+        position: static;
+        display: inline-block;
         text-align: center;
       }
       #toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -79,6 +92,50 @@
       /* Photo mode: the world, and nothing else. */
       .panel, #toast { transition: opacity 320ms ease; }
       body.photo .panel { opacity: 0; }
+      body.photo #hg-stick, body.photo .hg-btn { opacity: 0; pointer-events: none; }
+
+      /* ---------------------------- small screens ----------------------------
+         A narrow screen is not a wide one with less in it.  The six readouts
+         are placed by corner, and on a phone the three along the top ran into
+         one another — the place name disappeared under the distance readout —
+         while the keyboard legend, four lines of it, ran off the bottom.
+         So: hearts left, place centred and shorter, compass right, and the
+         distance drops down the left under the hearts, which is the only
+         corner left free.
+
+         This is in here rather than with the touch controls because it is a
+         consequence of how wide the SCREEN is, not of what is pointing at it:
+         a narrow desktop window has the same problem and no thumbs. */
+      @media (max-width: 820px) {
+        #keys { display: none; }
+        .panel { font-size: 0.76rem; padding: 0.34rem 0.56rem; border-radius: 0.75rem; }
+        #hearts {
+          top: calc(0.5rem + env(safe-area-inset-top));
+          left: calc(0.5rem + env(safe-area-inset-left));
+          font-size: 0.98rem;
+        }
+        #place { top: calc(0.5rem + env(safe-area-inset-top)); max-width: 42vw; }
+        #place b { font-size: 0.8rem; }
+        #place small { font-size: 0.66rem; }
+        #clock {
+          top: calc(3.1rem + env(safe-area-inset-top));
+          left: calc(0.5rem + env(safe-area-inset-left));
+          right: auto; text-align: left; font-size: 0.7rem;
+        }
+        #compass {
+          top: calc(0.5rem + env(safe-area-inset-top));
+          right: calc(0.5rem + env(safe-area-inset-right));
+        }
+        #compass canvas { width: 60px; height: 60px; }
+        /* Clear of the thumb controls.  The buttons sit in the bottom-right
+           corner and the stick in the bottom-left, so a toast at a third of
+           the way up ran straight under "climb aboard" — which is the one
+           message you most need to be able to read at that moment. */
+        #toast { bottom: 41%; font-size: 0.88rem; max-width: 78vw; }
+        #prompt { bottom: 20rem !important; }
+        #start h1 { font-size: 1.5rem; }
+        #start p { font-size: 0.82rem; padding: 0 1.2rem; }
+      }
 
       /* The title card doubles as the click that starts the audio context and
        * takes the first frame's cost out of the opening view. */

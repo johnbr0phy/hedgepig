@@ -23,6 +23,7 @@ import { createDialogue } from './core/dialogue.js';
 import { createPuffs, createPrints } from './core/puffs.js';
 import { createHoglet } from './game/hoglet.js';
 import { createMission } from './game/mission.js';
+import { createTouch } from './core/touch.js';
 
 /* ------------------------------------------------------------------ *
  * the hedgepig adventure — v2.
@@ -132,6 +133,14 @@ const mission = createMission({
  * these ranges off *him* rather than off the camera — which is the invariant
  * the whole world is built on — so left running they would all have followed
  * him there and gone on being a robin in a butterscotch sky. */
+/* Thumbs.  Built lazily on the first real touch, so a laptop with a
+ * touchscreen gets the buttons only once somebody uses their hands. */
+const touch = createTouch({
+  canvas, chase,
+  onHop: () => { if (!mission.active) hog.jump(); },
+  onAct: () => tryBoard(),
+});
+
 mission.leaveBehind(
   scene.getObjectByName('critters'), characters.group,
   hoglet.parts?.root, hoglet.parts?.shadow,
@@ -199,8 +208,20 @@ let rollHeld = false;
 let lastDriveTap = { key: '', at: -1e9 };
 
 function driveHog() {
-  const f = (held.has('f') ? 1 : 0) - (held.has('b') ? 1 : 0);
-  const r = (held.has('r') ? 1 : 0) - (held.has('l') ? 1 : 0);
+  /* The thumb and the keys go down the **same** path from here: a screen-space
+   * forward and right, turned into a heading against wherever the camera is
+   * actually looking.  Two routes to `driveBy` would be two chances to
+   * disagree about which way "forward" is. */
+  const stick = touch.drive();
+  let f, r, throttle, roll;
+  if (stick) {
+    f = stick.f; r = stick.r; throttle = stick.throttle; roll = stick.roll;
+  } else {
+    f = (held.has('f') ? 1 : 0) - (held.has('b') ? 1 : 0);
+    r = (held.has('r') ? 1 : 0) - (held.has('l') ? 1 : 0);
+    throttle = Math.min(1, Math.hypot(f, r));
+    roll = rollHeld;
+  }
   if (!f && !r) {
     rollHeld = false;
     hog.driveBy(0, 0, false);
@@ -218,7 +239,7 @@ function driveHog() {
   const east = Math.cos(yaw) * f + Math.cos(yaw + RIGHT_OF) * r;
   const north = Math.sin(yaw) * f + Math.sin(yaw + RIGHT_OF) * r;
   // a diagonal is not faster than a straight line
-  hog.driveBy(Math.atan2(north, east), Math.min(1, Math.hypot(f, r)), rollHeld);
+  hog.driveBy(Math.atan2(north, east), throttle, roll);
 }
 
 /* Sound: unlocked by the first gesture (the autoplay rule and also simply
@@ -347,15 +368,7 @@ window.addEventListener('keydown', (e) => {
   /* **E is the whole point of the game.**  Deliberately a key and not a walk
    * -into-it trigger: everything else in this world happens by being near it,
    * and leaving the planet is the one thing that should take a decision. */
-  if (e.code === 'KeyE' && !mission.active && !mission.onMars) {
-    if (distance(hog.x, hog.z, PAD.x, PAD.z) < SHIP_REACH) {
-      held.clear(); rollHeld = false;
-      hud.setPrompt('');
-      mission.begin();
-    } else {
-      hud.flash('the ship is in the mire, and it is the tallest thing in the world');
-    }
-  }
+  if (e.code === 'KeyE') tryBoard();
   if (e.code === 'KeyP') {
     setPlanetView(!planetView);
     hud.flash(planetView ? 'the whole of it · P to come back down' : 'back in the grass');
@@ -652,15 +665,34 @@ function shipDistance() {
   return distance(hog.x, hog.z, PAD.x, PAD.z);
 }
 
+/** One way in, whichever thing asked — the key, or the thumb. */
+function tryBoard() {
+  if (mission.active || mission.onMars) return;
+  if (shipDistance() >= SHIP_REACH) {
+    hud.flash('the ship is in the mire, and it is the tallest thing in the world');
+    return;
+  }
+  held.clear();
+  rollHeld = false;
+  hud.setPrompt('');
+  touch.setAction('');
+  mission.begin();
+}
+
 function offerCockpit(dt) {
   if (mission.active || mission.onMars) {
-    if (boardPrompt) { boardPrompt = false; hud.setPrompt(''); }
+    if (boardPrompt) { boardPrompt = false; hud.setPrompt(''); touch.setAction(''); }
     return;
   }
   const near = shipDistance() < SHIP_REACH && !hog.under && !hog.afloat;
   if (near === boardPrompt) return;
   boardPrompt = near;
-  hud.setPrompt(near ? '<kbd>E</kbd> climb aboard' : '');
+  /* Two ways of offering the same thing, because there are two ways of
+   * taking it: a legend for the keyboard, a thumb-sized button for the
+   * glass.  The button only exists once somebody has actually touched the
+   * screen — see `touch.js`. */
+  hud.setPrompt(near && !touch.touching ? '<kbd>E</kbd> climb aboard' : '');
+  touch.setAction(near ? 'climb\naboard' : '');
   if (near) hud.flash('the hatch is open. it is a very long way up.');
 }
 

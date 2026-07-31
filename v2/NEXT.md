@@ -157,6 +157,20 @@ last run did *not* touch.
    the wood as on the road; place, weather and how tired he is could all
    colour it, and `VOICE` is one table to do it from.
 
+### Mobile
+
+1. **Nothing has been tried on a real phone.** The touch layer was built and
+   asserted against synthetic pointer events in a resized desktop Chrome,
+   which proves the geometry and proves nothing about frame rate, thermal
+   throttling, or what iOS Safari does with `env(safe-area-inset-*)` and a
+   full-screen canvas. `pixelBudget` caps resolution at 4.6 M px and has
+   never been measured on hardware that needed it.
+2. **The forty-two second flight cannot be skipped on a phone either.** It is
+   the one place a touch player is stuck, and there is no button for it.
+3. **You cannot look and walk at once.** One thumb drives, the other looks;
+   there is no way to do both with one hand, which is fine for a hedgehog and
+   would not be for anything with a hazard that chases.
+
 ### Debt and harness
 
 - `sky.js` and the critters now have coverage; the **weather fields** in
@@ -389,3 +403,29 @@ Newest last. One line each: date, workstream, what landed, what the sweep found.
   way home. And there is nothing to *do* on Mars: it is a red sphere with
   rocks on it and the ship he came in, which is a destination rather than a
   place.
+- **2026-07-31 — thumbs (interactive session).** 269/269, deployed. It was
+  **unplayable on a phone and it looked finished**: you could look, pinch and
+  tap to sow, and you could not walk, hop, roll or get into the rocket,
+  because all four were on keys. The screen splits down the middle now — a
+  floating stick on the left that appears wherever the thumb lands, look and
+  sow on the right, a hop button and a contextual "climb aboard" — and
+  **double-tap-and-hold rolls him**, which is the keys' gesture exactly.
+  Five things had to be got right: the zone is decided on touch-down and
+  never revisited, or a walk that crosses the middle is handed to the look
+  camera; the ring follows the thumb past its own edge, or the throttle pins
+  in a direction you cannot steer; a tap on the stick's side still sows,
+  because the stick had swallowed half the world's planting; there is one
+  owner per finger, via `chase.setPointerFilter`, rather than two handlers
+  racing on the same canvas; and the buttons fire on `pointerdown`, because a
+  `click` on glass is 300 ms late.
+  **And a fault the phone found that had always been there:** every toast in
+  the game was rendering as a vertical strip one word wide. `.panel` sets
+  `position: absolute` for the readouts placed by corner, and the span inside
+  `#toast` inherited it — out of flow, container collapsed to no width. It is
+  only obvious when the screen is narrow, which is why it took a phone.
+  **Sweep found / still open:** the flight has no touch way to skip it, and
+  it is the one place a phone player is stuck for forty-two seconds. There is
+  no way to look *and* walk at once with one thumb — fine for a hedgehog,
+  not for anything faster. And **none of this has run on a real device**:
+  it is resized desktop Chrome with synthetic pointer events, which gets the
+  geometry right and says nothing at all about frame rate on a phone.

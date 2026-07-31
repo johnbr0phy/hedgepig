@@ -946,6 +946,57 @@ there, and putting it through the queue would either lose it while the offer
 was open or block the queue for as long as he loitered. They are two kinds of
 message and the fault the queue fixed was that they had been one.
 
+### It was unplayable on a phone, and it looked finished
+
+You could look around, pinch, and tap to sow. **You could not walk.** Every
+input that moves him was on WASD, the hop was on space and the rocket was on
+E, so on a touch screen the game was a thing to look at. None of that is
+visible from a desktop, which is exactly why it lasted.
+
+`core/touch.js` is the missing half. The screen splits down the middle:
+**left is a floating stick**, right is look-and-sow as before.
+
+- **The stick appears wherever the thumb lands.** A stick painted at a fixed
+  place is one you have to look down to find; the point of a game about a
+  hedgehog is not looking at your own thumb.
+- **Double-tap-and-hold rolls him** — the same gesture as the keys, where two
+  taps of a direction tuck him. The first tap has already set him walking, so
+  the second is an *upgrade* rather than a fresh start, which is why it feels
+  immediate on both.
+- **The zone is decided on touch-DOWN and never revisited.** Testing whether
+  the *current* position is on the left hands your finger to the look camera
+  halfway through a walk.
+- **The ring follows the thumb past its own edge**, or your thumb wanders off
+  it during any real walk and the throttle silently pins at full in a
+  direction you can no longer steer.
+- **A tap on the stick's side still sows.** The stick claimed the whole left
+  half of the screen and took the sow tap with it, so half the world quietly
+  became unplantable and nothing said why.
+- **One owner per finger.** Both the stick and the chase camera want
+  `pointerdown` on the same canvas, and two handlers deciding what a finger
+  meant is a race settled by the order they were bound in.
+  `chase.setPointerFilter` lets the stick claim its own outright.
+- Buttons fire on `pointerdown`, not `click`: a click on a touch screen
+  arrives up to 300 ms late, and a hop you asked for a third of a second ago
+  has already been missed.
+
+The controls are built on the **first real touch** rather than off a
+user-agent string, so a laptop with a touchscreen gets both and gets the
+thumb buttons only once somebody uses their hands.
+
+**And the toast had been rendering as a vertical strip one word wide, all
+along.** `.panel` sets `position: absolute` for the six readouts that are
+placed by corner, and the span inside `#toast` was inheriting it — so it was
+out of flow, its container collapsed to no width, and every message in the
+game wrapped to one word per line. It is only obvious on a narrow screen,
+which is why finding it took putting the thing on a phone.
+
+The small-screen layout lives in `index.html` and not with the touch
+controls, because it is a consequence of how wide the **screen** is rather
+than of what is pointing at it — a narrow desktop window has the same problem
+and no thumbs. `touch.js` only injects its stylesheet on the first touch, so
+anything in there would never reach that window.
+
 ## 5. Things that will bite the next change
 
 - **A pitched roof is `s * +angle`, not `s * -angle`.** Rotating about +x by a
