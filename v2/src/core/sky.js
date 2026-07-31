@@ -41,9 +41,17 @@ export function buildSky(scene, radius = 300) {
     vertexShader: /* glsl */ `
       varying vec3 vWorld;
       void main() {
-        vec4 wp = modelMatrix * vec4( position, 1.0 );
-        vWorld = wp.xyz - cameraPosition;
-        gl_Position = projectionMatrix * viewMatrix * wp;
+        /* **Object space, not world space.**  This read the world offset
+         * from the camera and then took its y, which is elevation above
+         * the *world* horizontal — and on a planet the world horizontal is
+         * only the horizon at one single point on the surface.  Everywhere
+         * else the whole sky gradient was tilted against the skyline, by up
+         * to ninety degrees, which arrives as a hard cream wall with blue
+         * down one side of it and reads as a rendering fault.  The group is
+         * rotated into his own tangent frame now, so the dome's own +Y *is*
+         * up and the bands are level wherever he stands. */
+        vWorld = position;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
       }
     `,
     fragmentShader: /* glsl */ `
@@ -212,13 +220,20 @@ export function buildSky(scene, radius = 300) {
   const matB = flat({ color: PAL.cloudShade, map: tex, transparent: true, opacity: 0.34, depthWrite: false, fog: false, cache: false });
   matA.map.wrapS = matA.map.wrapT = THREE.ClampToEdgeWrapping;
 
+  /* **Smaller, further, and more of them.**  They were 34–88 m wide at
+   * 90–190 m out, which is up to 52° of arc: a single cloud filled half the
+   * sky, and because a cloud plane is brighter than the sky behind it what
+   * you actually saw was a hard-edged cream wall with blue down one side.  It
+   * reads as a rendering fault rather than as weather.  On a planet whose
+   * horizon is eleven metres away the sky is most of the frame, so a cloud
+   * has to be small enough that several of them fit in it. */
   const puffs = [];
-  for (let i = 0; i < 20; i++) {
-    const r = crng.range(90, 190);
+  for (let i = 0; i < 28; i++) {
+    const r = crng.range(150, 280);
     const a = crng.range(0, Math.PI * 2);
-    const w = crng.range(34, 88);
+    const w = crng.range(26, 58);
     const h = w * crng.range(0.24, 0.34);
-    const y = crng.range(22, 62);
+    const y = crng.range(34, 96);
     const g = new THREE.Group();
     const back = new THREE.Mesh(new THREE.PlaneGeometry(w, h), matB);
     back.position.set(1.2, -h * 0.1, -0.8);
@@ -345,6 +360,7 @@ export function buildSky(scene, radius = 300) {
   const _moonDir = new THREE.Vector3(0, -1, 0);
   const _anti = new THREE.Vector3();
   const _flat = new THREE.Vector3();
+  const _b = new THREE.Matrix4();
   let skyT = 0;
   let nightNow = 0;
   let wetNow = 0;
@@ -422,7 +438,7 @@ export function buildSky(scene, radius = 300) {
      * bare sun direction; the sky needs the moon's too, and they are not
      * derivable from one another once the moon has a phase.
      */
-    update(dt, camera, sky) {
+    update(dt, camera, sky, basis = null) {
       skyT += dt;
       group.position.copy(camera.position);
       const sunDir = sky?.sunDir || null;
@@ -449,6 +465,15 @@ export function buildSky(scene, radius = 300) {
        * held above the skyline: the sun sets, and the dome's glow — which is
        * aimed at the sun's bearing whether it is up or not — is what keeps
        * the horizon alive after it has gone. */
+      /* Everything below is in **his** frame — east, up, north — because the
+       * group carries his tangent basis.  `state.sunDir` is in that frame
+       * already; before the rotation it was being used as though it were
+       * world space, so the drawn sun and the light that cast the shadows
+       * were in different parts of the sky everywhere but one point. */
+      if (basis) {
+        _b.makeBasis(basis.east, basis.up, basis.north);
+        group.quaternion.setFromRotationMatrix(_b);
+      }
       if (sunDir) {
         _sunDir.copy(sunDir).normalize();
         disc.position.copy(_sunDir).multiplyScalar(radius * 0.9);
@@ -516,7 +541,7 @@ export function buildSky(scene, radius = 300) {
 
     /** Orbit view wants the sky where it actually is, not on the camera. */
     setOrbit(on) {
-      if (on) group.position.set(0, 0, 0);
+      if (on) { group.position.set(0, 0, 0); group.quaternion.identity(); }
     },
   };
 }

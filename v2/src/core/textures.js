@@ -38,26 +38,42 @@ export const cloudTex = () => memo('cloud', () => {
   const rng = rngKit(5150);
   x.clearRect(0, 0, 256, 128);
   x.fillStyle = '#ffffff';
+  /* **Nothing may touch the border.**  The lobes used to run from cx 26 with
+   * radii up to 50, which reaches x = -24 and gets clipped by the canvas: the
+   * cloud then has a dead-straight vertical cut down one side, and since a
+   * cloud plane is 34–88 m wide and can be 90 m from a camera on a planet
+   * with an 11 m horizon, that cut arrives as a hard diagonal seam right
+   * across the sky.  It reads as a rendering fault, which is what it is. */
   const lobes = 9;
   for (let i = 0; i < lobes; i++) {
     const t = i / (lobes - 1);
-    const cx = 26 + t * 204;
-    const r = 16 + Math.sin(t * Math.PI) * 34 * rng.range(0.8, 1.15);
-    const cy = 86 - Math.sin(t * Math.PI) * 22 * rng.range(0.7, 1.1);
+    const cx = 46 + t * 164;
+    const r = 13 + Math.sin(t * Math.PI) * 28 * rng.range(0.8, 1.15);
+    const cy = 84 - Math.sin(t * Math.PI) * 20 * rng.range(0.7, 1.1);
     x.beginPath();
     x.arc(cx, cy, r, 0, Math.PI * 2);
     x.fill();
   }
-  x.fillRect(20, 80, 216, 14);
-  // feather only the underside, so the top keeps a painted edge
-  const g = x.createLinearGradient(0, 78, 0, 100);
+  x.fillRect(40, 78, 176, 14);
+  // feather the underside and both ends; the top keeps its painted edge
+  const g = x.createLinearGradient(0, 76, 0, 98);
   g.addColorStop(0, 'rgba(255,255,255,1)');
   g.addColorStop(1, 'rgba(255,255,255,0)');
   x.globalCompositeOperation = 'destination-in';
   x.fillStyle = '#fff';
-  x.fillRect(0, 0, 256, 78);
+  x.fillRect(0, 0, 256, 76);
   x.fillStyle = g;
-  x.fillRect(0, 78, 256, 30);
+  x.fillRect(0, 76, 256, 30);
+  const h = x.createLinearGradient(0, 0, 30, 0);
+  h.addColorStop(0, 'rgba(255,255,255,0)');
+  h.addColorStop(1, 'rgba(255,255,255,1)');
+  x.fillStyle = h;
+  x.fillRect(0, 0, 30, 128);
+  const h2 = x.createLinearGradient(226, 0, 256, 0);
+  h2.addColorStop(0, 'rgba(255,255,255,1)');
+  h2.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = h2;
+  x.fillRect(226, 0, 30, 128);
   x.globalCompositeOperation = 'source-over';
   return toTexture(c);
 });

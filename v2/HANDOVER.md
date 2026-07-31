@@ -327,6 +327,43 @@ While proving it: **a snowfield at 2.15 key intensity clips every channel** and
 comes out as a flat sheet of paper. The snow colour is 0xdfe9f1, not white, so
 the shading has somewhere to go.
 
+### The sky did not know which way was up
+
+The dome shader took the view direction's **world** `.y` as elevation. On a
+planet the world horizontal is the horizon at exactly *one* point on the
+surface — flat (0, 0), where `dirAt` returns +Y — and everywhere else the
+entire sky gradient was tilted against the skyline, by up to ninety degrees.
+
+What that arrives as is a hard cream wall filling half the frame with blue
+down one side of it, and it reads so completely like a rendering fault that
+three other things were suspected first: the cloud planes, the sun's halo, and
+the new horizon glow. It had been there since the dome was written.
+
+The same frame error was under the sun and the moon: `state.sunDir` is in
+**his** tangent frame (east, up, north) and `seatLight` converts it properly
+for the light rig — but `sky.update` was using the same vector as though it
+were world space to place the disc. So the drawn sun and the light casting the
+shadows were in different parts of the sky everywhere but that one point.
+
+The fix is one rotation, not one conversion: the sky group carries his tangent
+basis, and the dome reads its own **object-space** y. Everything inside the
+group — clouds, stars, constellations, the aurora, the meteor, both discs —
+becomes correct at the same time, and `state.sunDir` can be used directly
+because group space now *is* his frame. `setOrbit` clears the rotation with
+the position.
+
+Found while chasing something else, which is the usual way here. The lesson is
+the general one: **on this world, any `.y` is a bug unless you can say which
+frame it is in.**
+
+### Clouds have to be small enough that several fit in the sky
+
+They were 34–88 m wide at 90–190 m out — up to 52° of arc each. One cloud
+filled half the sky, and since a cloud plane is brighter than the sky behind
+it, the result was another cream wall. 26–58 m at 150–280 m, and 28 of them.
+Their texture also had lobes running off the edge of its own canvas, which put
+a dead-straight vertical cut down one side of every cloud.
+
 ## 5. Things that will bite the next change
 
 - **A pitched roof is `s * +angle`, not `s * -angle`.** Rotating about +x by a

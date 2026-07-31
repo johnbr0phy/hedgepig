@@ -592,7 +592,7 @@ function frame() {
   }
 
   sky.setWet(state.wet);
-  sky.update(dt, camera, planetView ? null : state);
+  sky.update(dt, camera, planetView ? null : state, planetView ? null : basisAt(hog.x, hog.z));
   hud.update(dt);
 
   pipeline.render(dt);
@@ -634,7 +634,7 @@ if (import.meta.env?.DEV) {
       camera.up.set(0, 1, 0);
       camera.lookAt(CENTER);
     }
-    sky.update(0.0001, camera, planetView ? null : climate.state);
+    sky.update(0.0001, camera, planetView ? null : climate.state, planetView ? null : basisAt(hog.x, hog.z));
 
     camera.aspect = W / H;
     camera.updateProjectionMatrix();
