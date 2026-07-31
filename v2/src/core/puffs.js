@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { blobTex } from './textures.js';
 import { rngKit } from './util.js';
 import { positionAt, basisAt } from '../world/planet.js';
+import { slopeAt } from '../world/terrain.js';
 
 /* ------------------------------------------------------------------ *
  * Puffs: the little dusts of contact.
@@ -145,10 +146,39 @@ export function createPuffs(scene) {
 
 const PRINTS = 48;
 
+/**
+ * A hedgehog's print: a pad and five toes, drawn once into a texture.
+ *
+ * It was a rounded rectangle.  At 34 mm across nobody was going to count the
+ * toes, but a print is the one mark in this world you are *meant* to lean in
+ * at, and what you leaned in at was a smudge.  This costs one 32×32 canvas.
+ */
+function pawTex() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 32;
+  const x = c.getContext('2d');
+  x.fillStyle = '#fff';
+  // the pad: a rounded wedge, wider at the front
+  x.beginPath();
+  x.ellipse(16, 20, 7.5, 6, 0, 0, Math.PI * 2);
+  x.fill();
+  // five toes in an arc across the front of it
+  for (let i = 0; i < 5; i++) {
+    const a = -Math.PI / 2 + (i - 2) * 0.42;
+    x.beginPath();
+    x.ellipse(16 + Math.cos(a) * 9.5, 20 + Math.sin(a) * 9.5, 2.3, 2.8, a + Math.PI / 2, 0, Math.PI * 2);
+    x.fill();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.needsUpdate = true;
+  return t;
+}
+
 export function createPrints(scene) {
   const rng = rngKit(6607);
-  const geo = new THREE.PlaneGeometry(0.034, 0.024).rotateX(-Math.PI / 2);
+  const geo = new THREE.PlaneGeometry(0.040, 0.034).rotateX(-Math.PI / 2);
   const mat = new THREE.MeshBasicMaterial({
+    map: pawTex(),
     transparent: true, opacity: 0.34, depthWrite: false,
     polygonOffset: true, polygonOffsetFactor: -1,
   });
@@ -166,6 +196,10 @@ export function createPrints(scene) {
   const _p = new THREE.Vector3();
   const _c = new THREE.Color();
   const _zero = new THREE.Matrix4().makeScale(0, 0, 0);
+  const _slope = { nx: 0, nz: 0 };
+  const _up = new THREE.Vector3();
+  const _east = new THREE.Vector3();
+  const _north = new THREE.Vector3();
   let head = 0;
   let side = 1;
   for (let i = 0; i < PRINTS; i++) mesh.setMatrixAt(i, _zero);
@@ -175,8 +209,22 @@ export function createPrints(scene) {
     const k = head;
     head = (head + 1) % PRINTS;
     side = -side;
+    /* **Seated on the ground, not on the planet.**  `basisAt` gives the
+     * sphere's own up, which is the right frame for a prop but not for a
+     * decal: on any real slope a flat quad laid against the sphere's up
+     * lifts at the uphill edge and buries itself at the downhill one, and a
+     * footprint is exactly the thing you notice that on.  The terrain's own
+     * gradient goes in first, and the tangents are rebuilt around it so the
+     * basis stays orthonormal. */
     const b = basisAt(x, z);
-    _m.makeBasis(b.east, b.up, b.north);
+    slopeAt(x, z, _slope);
+    _up.copy(b.up)
+      .addScaledVector(b.east, -_slope.nx)
+      .addScaledVector(b.north, -_slope.nz)
+      .normalize();
+    _east.copy(b.east).addScaledVector(_up, -b.east.dot(_up)).normalize();
+    _north.crossVectors(_up, _east).normalize();
+    _m.makeBasis(_east, _up, _north);
     _m.setPosition(positionAt(x, y + 0.004, z, _p));
     _r.makeRotationY(-hd);
     _m.multiply(_r);

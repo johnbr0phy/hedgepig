@@ -34,12 +34,6 @@ import { clamp, lerp, sstep, TAU } from '../core/util.js';
 export const CIRC = 300;
 export const R = CIRC / TAU;
 
-/**
- * Ten equal shares of a 28 650 m² sphere is 2 865 m² each — a disc 30 m
- * across.  v2's original "ten places of thirty metres" survives as the size
- * of a place rather than the length of one.
- */
-export const PLACE_SPAN = 2 * R * Math.asin(1) / 5;   // ~30 m, for reference
 /** How wide the blend between two places is, in metres of arc. */
 export const XF = 9;
 
@@ -304,11 +298,6 @@ export function townAt(x, z) {
 export const hardAt = (x, z) => Math.max(lakeAt(x, z), roadAt(x, z), townAt(x, z));
 
 /* ------------------------------ longitude ------------------------------ */
-
-/** Fold a longitude into [-CIRC/2, CIRC/2). */
-export function wrapX(x) {
-  return ((((x + CIRC / 2) % CIRC) + CIRC) % CIRC) - CIRC / 2;
-}
 
 /** Shortest signed difference between two longitudes, in metres of arc. */
 export function wrapDelta(a, b) {

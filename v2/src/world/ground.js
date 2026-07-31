@@ -190,9 +190,12 @@ export function buildWater(parent) {
 
   /* A polar grid over the lake's own centre, laid out with the exponential
    * map so it stays a circle on the sphere rather than on the page. */
-  const RINGS = 12, SEG = 40, RAD = LAKE_R + 1.5;
+  /* Sixteen rings rather than twelve, because the shoreline is now carried
+   * per vertex and the contour wants resolving. */
+  const RINGS = 16, SEG = 56, RAD = LAKE_R + 1.5;
   const verts = [];
   const uvs = [];
+  const deep = [];        // how much water is under each vertex
   const idx = [];
   const at = { x: 0, z: 0 };
   for (let r = 0; r <= RINGS; r++) {
@@ -202,6 +205,12 @@ export function buildWater(parent) {
       offsetFrom(CENTRE[LAKE], Math.cos(a) * d, Math.sin(a) * d, at);
       verts.push(at.x, WATER_Y, at.z);
       uvs.push(0.5 + Math.cos(a) * (d / RAD) * 0.5, 0.5 + Math.sin(a) * (d / RAD) * 0.5);
+      /* The one thing the sheet never knew: **how deep it is**.  It was a
+       * single flat colour drawn to a fixed radius and simply clipped where
+       * the bed came up through it, so it had no shore — the water just
+       * stopped, at a circle, in the middle of the ground.  Depth is a bake:
+       * the bed does not move. */
+      deep.push(Math.max(0, WATER_Y - heightAt(at.x, at.z)));
     }
   }
   for (let r = 0; r < RINGS; r++) {
@@ -216,8 +225,42 @@ export function buildWater(parent) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setAttribute('aDeep', new THREE.Float32BufferAttribute(deep, 1));
   geo.setIndex(idx);
   geo.computeVertexNormals();
+
+  /* What the depth buys, in one patch:
+   *  - the sheet **ends where the water ends**, instead of at a circle;
+   *  - a pale band of foam in the last hand's breadth of it;
+   *  - the deep middle goes darker and bluer than the shallows, which is the
+   *    single cue that says "this is a body of water" rather than "this is a
+   *    blue disc";
+   *  - and a slow glitter that only happens out where it is deep.
+   */
+  const wTime = { value: 0 };
+  const prevWater = mat.onBeforeCompile;
+  mat.onBeforeCompile = (shader, renderer) => {
+    prevWater?.call(mat, shader, renderer);
+    shader.uniforms.uWTime = wTime;
+    shader.uniforms.uDeepCol = { value: new THREE.Color(PAL.waterDeep) };
+    shader.uniforms.uFoam = { value: new THREE.Color(PAL.waterFoam) };
+    shader.vertexShader = 'attribute float aDeep;\nvarying float vDeep;\n' +
+      shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvDeep = aDeep;');
+    shader.fragmentShader = 'uniform float uWTime;\nuniform vec3 uDeepCol, uFoam;\nvarying float vDeep;\n' +
+      shader.fragmentShader
+        .replace(
+          '#include <color_fragment>',
+          `#include <color_fragment>
+          float shallow = smoothstep( 0.34, 0.02, vDeep );
+          diffuseColor.rgb = mix( uDeepCol, diffuseColor.rgb, shallow * 0.55 + 0.45 );
+          float foam = smoothstep( 0.09, 0.035, vDeep ) * ( 1.0 - smoothstep( 0.035, 0.004, vDeep ) );
+          foam *= 0.55 + 0.45 * sin( uWTime * 1.7 + vDeep * 60.0 );
+          diffuseColor.rgb = mix( diffuseColor.rgb, uFoam, clamp( foam, 0.0, 1.0 ) * 0.7 );
+          diffuseColor.a *= smoothstep( 0.004, 0.05, vDeep );`
+        );
+  };
+  const prevWKey = mat.customProgramCacheKey?.bind(mat);
+  mat.customProgramCacheKey = () => `water|${prevWKey ? prevWKey() : ''}`;
 
   const mesh = new THREE.Mesh(geo, mat);
   mesh.receiveShadow = true;
@@ -235,6 +278,7 @@ export function buildWater(parent) {
       // the ripple map drifts; the sheet itself never moves
       tex.offset.y -= dt * 0.012;
       tex.offset.x += dt * 0.004;
+      wTime.value += dt;
     },
   };
 }
