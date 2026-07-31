@@ -32,6 +32,10 @@ last run did *not* touch.
    the shadow camera has bitten twice before — read HANDOVER §3 first.
 5. **Cel banding on large smooth surfaces** — the lake sheet and the sky dome
    in orbit. The ramp was tuned on props at two metres, not on a 47 m sphere.
+6. **The clouds do not cast anything on the ground.** They dim the key light
+   when one crosses the sun, which is the feel of it; an actual moving pool of
+   shade on the meadow is the sight of it, and the shadow camera at ±17 m
+   cannot reach 200 m clouds — it wants a projected mask, not a shadow map.
 6. **The far field has no aerial perspective.** Fog is one colour at one
    density; distant hills should also desaturate and lift, not just tint.
 7. **Inverted-hull outlines after the static merge** — check that `noOutline`
@@ -230,3 +234,15 @@ Newest last. One line each: date, workstream, what landed, what the sweep found.
   they still read as too quiet, the size is one number. And `weather.js` still
   spawns motes named for butterflies and bees, which now duplicates real
   animals.
+- **2026-07-31 — clouds in three dimensions (interactive session).** 157/157.
+  Researched volumetric raymarching and deliberately did not build it: a
+  nested loop per pixel on a frame already at 500 calls, and photoreal next to
+  four-band toon ramps. Took the *shading model* instead and put it on
+  low-poly geometry — real Henyey–Greenstein forward scatter at g≈0.72 for the
+  silver lining, Beer by silhouette proxy, the powder effect for the
+  cauliflower, sky above and land below. 26 draw calls, ~14k triangles. A
+  cloud crossing the sun now dims the meadow. Two things needed measuring: a
+  *ring* of clouds has nothing overhead, so the crossing happened zero per
+  cent of the time until they went on a dome; and the occlusion cone has to be
+  wider than the cloud, because at the true radius it is a one-per-cent event
+  you never see.

@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { PAL } from './palette.js';
 import { flat } from './toon.js';
-import { cloudTex, starTex } from './textures.js';
+import { starTex } from './textures.js';
+import { buildClouds } from './clouds.js';
 import { rngKit, clamp } from './util.js';
 
 /* ------------------------------------------------------------------ *
@@ -212,42 +213,8 @@ export function buildSky(scene, radius = 300) {
   stars.frustumCulled = false;
   group.add(stars);
 
-  /* --- flat clouds: billboarded puffs, no depth writes --- */
-  const tex = cloudTex();
-  const crng = rngKit(7781);
-  const clouds = new THREE.Group();
-  const matA = flat({ color: PAL.cloud, map: tex, transparent: true, opacity: 0.66, depthWrite: false, fog: false, cache: false });
-  const matB = flat({ color: PAL.cloudShade, map: tex, transparent: true, opacity: 0.34, depthWrite: false, fog: false, cache: false });
-  matA.map.wrapS = matA.map.wrapT = THREE.ClampToEdgeWrapping;
-
-  /* **Smaller, further, and more of them.**  They were 34–88 m wide at
-   * 90–190 m out, which is up to 52° of arc: a single cloud filled half the
-   * sky, and because a cloud plane is brighter than the sky behind it what
-   * you actually saw was a hard-edged cream wall with blue down one side.  It
-   * reads as a rendering fault rather than as weather.  On a planet whose
-   * horizon is eleven metres away the sky is most of the frame, so a cloud
-   * has to be small enough that several of them fit in it. */
-  const puffs = [];
-  for (let i = 0; i < 28; i++) {
-    const r = crng.range(150, 280);
-    const a = crng.range(0, Math.PI * 2);
-    const w = crng.range(26, 58);
-    const h = w * crng.range(0.24, 0.34);
-    const y = crng.range(34, 96);
-    const g = new THREE.Group();
-    const back = new THREE.Mesh(new THREE.PlaneGeometry(w, h), matB);
-    back.position.set(1.2, -h * 0.1, -0.8);
-    const front = new THREE.Mesh(new THREE.PlaneGeometry(w, h), matA);
-    g.add(back, front);
-    g.position.set(Math.cos(a) * r, y, Math.sin(a) * r);
-    g.lookAt(0, y * 0.55, 0);
-    g.renderOrder = -9;
-    g.userData = { ang: a, rad: r, baseY: y, drift: crng.range(0.004, 0.014) * crng.sign(), bob: crng.range(0, Math.PI * 2) };
-    clouds.add(g);
-    puffs.push(g);
-  }
-  clouds.frustumCulled = false;
-  group.add(clouds);
+  /* --- clouds: solid, and lit by the sun.  See `core/clouds.js`. --- */
+  const clouds = buildClouds(group, radius);
 
   /* --- one shooting star, for the deepest part of the night --- */
   const shootMat = new THREE.MeshBasicMaterial({
@@ -360,6 +327,7 @@ export function buildSky(scene, radius = 300) {
   const _moonDir = new THREE.Vector3(0, -1, 0);
   const _anti = new THREE.Vector3();
   const _flat = new THREE.Vector3();
+  const sunLocal = new THREE.Vector3(0, 1, 0);
   const _b = new THREE.Matrix4();
   let skyT = 0;
   let nightNow = 0;
@@ -368,12 +336,17 @@ export function buildSky(scene, radius = 300) {
   return {
     group, dome, clouds, stars, disc, halo, moon, moonHalo,
 
+    /** How much cloud stands between him and the sun, 0 to 1. */
+    sunOcclusion: (sun) => clouds.sunOcclusion(sun),
+
+
     /** Sky colours for the hour. `night` is 0 by day, 1 at full dark. */
     setColors({
-      top, mid, haze, night = 0, cloud, cloudShade, moonPhase = 0.5, aurora = 0,
+      top, mid, haze, night = 0, cloud, cloudShade, cloudBase, moonPhase = 0.5, aurora = 0,
       glow = null, counter = null, glowAmt = 0,
-      sunUp = 1, moonUp = 0, starAmt = null,
+      sunUp = 1, moonUp = 0, starAmt = null, sun = null,
     }) {
+      if (sun) sunLocal.copy(sun);
       auroraNow = aurora;
       /* Stars come up with the *sun going down*, not with a night scalar that
        * is still zero a long way past sunset — `starAmt` reaches them before
@@ -415,10 +388,14 @@ export function buildSky(scene, radius = 300) {
       moonHaloMat.opacity = moonUp * night * fullness * 0.22;
       moonHalo.visible = moonHaloMat.opacity > 0.01;
 
-      if (cloud) matA.color.set(cloud);
-      if (cloudShade) matB.color.set(cloudShade);
-      matA.opacity = 0.66 - 0.22 * night;
-      matB.opacity = 0.34 - 0.12 * night;
+      /* The clouds are solid now and take a full lighting set rather than a
+       * pair of flat tints — see `core/clouds.js`.  The sun goes in in *his*
+       * frame and the group's rotation carries it to world space. */
+      clouds.setColors({
+        sun: sunLocal, quaternion: group.quaternion,
+        lit: cloud, shade: cloudShade, base: cloudBase, glow: glow || 0xffd9a2,
+        silver: 0.35 + 0.75 * clamp(glowAmt, 0, 1),
+      });
     },
 
     /**
@@ -495,16 +472,7 @@ export function buildSky(scene, radius = 300) {
       /* Each cloud on its own ring at its own pace, some against the rest —
        * one shared rotation reads as the *sky* turning, which it does anyway
        * at dusk, and two of the same motion is a turntable. */
-      for (const p of puffs) {
-        const u = p.userData;
-        u.ang += dt * u.drift;
-        p.position.set(
-          Math.cos(u.ang) * u.rad,
-          u.baseY + Math.sin(skyT * 0.05 + u.bob) * 1.6,
-          Math.sin(u.ang) * u.rad
-        );
-        p.lookAt(0, u.baseY * 0.55, 0);
-      }
+      clouds.update(dt);
 
       /* The aurora breathes: each curtain swells and sways on its own. */
       auroraGroup.visible = auroraNow > 0.03;

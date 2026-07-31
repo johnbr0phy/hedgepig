@@ -472,6 +472,58 @@ pool nobody meets. The next thing built for the world wants a sentence about
 *how often you will be standing near one*, and the harness now asserts exactly
 that — walk to the far side of the planet, and count how many are within 12 m.
 
+### Clouds: the lighting model, not the integration
+
+The clouds were flat cel quads that turned to face you — fine as painted
+background and completely inert: the same colour whether the sun was behind
+them or over your shoulder, so the one thing a sky does in an evening did not
+happen.
+
+**Volumetric raymarching was researched and deliberately not built.** It is the
+right answer for a photoreal sky and the wrong one here twice over: it costs a
+nested loop per pixel (a view ray, and a second ray to the sun at every
+sample), and the standard remedies — quarter-res cloud pass, temporal
+upscaling — are a whole machinery this project does not have. And it would
+look photoreal, next to four-band toon ramps and a screen-space ink pass. The
+rule in §5 is that a change which makes this read as generic 3D is wrong
+however clean the code is.
+
+What *was* taken is the shading model, applied to ordinary low-poly geometry
+for a few instructions:
+
+- **Henyey–Greenstein forward scattering**, the real phase function at g≈0.72.
+  Droplets scatter light forward, so a cloud between you and the sun glows.
+  This is the silver lining and it is most of the effect.
+- **Beer's law by proxy.** Thickness on a mesh is the silhouette: a face
+  edge-on to you has a lot of cloud behind it. So the glow lives at the rim,
+  which is where it lives.
+- **The powder effect** — darkening just inside the lit edge, which is what
+  gives a cumulus its cauliflower. The reference is candid that it is not
+  physical; it is kept for the same reason it was invented.
+- **Sky above, land below** — the top takes the sky, the base takes the haze,
+  and the base is the part that goes pink first.
+
+Cost: 26 draw calls and about 14 000 triangles.
+
+Two things had to be found by measuring:
+
+- **A ring of clouds has nothing over your head.** They were placed at a
+  radius and a height, which puts every one of them between 8° and 36° of
+  elevation — so near noon the sun is above all of them and "a cloud goes
+  over and the meadow dims" happened *zero* per cent of the time. They are on
+  a dome now, weighted low because you spend this game looking down, and the
+  sun is behind cloud 4–19 % of the hour.
+- **The occlusion cone is deliberately wider than the cloud.** At the true
+  angular radius the sun is behind something about one per cent of the time —
+  honest for a fair-weather sky, and it means you never once see it while you
+  are watching.
+
+And one self-inflicted trap worth recording: `season.js` had a local
+`const damp` for how damp the season is, which **silently shadows the imported
+`damp` easing function** for the rest of the scope. It surfaced four hundred
+lines later as `damp is not a function`, in a code path added long afterwards.
+It is `wetness` now.
+
 ## 5. Things that will bite the next change
 
 - **A pitched roof is `s * +angle`, not `s * -angle`.** Rotating about +x by a

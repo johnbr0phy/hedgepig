@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { PAL, SEASONS, NIGHT } from '../core/palette.js';
 import { applyPalette, setShadowTint } from '../core/toon.js';
 import { setOutlineColor } from '../core/outline.js';
-import { clamp, lerp, TAU, sstep } from '../core/util.js';
+import { clamp, lerp, damp, TAU, sstep } from '../core/util.js';
 
 /* ------------------------------------------------------------------ *
  * The year and the day.
@@ -209,6 +209,8 @@ export function createClimate({
     wet: 0,
     /** 0 clear, 1 a front sitting right over him. */
     front: 0,
+    /** How much cloud is between him and the sun this instant. */
+    shaded: 0,
     /** The true sun, which goes below the horizon. */
     sunDir: new THREE.Vector3(-0.4, 0.8, 0.45),
     /** The true moon, wherever its phase has put it. */
@@ -283,9 +285,13 @@ export function createClimate({
       + 0.22 * Math.sin(state.t * 0.0071 + 2.3)
       + 0.10 * Math.sin(state.t * 0.0523 + 5.1);
     // how much of the year's weather this season is inclined to give
-    const damp = 0.30 * w[0] + 0.02 * w[1] + 0.46 * w[2] + 0.34 * w[3];
-    state.front = sstep(0.72 - damp * 0.52, 0.94 - damp * 0.52, wander);
-    state.wet = state.front * (0.45 + 0.55 * damp);
+    /* Named `wetness`, not `damp`: `damp` is the easing function this whole
+     * file imports, and a local of that name silently shadows it for the rest
+     * of the scope — which is the sort of thing that surfaces four hundred
+     * lines later as "damp is not a function". */
+    const wetness = 0.30 * w[0] + 0.02 * w[1] + 0.46 * w[2] + 0.34 * w[3];
+    state.front = sstep(0.72 - wetness * 0.52, 0.94 - wetness * 0.52, wander);
+    state.wet = state.front * (0.45 + 0.55 * wetness);
 
     /* Snow is rain that is cold enough, and **it lies and it melts**.  As a
      * direct function of the winter weight it appeared and vanished on the
@@ -305,7 +311,7 @@ export function createClimate({
     const base = 0.10 + 0.14 * w[2] + 0.10 * w[3] + 0.05 * w[0];
     const swell = 0.6 + 0.4 * Math.sin(state.t * 0.11 + Math.sin(state.t * 0.043) * 2.1);
     const gust = Math.max(0, Math.sin(state.t * 0.31) - 0.82) * 3.4;    // brief, a few times a minute
-    const blow = sstep(0.58 - damp * 0.42, 0.88 - damp * 0.42, wander);
+    const blow = sstep(0.58 - wetness * 0.42, 0.88 - wetness * 0.42, wander);
     state.wind = base * (swell + gust) * (1 + blow * 1.15);
 
     // leaves come down with the season, and far faster when it blows
@@ -422,10 +428,16 @@ export function createClimate({
     sky.setColors({
       top: skyTop, mid: skyMid, haze: skyHaze, night: dk,
       glow: skyGlow, counter: skyCounter, glowAmt,
+      sun: state.sunDir,
+      /* Three colours now rather than two: the sunlit face, the face turned
+       * away, and the base — a cloud's underside takes the haze off the land
+       * and is the part that goes pink first in an evening. */
       cloud: _a.set(PAL.cloud).lerp(_b.set(0x8f9ac4), dk)
-        .lerp(skyGlow, state.golden * 0.55).getHex(),
+        .lerp(skyGlow, state.golden * 0.62).getHex(),
       cloudShade: _a.set(PAL.cloudShade).lerp(_b.set(0x5c648e), dk)
-        .lerp(skyCounter, state.golden * 0.40).getHex(),
+        .lerp(skyCounter, state.golden * 0.45).getHex(),
+      cloudBase: _a.set(0xc6cbdd).lerp(_b.set(0x3c4166), dk)
+        .lerp(skyGlow, state.golden * 0.55 + state.twilight * 0.35).getHex(),
       moonPhase: state.moonPhase,
       moonUp: sstep(-0.06, 0.06, state.moonAlt),
       sunUp: sstep(-0.05, 0.05, alt),
@@ -464,14 +476,27 @@ export function createClimate({
      * shadow pointing at a sun that set two minutes ago is the kind of thing
      * nobody names but everybody feels.  What lights the blue hour is the
      * hemisphere and the fill, which is also what lights it outdoors. */
+    /* **A cloud going over dims the meadow.**  The other half of "clouds
+     * interact with sunlight", and the half you feel rather than see: the key
+     * drops and the shade comes up for the few seconds one takes to cross,
+     * and then it is bright again.  Costs a handful of dot products.
+     *
+     * Read from the sky's *previous* frame — `climate.update` runs before
+     * `sky.update` — which at a cloud's drift rate is a few thousandths of a
+     * degree out of date. */
+    const cover = sky.sunOcclusion ? sky.sunOcclusion(state.sunDir) : 0;
+    // damped, so the light never steps — a cloud takes seconds to cross
+    state.shaded = damp(state.shaded, cover, 1.6, dt);
+    const shadeDip = 1 - state.shaded * 0.55;
+
     seasonColor('sun', w, _a);
     // the low sun is its own colour, not the noon one dimmed
     _a.lerp(skyGlow, state.golden * 0.62);
     _b.set(NIGHT.sun);
     sun.color.copy(state.keyIsSun ? _a : _b.set(0xc3d2ff));
-    sun.intensity = state.keyIsSun
+    sun.intensity = (state.keyIsSun
       ? lerp(2.15, 0.95, state.golden) * sunKey * lerp(1, 0.72, state.wet)
-      : (0.26 + 0.46 * moonKey) * dk * lerp(1, 0.6, state.wet);
+      : (0.26 + 0.46 * moonKey) * dk * lerp(1, 0.6, state.wet)) * shadeDip;
 
     seasonColor('fill', w, _a);
     _b.set(NIGHT.fill);
