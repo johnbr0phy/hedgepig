@@ -158,7 +158,14 @@ hog.onFootfall = () => {
   if (s.snow > 0.45) prints.stamp(hog.x, hog.y, hog.z, hog.hd, 0x8f9ab8);
   else if (s.wet > 0.4) prints.stamp(hog.x, hog.y, hog.z, hog.hd, 0x5f5444);
 };
-hog.onSniff = () => audio.sniff();
+/* His voice.  The animator fires these as often as the *animation* wants;
+ * `audio` decides how often he actually says anything — see the voice gate
+ * in `core/audio.js`.  Wiring the sounds straight to the animation gave a
+ * hedgehog snuffling without pause, forever. */
+hog.onSniff = () => audio.snuffle();
+hog.onNuzzle = () => audio.chunter();
+hog.onPleased = () => audio.peep();
+hog.onGrumble = () => audio.grumble();
 hog.onSneeze = () => {
   audio.sneeze();
   puffs.burst(hog.x, hog.y + 0.07, hog.z, { n: 3, up: 0.05, spread: 0.12, px: 12, color: 0xe8dcc8 });

@@ -67,6 +67,9 @@ const { createGame } = await import('./src/game/game.js');
 const { CULVERT_Z } = await import('./src/world/places/road.js');
 const { cel, applyPalette } = await import('./src/core/toon.js');
 const { buildSky } = await import('./src/core/sky.js');
+const { createVoiceGate, VOICE } = await import('./src/core/audio.js');
+const { rngKit: rngSeedKit } = await import('./src/core/util.js');
+const rngSeq = (seed) => { const r = rngSeedKit(seed); return () => r.next(); };
 const { createCritters } = await import('./src/world/critters.js');
 
 /* ------------------------------- reporting ------------------------------- */
@@ -1169,6 +1172,63 @@ function sMerge() {
     'sort order is load-bearing');
 }
 
+function sVoice() {
+  /* **An animation rate is not an utterance rate.**  `anim.js` twitches his
+   * nose every half-second to two seconds, which is right to look at, and
+   * every one of those used to fire a sound — so he snuffled continuously,
+   * forever.  The gate is the fix and it is the part that can be tested
+   * without a sound card. */
+  let dice = 0;
+  const seq = [0.05, 0.9, 0.1, 0.95, 0.02, 0.5];      // a rigged d20
+  const gate = createVoiceGate({ gap: 2.6, rng: () => seq[dice++ % seq.length] });
+
+  ok(gate.try(0, 1) === true, 'the first thing he wants to say, he says');
+  ok(gate.try(1.0, 1) === false, 'and then he is quiet for a moment',
+    'no second utterance inside the gap');
+  ok(gate.try(2.5, 1) === false, 'right to the end of it');
+  ok(gate.try(2.7, 1) === true, 'and then he may speak again');
+
+  /* The chance is asked *after* the gap, so a refused roll does not restart
+   * the clock — otherwise a run of bad luck makes him mute for a minute. */
+  dice = 1;                                            // next roll is 0.9
+  const g2 = createVoiceGate({ gap: 1, rng: () => seq[dice++ % seq.length] });
+  ok(g2.try(10, 0.2) === false, 'a low chance usually declines');
+  ok(g2.quietFor(10) > 100, 'and declining does not count as speaking',
+    'the gap clock is untouched by a refused roll');
+
+  /* One clock across every kind of utterance, so he never talks over
+   * himself: a chunter cannot land on top of a snuffle. */
+  const g3 = createVoiceGate({ gap: 2.6, rng: () => 0 });
+  ok(g3.try(0, 1, 1.2) === true && g3.try(0.5, 1, 1.2) === false,
+    'and one clock covers every kind of noise he makes');
+
+  /* Now the rate it actually produces, driven by the real animator.  This is
+   * the number the change was about: "occasionally", not "constantly". */
+  const parts = buildHog();
+  const anim = createAnimator(parts, 4242);
+  const voice = createVoiceGate({ gap: VOICE.gap, rng: rngSeq(90210) });
+  const s = {
+    gait: 0, stride: 0, bob: 0, lean: 0, roll: 0, curl: 0, ball: 0, spin: 0,
+    hurt: 0, shiver: 0, snuffle: 1, celebrate: 0, balk: 0, carry: 0, shake: 0,
+    night: 0, lookYaw: 0, turning: 0, legSpeed: 1, speed: 0, walked: 0,
+  };
+  let sniffs = 0, said = 0, t = 0;
+  s.onSniff = () => { sniffs++; if (voice.try(t, VOICE.snuffle)) said++; };
+  s.onNuzzle = () => { if (voice.try(t, VOICE.chunter, VOICE.chunterGap)) said++; };
+  const MINUTES = 4;
+  for (let i = 0; i < 60 * 60 * MINUTES; i++) {
+    t += 1 / 60;
+    anim.update(s, 1 / 60, t);
+  }
+  const perMin = said / MINUTES;
+  ok(sniffs / MINUTES > 30, 'his nose still works as often as it ever did',
+    `${f(sniffs / MINUTES, 0)} twitches a minute`);
+  ok(perMin >= 3 && perMin <= 8, 'but he only makes a noise now and then — one every ten seconds or so',
+    `${f(perMin, 1)} a minute, from ${f(sniffs / MINUTES, 0)} twitches`);
+  ok(said < sniffs / 8, 'and nine twitches in ten are silent',
+    `${f((said / sniffs) * 100, 0)} % of twitches are audible`);
+}
+
 function sPersist() {
   /* The save: a browser thing, shimmed here.  What must hold is the round
    * trip — one game writes its numbers, a second game built over the same
@@ -1349,7 +1409,7 @@ const SCENARIOS = {
   plan: sPlan, terrain: sTerrain, planet: sPlanet, clock: sClock,
   open: sOpen, gait: sGait, roll: sRoll, face: sFace, walk: sWalk, idle: sIdle, back: sBack, water: sWater, boat: sBoat,
   road: sRoad, roadmiss: sRoadmiss, abandon: sAbandon,
-  burrow: sBurrow, grass: sGrass, solid: sSolid, persist: sPersist, palette: sPalette, weather: sWeather, sky: sSky, slow: sSlow, merge: sMerge, critters: sCritters, nan: sNan,
+  burrow: sBurrow, grass: sGrass, solid: sSolid, persist: sPersist, palette: sPalette, weather: sWeather, sky: sSky, slow: sSlow, merge: sMerge, voice: sVoice, critters: sCritters, nan: sNan,
 };
 
 const arg = process.argv[2] || 'all';

@@ -364,6 +364,34 @@ it, the result was another cream wall. 26–58 m at 150–280 m, and 28 of them.
 Their texture also had lobes running off the edge of its own canvas, which put
 a dead-straight vertical cut down one side of every cloud.
 
+### An animation rate is not an utterance rate
+
+A hedgehog is a nose with legs on, so `anim.js` twitches his nose every half
+second to two seconds. That is right to *look* at, and it was wired straight
+to `audio.sniff()` — one sound per twitch, which is a hedgehog snuffling
+continuously, forever. It stops being charming inside a minute and then it is
+the only thing in the mix.
+
+The nose keeps its rate. The **voice** is gated: `createVoiceGate` holds one
+shared clock across every kind of utterance, so a chunter cannot land on top
+of a snuffle and he never talks over himself, and each kind asks with its own
+probability. Roughly one small noise every ten seconds comes out of it — the
+harness asserts the *rate*, in noises per minute, reading `VOICE` rather than
+carrying its own copy of the tuning.
+
+Two details worth keeping:
+
+- **The chance is asked after the gap, and a refused roll does not restart the
+  clock.** The other way round, a run of bad luck makes him mute for a minute.
+- **A gap is a floor, not a schedule.** Quiet for at least that long, and then
+  the dice decide. Clocked noises read as a cuckoo clock; this reads as a
+  creature.
+
+And on the sounds themselves: a snuffle that is only filtered noise is a
+draught under a door. Every utterance is breath *plus* a little voicing — the
+low triangle under each puff is the whole difference between a hedgehog and a
+bellows.
+
 ## 5. Things that will bite the next change
 
 - **A pitched roof is `s * +angle`, not `s * -angle`.** Rotating about +x by a

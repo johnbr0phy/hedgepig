@@ -337,9 +337,11 @@ export class Hog {
      * and a paw at the wet, which is a hedgehog saying no. */
     if (this._balkOnArrive) {
       this.balk = 1.4;
+      this.onGrumble?.();
       this._balkOnArrive = false;
     } else {
       this.celebrate = 1.1;
+      this.onPleased?.();
     }
   }
 
@@ -380,7 +382,8 @@ export class Hog {
     if (this.canStand(this.x, nz)) { this.z = nz; this.blocked = 0; return true; }
     this.blocked += dt;
     // he gives up on a target he cannot reach rather than pressing into it
-    if (this.blocked > 1.1) { this.stop(); this.blocked = 0; }
+    // giving up on somewhere he cannot reach is worth a small complaint
+    if (this.blocked > 1.1) { this.stop(); this.blocked = 0; this.onGrumble?.(); }
     return false;
   }
 

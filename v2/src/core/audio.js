@@ -38,6 +38,56 @@ function noiseBuffer(ctx) {
   return buf;
 }
 
+/**
+ * The occasional-speech gate.
+ *
+ * Pulled out and exported because it is the whole idea and it is the one part
+ * of the audio that can be tested without a sound card: given a clock and a
+ * dice roll it says whether he may make a noise. One shared `last` across
+ * every kind of utterance, so a snuffle and a chunter cannot land on top of
+ * each other and he never talks over himself.
+ *
+ * `gap` is a floor, not a schedule — he is quiet for at least that long, and
+ * then the chance decides. That combination is what makes the noises feel
+ * *found* rather than clocked, which is the difference between a creature and
+ * a cuckoo clock.
+ */
+/**
+ * How often he is allowed to be heard, and how likely each kind is.
+ *
+ * Exported so the harness can assert the *rate* rather than a hard-coded copy
+ * of it — the whole point of the change is a number of noises per minute, and
+ * a test that carries its own copy of the tuning stops guarding it the moment
+ * anyone retunes.  `gap` is shared: one clock for every kind, so he never
+ * talks over himself.
+ */
+export const VOICE = {
+  gap: 5.0,
+  snuffle: 0.11,        // the everyday nose-twitch, most of which stay silent
+  chunter: 0.24,        // nose down in the grass, the forage rhythm
+  chunterGap: 6.5,
+  peep: 0.55,           // pleased
+  peepGap: 1.2,
+  trillGap: 9,
+  grumble: 0.7,
+  grumbleGap: 2.4,
+};
+
+export function createVoiceGate({ gap = VOICE.gap, rng = Math.random } = {}) {
+  let last = -1e9;
+  return {
+    try(now, chance = 1, ownGap = gap) {
+      if (now - last < ownGap) return false;
+      if (chance < 1 && rng() > chance) return false;
+      last = now;
+      return true;
+    },
+    /** For the harness, and for anything that wants to know if he just spoke. */
+    quietFor: (now) => now - last,
+    reset() { last = -1e9; },
+  };
+}
+
 export function createAudio() {
   /** @type {AudioContext} */
   let ctx = null;
@@ -216,13 +266,109 @@ export function createAudio() {
     blip(lerp(150, 110, wet), { dur: 0.05, vol: 0.035, type: 'sine' });
   }
 
-  function sniff() {
+  /* ------------------------------- his voice ------------------------------ *
+   *
+   * **An animation rate is not an utterance rate**, and conflating the two is
+   * how you get a chatterbox.  A hedgehog is a nose with legs on: `anim.js`
+   * twitches it every half-second to two seconds and that is exactly right to
+   * *look* at.  Firing a sound off each one gave a hedgehog snuffling
+   * continuously, forever, which stops being charming inside a minute and
+   * then becomes the only thing you can hear.
+   *
+   * So the nose keeps its rate and the voice is gated: every utterance asks
+   * `voice` first, and `voice` refuses if anything else spoke recently or if
+   * the dice say not this time.  What comes out is one small noise every
+   * six or ten seconds, which is about how often a real one obliges.
+   *
+   * Everything is breath plus a little voicing.  A snuffle that is only
+   * filtered noise is a draught under a door; the low triangle under each
+   * puff is what makes it an animal.  Nothing here is sampled.
+   */
+  const voice = createVoiceGate({ rng: () => rng.next() });
+  let voiceT = 0;
+
+  /**
+   * The everyday one: two or three wet nasal huffs, and now and then a tiny
+   * squeak on the end of the last, because a hedgehog that only ever huffs
+   * sounds like a bellows.
+   */
+  function snuffle(force = false) {
     if (!ctx || muted) return;
-    const n = 2 + (rng.next() < 0.4 ? 1 : 0);
+    if (!force && !voice.try(voiceT, VOICE.snuffle)) return;
+    const n = 2 + (rng.next() < 0.45 ? 1 : 0);
+    const key = rng.range(-0.10, 0.10);           // this snuffle's own pitch
     for (let i = 0; i < n; i++) {
-      puff(1350 + rng.range(-150, 150), { dur: 0.06, vol: 0.028, q: 1.6, at: i * 0.11 });
+      const at = i * (0.115 + rng.range(-0.02, 0.02));
+      const k = 1 + key + i * 0.03;
+      puff(1180 * k + rng.range(-120, 120), { dur: 0.055, vol: 0.030, q: 2.2, glide: -260, at });
+      blip(470 * k + rng.range(-30, 30), {
+        dur: 0.055, vol: 0.019, type: 'triangle', glide: -70, at: at + 0.004,
+      });
+    }
+    if (rng.next() < 0.30) {
+      const at = n * 0.115 + 0.03;
+      blip(880 * (1 + key), { dur: 0.09, vol: 0.026, type: 'sine', glide: 220, at });
     }
   }
+
+  /**
+   * Nose down in the grass: the forage rhythm.  Faster, quieter and more of
+   * them than a snuffle — this is the sound of him working rather than of him
+   * checking, and it is the one people describe as chuntering.
+   */
+  function chunter() {
+    if (!ctx || muted) return;
+    if (!voice.try(voiceT, VOICE.chunter, VOICE.chunterGap)) return;
+    const n = 4 + Math.floor(rng.next() * 3);
+    const key = rng.range(-0.08, 0.08);
+    for (let i = 0; i < n; i++) {
+      const at = i * 0.082;
+      const k = 1 + key + (i % 2) * 0.06;
+      puff(980 * k, { dur: 0.042, vol: 0.020, q: 2.6, at });
+      blip(360 * k, { dur: 0.040, vol: 0.013, type: 'triangle', glide: -40, at: at + 0.003 });
+    }
+  }
+
+  /** Pleased: a small rising peep.  Arriving, and finding things. */
+  function peep() {
+    if (!ctx || muted) return;
+    if (!voice.try(voiceT, VOICE.peep, VOICE.peepGap)) return;
+    const f = 720 * (1 + rng.range(-0.06, 0.10));
+    blip(f, { dur: 0.13, vol: 0.048, type: 'sine', glide: f * 0.55 });
+    blip(f * 2.01, { dur: 0.10, vol: 0.014, type: 'sine', glide: f * 0.5, at: 0.01 });
+    if (rng.next() < 0.4) {
+      blip(f * 1.32, { dur: 0.10, vol: 0.030, type: 'sine', glide: f * 0.3, at: 0.15 });
+    }
+  }
+
+  /**
+   * Contented: a purr, which on a hedgehog is a soft rapid burr rather than a
+   * cat's continuous one.  Kept for standing about half asleep, and rare even
+   * then — it is the quietest thing he does and it should feel found.
+   */
+  function trill() {
+    if (!ctx || muted) return;
+    if (!voice.try(voiceT, 1, VOICE.trillGap)) return;
+    const n = 7 + Math.floor(rng.next() * 4);
+    const f = 285 * (1 + rng.range(-0.07, 0.07));
+    for (let i = 0; i < n; i++) {
+      blip(f * (1 + Math.sin(i * 0.9) * 0.05), {
+        dur: 0.05, vol: 0.016 * Math.sin((i / n) * Math.PI + 0.4), type: 'triangle',
+        at: i * 0.047,
+      });
+    }
+  }
+
+  /** Put out: a low descending huff.  Balked at the water, or walled in. */
+  function grumble() {
+    if (!ctx || muted) return;
+    if (!voice.try(voiceT, VOICE.grumble, VOICE.grumbleGap)) return;
+    blip(255 * (1 + rng.range(-0.06, 0.06)), {
+      dur: 0.28, vol: 0.040, type: 'triangle', glide: -95,
+    });
+    puff(700, { dur: 0.24, vol: 0.022, q: 1.3, glide: -260, at: 0.01 });
+  }
+
 
   /** Sowing: a two-note pluck, pitched by what came up. */
   const SCALE = [523.3, 587.3, 659.3, 784.0, 880.0];    // C major pentatonic
@@ -350,8 +496,17 @@ export function createAudio() {
    * nothing ever clicks.
    */
   function update(dt, hog, state, world) {
+    voiceT += dt;                 // the voice runs on its own clock, muted or not
     if (!ctx || mode === 'off') return;
     const t = ctx.currentTime;
+
+    /* Standing about half asleep, he sometimes purrs.  Driven from here
+     * rather than from the animator because it is a *mood*, not an event —
+     * there is no frame on which it begins. */
+    if (hog && (hog.gait || 0) < 0.02 && (hog.night || 0) > 0.7 && !hog.afloat
+        && (hog.curl || 0) < 0.05 && rng.next() < dt * 0.055) {
+      trill();
+    }
     const set = (param, v, tc = 0.25) => param.setTargetAtTime(v, t, tc);
 
     const day = 1 - state.night;
@@ -463,7 +618,8 @@ export function createAudio() {
 
   return {
     unlock, update, toggleMute,
-    footfall, sniff, sow, hurt, home, hoot, plip, squawk, nom, lap, sneeze, thunder, creak, drip,
+    footfall, sow, hurt, home, hoot, plip, squawk, nom, lap, sneeze, thunder, creak, drip,
+    snuffle, chunter, peep, trill, grumble,
     get muted() { return muted; },
   };
 }

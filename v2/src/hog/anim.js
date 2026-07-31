@@ -346,6 +346,8 @@ export function createAnimator(parts, seed = 4242) {
     if (face.nuzzleIn <= 0 && moving < 0.3) {
       face.nuzzle = 1.2 + rng() * 1.6;
       face.nuzzleIn = 2.0 + rng() * 3.5;
+      // nose going down is the frame the chunter starts on, if it starts
+      s.onNuzzle?.();
     }
     const nuzzling = face.nuzzle > 0 && moving < 0.5 && ball < 0.3 && doze < 0.4 && face.scratch <= 0;
     face.nuzzleAmt = damp(face.nuzzleAmt, nuzzling ? 1 : 0, 5, dt);

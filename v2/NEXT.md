@@ -106,9 +106,10 @@ last run did *not* touch.
    their own noise-burst envelopes — the surface is already known.
 3. **Weather has no voice beyond rain.** Now that fronts arrive and clear
    there is wind to hear coming, which is the whole point of it leading.
-4. **His own voice is one sneeze.** A snuffle, a huff and a contented chirrup
-   off the states `anim.js` already exposes.
-5. **No audio LOD** — check what stays running while muted or off screen.
+4. **No audio LOD** — check what stays running while muted or off screen.
+5. **His voice has five sounds and no context.** He snuffles the same way in
+   the wood as on the road; place, weather and how tired he is could all
+   colour it, and `VOICE` is one table to do it from.
 
 ### Debt and harness
 
