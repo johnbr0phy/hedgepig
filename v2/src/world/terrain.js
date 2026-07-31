@@ -328,9 +328,14 @@ function farmForm(n) {
  * because somebody dug it.  Laid on the road's own across-axis, so both
  * banks run parallel to the carriageway; they are worth 45 mm on the
  * centreline, so the road itself stays as flat as the corridor made it. */
-const ROAD_ACROSS = acrossAxis(CENTRE[ROAD], turnToward(CENTRE[ROAD], ROAD_AXIS));
-function roadForm(n) {
-  const t = n.dot(ROAD_ACROSS) * R;
+/* **Read off `roadOffset`, not off a fixed axis.**  This used to project onto
+ * `ROAD_ACROSS`, a single vector square to the road at the roadside's centre,
+ * which is exact only while the road is a great circle.  It is not one any
+ * more — see the bend in `plan.js` — so a fixed axis would have left these
+ * two banks running dead straight through the lake while the carriageway
+ * they belong to curved away from it. */
+function roadForm(n, x, z) {
+  const t = roadOffset(x, z);
   return bank(t, -12, 6.0, 1.15) + bank(t, 12.5, 6.5, 0.95);
 }
 
@@ -362,11 +367,15 @@ const FORMS = [
   [ROAD, roadForm], [TOWN, townForm],
 ];
 
-function landform(n, w) {
+/* The flat coordinates go through as well as the direction, because the road
+ * reads its own across-offset and that is a function of (x, z).  Only the
+ * road wants them, and only where its weight is non-zero, so it costs
+ * nothing anywhere else on the planet. */
+function landform(n, w, x, z) {
   let h = 0;
   for (let i = 0; i < FORMS.length; i++) {
     const a = w[FORMS[i][0]];
-    if (a > 0) h += FORMS[i][1](n) * a;
+    if (a > 0) h += FORMS[i][1](n, x, z) * a;
   }
   return h;
 }
@@ -384,7 +393,7 @@ export function heightAt(x, z) {
   dirAt(x, z, _n);
   placeWeights(x, z, _w);
   let h = relief(_n) * reliefMask(x, z, _w);
-  h += landform(_n, _w);
+  h += landform(_n, _w, x, z);
   h += basin(x, z);
   h += dishes(_w);
   return h;

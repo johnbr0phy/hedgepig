@@ -195,9 +195,42 @@ function sPlan() {
   const [lc, tc] = [CENTRE[LAKE], CENTRE[TOWN]];
   ok(plan.lakeAt(lc.x, lc.z) > 0.99 && plan.lakeAt(0, 0) === 0,
     'the lake is a disc round its own centre');
-  ok(Math.abs(plan.roadOffset(CENTRE[ROAD].x, CENTRE[ROAD].z)) < 1e-6 &&
-     Math.abs(plan.roadOffset(tc.x, tc.z)) < 1e-6,
-    'and the road runs through the roadside and the town, as a great circle');
+  /* **The road serves two places and must clear the other eight.**
+   *
+   * This used to assert that it was a great circle, and *that was the bug*:
+   * the ten places are an antiprism, an antiprism is antipodally symmetric,
+   * so a great circle through the roadside and the town also runs through
+   * their antipodes — which are the mushroom garden and the lake.  Standing
+   * at the centre of the lake you were on tarmac with white lines on it.
+   *
+   * So the invariant is not the shape of the path, it is what the path
+   * misses.  The centreline still passes through the two places that are
+   * about a road, to within a few millimetres of the tails of its own bends.
+   */
+  ok(Math.abs(plan.roadOffset(CENTRE[ROAD].x, CENTRE[ROAD].z)) < 0.1 &&
+     Math.abs(plan.roadOffset(tc.x, tc.z)) < 0.1,
+    'the road still runs through the roadside and the town',
+    `${f(plan.roadOffset(CENTRE[ROAD].x, CENTRE[ROAD].z), 3)} m and ` +
+    `${f(plan.roadOffset(tc.x, tc.z), 3)} m off their centres`);
+
+  const paved = [plan.ROAD, plan.TOWN];
+  let closest = { name: '', d: 1e9 };
+  for (const c of CENTRES) {
+    if (paved.includes(c.kind)) continue;
+    const d = Math.abs(plan.roadOffset(c.x, c.z));
+    if (d < closest.d) closest = { name: plan.PLACE[c.kind].name, d };
+  }
+  ok(closest.d > plan.ROAD_HALF + 4, 'and it goes round every place that is not one',
+    `nearest is ${closest.name} at ${f(closest.d)} m, carriageway is ${plan.ROAD_HALF} m half-width`);
+
+  /* The two it was actually driving through, named, so a future layout change
+   * that puts them back under the tarmac fails by name rather than by a
+   * number nobody can place. */
+  for (const k of [plan.LAKE, plan.MGARD]) {
+    const c = CENTRE[k];
+    ok(plan.roadAt(c.x, c.z) === 0, `no tarmac at the centre of ${plan.PLACE[k].name}`,
+      `${f(Math.abs(plan.roadOffset(c.x, c.z)))} m clear`);
+  }
 
   const d = plan.wrapDelta(1, CIRC - 1);
   ok(Math.abs(d - 2) < 1e-9, 'longitudes wrap the short way across the seam', `Δ = ${f(d, 6)} m`);

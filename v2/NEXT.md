@@ -18,12 +18,11 @@ last run did *not* touch.
 
 ### Graphics
 
-0. **The road runs through the middle of the lake, and the mushroom garden.**
-   `roadOffset` is 0.00 at the centres of LAKE, MGARD, ROAD and TOWN — the road
-   is a great circle and four of the ten antiprism vertices lie on it. Stand at
-   the lake's centre and you are on tarmac. Structural, pre-existing since the
-   layout was written, and now very visible because the road has markings. It
-   wants either the road's path bent off those centres or those places moved.
+0. ~~**The road runs through the middle of the lake, and the mushroom
+   garden.**~~ *Done 2026-07-31: the centreline is pushed aside by whatever it
+   would otherwise cross. The lake is 24.4 m clear, the mushroom garden 18.1,
+   and the roadside and the town are still on it. See HANDOVER §4 — it was
+   forced by the antiprism's antipodal symmetry, not a tuning slip.*
 
 1. **The orbit far side is bare.** Press `P` and half the planet is a 4-band
    ramp with nothing on it. Real props at reduced density, not labels. Flagged
@@ -461,3 +460,29 @@ Newest last. One line each: date, workstream, what landed, what the sweep found.
   they toggle visibility. And the frame has only ever been measured on one
   machine, an M1 — the scaler is what covers everything else, and it has
   never been seen to fire.
+\n- **2026-07-31 — the road ran through the lake (interactive session).**
+  272/272, deployed. Asked to pick the zone-detail thread back up; surveyed
+  all ten centres and found the real reason four of them read as empty —
+  `roadOffset` was exactly **0.00** at the roadside, the town, the lake AND
+  the mushroom garden. Standing in the middle of "the lake" you were on
+  tarmac with white lines and no water anywhere. Not sparse: paved.
+  It was forced by the geometry rather than mis-tuned. The ten places are an
+  antiprism and an antiprism is antipodally symmetric, so a great circle
+  through the roadside and the town runs through their antipodes too — which
+  are the mushroom garden and the lake. A symmetric weave cannot fix it
+  either: `f(s + half a lap) = ±f(s)`, so clearing the lake by twenty metres
+  pushes the road out of an 11 m town. The centreline is a sum of Gaussian
+  bumps now, one per place it has no business crossing, sized from the places
+  themselves. Lake 24.4 m clear, mushroom garden 18.1, roadside and town
+  still on it to within 7 mm. `road.js` needed no changes at all — it takes
+  every heading from `roadPoint(s)` against `roadPoint(s + 0.5)` — and
+  `terrain.js` needed one, because its verge banks projected onto a fixed
+  axis that is only square to a straight road.
+  **The harness had been asserting the bug**, in the words "as a great
+  circle". It now asserts what matters: the road serves the two places that
+  are about a road, clears the other eight by more than a carriageway, and
+  has no tarmac at the lake or the mushroom garden by name.
+  **Sweep found / still open:** the town is genuinely bare — a paved square,
+  one lamp post and nothing else — and that is now a content gap rather than
+  a road running through it. The mire, hen run and farmyard still read as one
+  brown wash at ground level.

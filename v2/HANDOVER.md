@@ -1081,6 +1081,59 @@ fence post may lean; a machine built to grip a rocket shares its vertical.
 The cost is `d²/2R` — three metres at seventeen — and the columns run down
 through it.
 
+### The road ran through the lake, and the antiprism made it inevitable
+
+Four of the ten places had `roadOffset` of exactly **0.00** at their centres:
+the roadside, the town, the lake and the mushroom garden. Standing in the
+middle of "the lake" you were on tarmac with white lines and no water
+anywhere; the mushroom garden's centre was a carriageway.
+
+It was not a tuning slip and no nudge could fix it. **The ten places are an
+antiprism, and an antiprism is antipodally symmetric** — upper vertex `i` sits
+at longitude `(step/5)τ`, the lower ring is the same latitudes negated and
+offset by `τ/10`, and half a turn from any upper vertex lands exactly on a
+lower one. So a *great circle* through the roadside and the town must also
+pass through their antipodes, and their antipodes are the mushroom garden and
+the lake.
+
+A symmetric weave does not fix it either. Any sinusoid over the lap has
+`f(s + 150) = ±f(s)`, so clearing the lake by twenty metres pushes the road
+twenty metres out of the town — and the town is an 11 m disc.
+
+So the centreline is **pushed aside by whatever is in its way**: a sum of
+Gaussian bumps, one per place the road has no business crossing, each wide
+enough (σ = 34 m) to be a bend rather than a kink. The push distances come
+from the places themselves — the lake gets `LAKE_R + ROAD_HALF + a verge` —
+so moving a place moves the road out of it.
+
+The lake is 24.4 m clear now, the mushroom garden 18.1, and the roadside and
+the town are still on the centreline to within 7 mm of their own bends' tails.
+A winding road also simply looks better than a great circle.
+
+Two things made this a small change rather than a large one:
+
+- **`road.js` already read the path instead of assuming it.** Every heading in
+  it — kerbs, markings, culvert, traffic — comes from `roadPoint(s)` against
+  `roadPoint(s + 0.5)`, so all of it followed the bend without knowing there
+  was one. `roadPoint` and `roadOffset` are exact inverses through the weave,
+  because stepping along `ROAD_AXIS` from a point on the great circle changes
+  only the axis component and leaves `roadAlong` alone. The round trip is
+  right to 2.7e-14.
+- **`terrain.js` was the one thing that assumed a straight road.** Its verge
+  banks projected onto `ROAD_ACROSS`, a single fixed vector square to the road
+  at the roadside — exact only for a great circle. Left alone they would have
+  run dead straight through the lake while the carriageway curved away. They
+  read `roadOffset` now, which costs an extra call only where the road's own
+  weight is non-zero.
+
+**And the harness was asserting the bug.** The check said "the road runs
+through the roadside and the town, *as a great circle*" — and the great circle
+was the fault. It asserts what actually matters now: that the road serves the
+two places that are about a road, that it clears every one of the other eight
+by more than a carriageway's width, and — by name, so a future layout change
+fails legibly — that there is no tarmac at the centre of the lake or the
+mushroom garden.
+
 ## 5. Things that will bite the next change
 
 - **A pitched roof is `s * +angle`, not `s * -angle`.** Rotating about +x by a

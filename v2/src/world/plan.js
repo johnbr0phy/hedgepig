@@ -262,10 +262,61 @@ export const ROAD_AXIS = new THREE.Vector3()
 export const ROAD_A = CENTRE[ROAD].dir.clone();
 export const ROAD_B = new THREE.Vector3().crossVectors(ROAD_AXIS, ROAD_A).normalize();
 
+/* ------------------------------- the bend --------------------------------- *
+ *
+ * **The road used to run through the middle of the lake, and the mushroom
+ * garden**, and it was not a tuning slip — it was forced by the geometry.
+ *
+ * The ten places are an antiprism, and an antiprism is **antipodally
+ * symmetric**: every vertex's opposite is another vertex.  Upper vertex `i`
+ * sits at longitude `(step/5)τ`, the lower ring is the same latitudes
+ * negated and offset by `τ/10`, and half a turn from any upper vertex lands
+ * exactly on a lower one.  So a *great circle* through the roadside and the
+ * town must also pass through their antipodes — which are the mushroom
+ * garden and the lake.  Standing at the centre of "the lake" you were on
+ * tarmac with white lines, no water anywhere.
+ *
+ * No nudge fixes that while the road is a great circle, and a symmetric
+ * weave does not either: with `f(s + half a lap) = ±f(s)`, clearing the lake
+ * by twenty metres pushes the road twenty metres out of the town.
+ *
+ * So the centreline is **pushed aside by whatever is in its way** — a sum of
+ * bumps, one per place the road has no business crossing, each wide enough
+ * to be a bend rather than a kink.  It is derived from where those places
+ * actually are rather than from hand-tuned numbers, so moving a place moves
+ * the road out of it.
+ *
+ * Everything else already reads the path instead of assuming it: `road.js`
+ * takes every heading from `roadPoint(s)` against `roadPoint(s + 0.5)`, so
+ * the kerbs, the markings, the culvert and the traffic all follow the bend
+ * without knowing there is one.
+ */
+const BEND_W = 34;                 // how long a bend takes to come and go
+const BEND = [
+  /* The lake is a hard disc and the road has to clear its rim, not its
+   * centre: `LAKE_R` plus the carriageway plus a verge to stand on. */
+  { kind: LAKE, by: LAKE_R + ROAD_HALF + 4.7 },
+  /* The mushroom garden has no hard edge, so it only wants the tarmac out
+   * of the middle of it. */
+  { kind: MGARD, by: 16 },
+].map((b) => ({ ...b, at: roadAlong(CENTRE[b.kind].x, CENTRE[b.kind].z) }));
+
+/** How far the centreline is pushed off the great circle, `along` metres on. */
+export function roadWeave(along) {
+  let out = 0;
+  for (let i = 0; i < BEND.length; i++) {
+    let d = along - BEND[i].at;
+    d -= Math.round(d / CIRC) * CIRC;         // the short way round the lap
+    out += BEND[i].by * Math.exp(-(d * d) / (BEND_W * BEND_W));
+  }
+  return out;
+}
+
 /** Signed metres across the road: 0 on the centreline, + on the town side. */
 export function roadOffset(x, z) {
   dirAt(x, z, _d);
-  return R * Math.asin(clamp(_d.dot(ROAD_AXIS), -1, 1));
+  const raw = R * Math.asin(clamp(_d.dot(ROAD_AXIS), -1, 1));
+  return raw - roadWeave(roadAlong(x, z));
 }
 
 /** Metres along the road from the roadside's centre, wrapping at one lap. */
@@ -276,7 +327,11 @@ export function roadAlong(x, z) {
 
 /** Flat coordinates of the point `along` metres round the road, `across` off it. */
 export function roadPoint(along, across, out = { x: 0, z: 0 }) {
-  const a = along / R, b = across / R;
+  /* The bend goes in here and comes out of `roadOffset`, and the two are
+   * exact inverses: stepping along the AXIS from a point on the great circle
+   * changes only the axis component, so `roadAlong` is untouched by it and
+   * `roadOffset(roadPoint(s, t)) === t` to the last bit. */
+  const a = along / R, b = (across + roadWeave(along)) / R;
   _p.set(0, 0, 0)
     .addScaledVector(ROAD_A, Math.cos(a) * Math.cos(b))
     .addScaledVector(ROAD_B, Math.sin(a) * Math.cos(b))
