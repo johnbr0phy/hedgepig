@@ -197,3 +197,16 @@ Newest last. One line each: date, workstream, what landed, what the sweep found.
   audible noises a minute, nine twitches in ten silent. The gate is exported
   and the harness asserts the rate off the `VOICE` table rather than a copy
   of it.
+- **2026-07-31 — the keys (interactive session).** 151/151. WASD drives him,
+  camera-relative, off the camera's real forward rather than `chase.yaw`;
+  double-tapping a direction rolls him, which is where the double-*click*
+  used to be; and the tap is now only for sowing, which finally separates
+  putting things in the world from deciding where he goes. Two faults fell
+  out of it, both of which a called walk had been hiding: `tryStep`'s slide
+  freed up whichever flat axis still worked, and walking due east makes the
+  z retry `canStand(x, z)` — where he already is — so it succeeded, reset
+  the blocked timer and moved him nowhere; he pressed against a fence in
+  silence for as long as you held the key. And `rolling` is set by whichever
+  branch of `update` is moving him, so a roll begun by the keys survived the
+  release and he stood about tucked into a ball for ever. Sliding is a step
+  deflection now, and the drive un-tucks what it tucked.

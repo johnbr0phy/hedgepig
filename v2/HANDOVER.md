@@ -392,6 +392,46 @@ draught under a door. Every utterance is breath *plus* a little voicing — the
 low triangle under each puff is the whole difference between a hedgehog and a
 bellows.
 
+### The keys, and the two things they made reachable
+
+WASD drives him camera-relative; the tap is now only for sowing. `driveBy`
+takes a heading in **his own tangent frame** and a throttle, and shares every
+bit of its steering with a call through `_steer` — the turn rate, the bank, the
+facing ramp. Two copies of those would drift, and the drift reads as "he
+handles differently when you drive him", which is the bug you cannot find by
+reading either copy.
+
+Three things were only learned by doing it:
+
+- **The heading comes off the camera's real forward, not `chase.yaw`.** They
+  agree to within the smoothing lag most of the time — but the chase clamps
+  its position when the ground would come between it and him and then re-aims,
+  so they part company exactly when you are backed into a bank, which is
+  exactly when you are pressing keys hardest. `RIGHT_OF` is `+π/2` and that was
+  *measured* against the live camera, not reasoned: the sign depends on how
+  `makeBasis` consumes (east, up, north), and backwards gives mirrored controls
+  that read as a broken camera rather than as a wrong sign.
+- **The slide was faking success.** `tryStep` used to free up whichever flat
+  axis still worked. Walking due east makes `dz` exactly zero, so the z retry
+  is `canStand(x, z)` — where he already is — which succeeds, resets the
+  blocked timer and moves him **nowhere**. With click-to-call that expired
+  after 1.1 s and you never saw it; with a key held down he pressed against a
+  fence in silence for as long as you liked. Sliding is a *step deflection*
+  now, nearest angle first, which cannot fake a zero-length move and does not
+  depend on which way round the planet you happen to be standing. It stops
+  short of a right angle on purpose: past that he is crab-walking, and a
+  dead-on press should stop and complain, because that is what an animal does.
+- **`rolling` is set by whichever branch of `update` is moving him**, and at
+  zero throttle that branch stops running — so a roll begun by the keys stayed
+  set for ever and he idled, snuffled and stood about still tucked into a ball.
+  `driveBy` clears it on the *release edge*, not while held at zero, because a
+  called roll is somebody else's and the keys report zero on every frame nobody
+  is touching them.
+
+`driveHog` is exposed on `window.__hedgepig` for the same reason `__shot` is:
+a hidden tab has no rAF, so nothing that only runs inside `frame()` can be
+exercised from a console — and the keys are exactly that.
+
 ## 5. Things that will bite the next change
 
 - **A pitched roof is `s * +angle`, not `s * -angle`.** Rotating about +x by a

@@ -1172,6 +1172,141 @@ function sMerge() {
     'sort order is load-bearing');
 }
 
+function sDrive() {
+  /* The keys.  `driveBy` takes a heading in his own tangent frame and a
+   * throttle, and it shares every bit of its steering with a call — the turn
+   * rate, the bank, the facing ramp — because two copies would drift and the
+   * drift shows up as "he handles differently when you drive him", which is
+   * the bug you cannot find by reading either copy. */
+  const { hog, game, world, put, step, centre } = makeWorld();
+  /* Open ground, found rather than assumed: the scenarios share one cached
+   * world, and `solid` leaves snowmen standing near the meadow's centre.
+   * Driving into one of those measures the snowman, not the drive. */
+  let m = null;
+  for (let i = 0; i < 96 && !m; i++) {
+    const a = (i / 96) * Math.PI * 2;
+    const p = plan.offsetFrom(centre(plan.MEADOW), Math.cos(a) * 6, Math.sin(a) * 6);
+    if (!terrain.walkableAt(p.x, p.z)) continue;
+    if (world.blockers.some((b) => plan.distance(p.x, p.z, b.x, b.z) < 5)) continue;
+    m = p;
+  }
+  ok(!!m, 'the meadow has open ground to drive him across');
+
+  const drive = (angle, n, dt = 1 / 60, roll = false) => {
+    for (let i = 0; i < n; i++) {
+      hog.driveBy(angle, 1, roll);
+      hog.update(dt, i * dt);
+      game.update(dt);
+    }
+  };
+
+  /* 1. He goes the way he is pointed, and keeps going while it is held. */
+  put(m.x, m.z);
+  hog.hd = 0;
+  drive(0, 180);
+  const east = plan.bearing(m.x, m.z, hog.x, hog.z).angle;
+  ok(Math.abs(wrapAng(east - 0)) < 0.12, 'held east, he walks east',
+    `he ended on a bearing of ${f(east, 3)} rad`);
+  const far = plan.distance(m.x, m.z, hog.x, hog.z);
+  ok(far > 1.5, 'and he keeps going as long as it is held', `${f(far, 2)} m in three seconds`);
+
+  /* 2. Letting go stops him — eased, not snapped, which is the whole feel. */
+  const wasGait = hog.gait;
+  hog.driveBy(0, 0, false);
+  for (let i = 0; i < 6; i++) hog.update(1 / 60, i / 60);
+  ok(hog.gait < wasGait && hog.gait > 0.2, 'letting go eases him down rather than stopping him dead',
+    `gait ${f(wasGait, 2)} → ${f(hog.gait, 2)} in a tenth of a second`);
+  for (let i = 0; i < 120; i++) { hog.driveBy(0, 0, false); hog.update(1 / 60, i / 60); }
+  ok(hog.gait < 0.02, 'and he does come to a stop', `gait ${f(hog.gait, 3)}`);
+
+  /* 3. He turns to a new heading rather than sliding to it, and the turn is
+   *    the same rate a call gets. */
+  put(m.x, m.z);
+  hog.hd = 0;
+  drive(Math.PI, 90);
+  ok(Math.abs(wrapAng(hog.hd - Math.PI)) < 0.15, 'asked for the opposite way, he turns round',
+    `heading ${f(hog.hd, 2)}`);
+
+  /* 4. The double-tap roll: tucked, and faster for it. */
+  put(m.x, m.z);
+  hog.hd = 0;
+  drive(0, 240, 1 / 60, true);
+  ok(hog.ball > 0.9, 'held with the roll on, he is tucked into a ball', `ball ${f(hog.ball, 2)}`);
+  /* And letting go unfurls him.  `rolling` is only ever set by whichever
+   * branch of `update` is moving him, and at zero throttle that branch stops
+   * running — so a roll begun by the keys stayed set for ever and he idled,
+   * snuffled and stood about still tucked into a ball. */
+  hog.driveBy(0, 0, false);
+  for (let i = 0; i < 120; i++) hog.update(1 / 60, i / 60);
+  ok(!hog.rolling && hog.ball < 0.02, 'and letting go unfurls him',
+    `ball ${f(hog.ball, 3)}`);
+  const rolled = plan.distance(m.x, m.z, hog.x, hog.z);
+  put(m.x, m.z);
+  hog.hd = 0;
+  hog.rolling = false;
+  drive(0, 240);
+  const walked = plan.distance(m.x, m.z, hog.x, hog.z);
+  ok(rolled > walked * 1.4, 'and he covers appreciably more ground rolling than walking',
+    `${f(rolled, 2)} m against ${f(walked, 2)} m`);
+
+  /* 5. **The hand wins.**  A live throttle cancels a call, or he is a
+   *    hedgehog fighting himself. */
+  put(m.x, m.z);
+  const away = plan.offsetFrom(m, 0, 6);
+  hog.callTo(away.x, away.z);
+  ok(hog.target !== null, 'called somewhere');
+  hog.driveBy(Math.PI, 1, false);
+  ok(hog.target === null, 'and a hand on the keys drops the call outright');
+
+  /* 6. Driven at something solid.  **Dead on**, he stops and complains and
+   *    you steer — every deflection under a right angle still has a component
+   *    into the thing, and crab-walking would look worse than stopping.  What
+   *    must hold is that he never gets inside it, that he **keeps the
+   *    controls** (a call that cannot be reached expires after 1.1 s, which
+   *    is right for an errand and quite wrong while you are holding the key),
+   *    and that he says something rather than pressing on in silence.
+   *
+   *    The silence is what this is really guarding.  The old slide tried the
+   *    two flat axes, and walking due east makes the z-axis retry
+   *    `canStand(x, z)` — where he already is — which succeeds, resets the
+   *    blocked timer and moves him nowhere.  He pressed against a fence for
+   *    as long as you held the key, never sliding and never giving up. */
+  put(m.x, m.z);
+  const cs = Math.max(0.08, Math.cos(m.z / plan.R));
+  const wx = m.x + 0.55 / cs;                    // dead ahead on heading 0
+  const wz = m.z;
+  const wall = world.addBlocker(wx, wz, 0.34);
+  let deepest = 0, grumbles = 0;
+  hog.onGrumble = () => { grumbles++; };
+  hog.hd = 0;
+  for (let i = 0; i < 300; i++) {
+    hog.driveBy(0, 1, false);
+    hog.update(1 / 60, i / 60);
+    game.update(1 / 60);
+    deepest = Math.max(deepest, 0.34 - plan.distance(hog.x, hog.z, wx, wz));
+  }
+  ok(deepest <= 0.02, 'driven straight at something solid, he never gets inside it',
+    `deepest ${f(Math.max(0, deepest), 3)} m`);
+  ok(hog._drive.throttle > 0.5, 'and the keys still have him',
+    'a call would have been abandoned after 1.1 s; a hand on the keys is not');
+  ok(grumbles > 0, 'and he says so rather than pressing on in silence',
+    `${grumbles} complaints in five seconds`);
+
+  /* 7. Approached at an angle, though, he slips past it — that is what the
+   *    deflection is for, and it is the case you actually meet. */
+  put(m.x, m.z);
+  hog.onGrumble = null;
+  hog.hd = 0.5;
+  for (let i = 0; i < 300; i++) {
+    hog.driveBy(0.5, 1, false);
+    hog.update(1 / 60, i / 60);
+    game.update(1 / 60);
+  }
+  world.removeBlocker(wall);
+  ok(plan.distance(hog.x, hog.z, m.x, m.z) > 1.5, 'and he slips past one he meets at an angle',
+    `${f(plan.distance(hog.x, hog.z, m.x, m.z), 2)} m on`);
+}
+
 function sVoice() {
   /* **An animation rate is not an utterance rate.**  `anim.js` twitches his
    * nose every half-second to two seconds, which is right to look at, and
@@ -1409,7 +1544,7 @@ const SCENARIOS = {
   plan: sPlan, terrain: sTerrain, planet: sPlanet, clock: sClock,
   open: sOpen, gait: sGait, roll: sRoll, face: sFace, walk: sWalk, idle: sIdle, back: sBack, water: sWater, boat: sBoat,
   road: sRoad, roadmiss: sRoadmiss, abandon: sAbandon,
-  burrow: sBurrow, grass: sGrass, solid: sSolid, persist: sPersist, palette: sPalette, weather: sWeather, sky: sSky, slow: sSlow, merge: sMerge, voice: sVoice, critters: sCritters, nan: sNan,
+  burrow: sBurrow, grass: sGrass, solid: sSolid, persist: sPersist, palette: sPalette, weather: sWeather, sky: sSky, slow: sSlow, merge: sMerge, drive: sDrive, voice: sVoice, critters: sCritters, nan: sNan,
 };
 
 const arg = process.argv[2] || 'all';

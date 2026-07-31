@@ -27,7 +27,12 @@ Nothing above this line changes — v1 keeps the root and keeps its URL.
 
 ## Controls
 
+v1 (the root):
+
 | | |
 |---|---|
 | tap / click | call him there — and sow whatever the place and season give you |
 | scroll / drag | move the camera, which never follows him on its own |
+
+v2 walks him on the keys instead: **WASD** to move, **double-tap a direction**
+to roll, and the click is left for sowing.

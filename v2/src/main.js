@@ -131,10 +131,72 @@ ripple.renderOrder = 4;
 scene.add(ripple);
 const rippleAt = { x: 0, z: 0, t: 0 };
 
-chase.onCall = (x, z, roll) => {
-  game.call(x, z, roll);
+/* A tap sows, and only sows.  Where he goes is your hand's business now. */
+chase.onCall = (x, z) => {
+  game.sowAt(x, z);
   rippleAt.x = x; rippleAt.z = z; rippleAt.t = 0.55;
 };
+
+/* ------------------------------- the keys -------------------------------- *
+ *
+ * WASD drives him, **relative to the camera** — W is away from you, which is
+ * the only mapping anybody has to be told once. On a planet that is not a
+ * world-space vector: the camera's forward is built in his own tangent frame
+ * from `chase.yaw`, and `hog.driveBy` takes a heading in exactly that frame,
+ * so the whole conversion is one angle and no vectors at all.
+ *
+ * **Double-tap a direction to roll**, which is where the double-*click* used
+ * to live. Holding it keeps him tucked; letting go of everything unfurls him.
+ * That keeps the gesture people already knew and puts it on the hand that is
+ * now steering.
+ *
+ * The heading comes off the **camera's own forward**, not off `chase.yaw`.
+ * They agree to within the camera's smoothing lag most of the time, but not
+ * always: the chase clamps its position when the ground would come between it
+ * and him, and then re-aims — so the yaw it was asked for and the direction it
+ * is actually looking part company exactly when you are backed into a bank,
+ * which is exactly when you are pressing keys hardest.
+ *
+ * `RIGHT_OF` was *measured* rather than reasoned. The sign depends on the
+ * handedness of (east, up, north) as `makeBasis` consumes it, and getting it
+ * backwards gives mirrored controls — which reads as a broken camera rather
+ * than as a wrong sign. Screen-right is forward + π/2 in that frame, and
+ * `east × up = north`; both were checked against the live camera.
+ */
+const RIGHT_OF = Math.PI / 2;
+const _camFwd = new THREE.Vector3();
+const DRIVE_KEYS = {
+  KeyW: 'f', ArrowUp: 'f',
+  KeyS: 'b', ArrowDown: 'b',
+  KeyA: 'l', ArrowLeft: 'l',
+  KeyD: 'r', ArrowRight: 'r',
+};
+const held = new Set();
+let rollHeld = false;
+let lastDriveTap = { key: '', at: -1e9 };
+
+function driveHog() {
+  const f = (held.has('f') ? 1 : 0) - (held.has('b') ? 1 : 0);
+  const r = (held.has('r') ? 1 : 0) - (held.has('l') ? 1 : 0);
+  if (!f && !r) {
+    rollHeld = false;
+    hog.driveBy(0, 0, false);
+    return;
+  }
+  const b = basisAt(hog.x, hog.z);
+  camera.getWorldDirection(_camFwd);
+  const fe = _camFwd.dot(b.east);
+  const fn = _camFwd.dot(b.north);
+  /* Looking almost straight down, the forward has no bearing left in it and
+   * the heading would spin on rounding error.  Fall back to what the chase
+   * was asked for, which always has one. */
+  const yaw = Math.hypot(fe, fn) > 1e-3 ? Math.atan2(fn, fe) : chase.yaw;
+
+  const east = Math.cos(yaw) * f + Math.cos(yaw + RIGHT_OF) * r;
+  const north = Math.sin(yaw) * f + Math.sin(yaw + RIGHT_OF) * r;
+  // a diagonal is not faster than a straight line
+  hog.driveBy(Math.atan2(north, east), Math.min(1, Math.hypot(f, r)), rollHeld);
+}
 
 /* Sound: unlocked by the first gesture (the autoplay rule and also simply
  * polite), fed by the same edges the animation runs on. */
@@ -216,9 +278,33 @@ function setPlanetView(on) {
 }
 
 /* --------------------------------- input --------------------------------- */
+window.addEventListener('keyup', (e) => {
+  const d = DRIVE_KEYS[e.code];
+  if (d) { held.delete(d); if (!held.size) rollHeld = false; }
+});
+// let go of the window with a key down and he would run on for ever
+window.addEventListener('blur', () => { held.clear(); rollHeld = false; });
+
 window.addEventListener('keydown', (e) => {
+  const d = DRIVE_KEYS[e.code];
+  if (d) {
+    e.preventDefault();
+    if (!e.repeat) {
+      /* Two taps of the same direction, near enough together, tucks him.
+       * The first has already set him off, so the second is an *upgrade*
+       * rather than a fresh start — which is why it feels immediate. */
+      const now = performance.now();
+      if (lastDriveTap.key === d && now - lastDriveTap.at < 340) {
+        rollHeld = true;
+        lastDriveTap = { key: '', at: -1e9 };
+      } else {
+        lastDriveTap = { key: d, at: now };
+      }
+    }
+    held.add(d);
+  }
   if (e.repeat) return;
-  if (e.code === 'Space') { hog.stop(); hud.flash('he stops where he is'); e.preventDefault(); }
+  if (e.code === 'Space') { hog.stop(); held.clear(); rollHeld = false; hud.flash('he stops where he is'); e.preventDefault(); }
   if (e.code === 'KeyP') {
     setPlanetView(!planetView);
     hud.flash(planetView ? 'the whole of it · P to come back down' : 'back in the grass');
@@ -499,6 +585,8 @@ function frame() {
   /* A good soaking earns a shake-off when the rain stops. */
   if (state.wet > 0.35) wetFor += dt;
   else if (wetFor > 5 && state.wet < 0.08) { hog.shake = Math.max(hog.shake, 1.1); wetFor = 0; }
+  // the keys, read fresh each frame against wherever the camera has got to
+  if (!planetView) driveHog(); else hog.driveBy(0, 0, false);
   hog.update(dt, acc);
   game.update(dt);
   world.update(dt, hog, state);
@@ -627,7 +715,10 @@ function frame() {
 frame();
 
 /* a little exposed for tuning from the console */
-window.__hedgepig = { scene, camera, renderer, pipeline, world, hog, chase, climate, weather, game, sky, sun, fill, hemi, audio, critters, puffs, prints, hoglet, THREE };
+/* `driveHog` is on here for the same reason `__shot` exists: a hidden tab has
+ * no rAF, so nothing that only ever runs inside `frame()` can be exercised
+ * from a console — and the keys are exactly that. */
+window.__hedgepig = { scene, camera, renderer, pipeline, world, hog, chase, climate, weather, game, sky, sun, fill, hemi, audio, critters, puffs, prints, hoglet, driveHog, THREE };
 
 if (import.meta.env?.DEV) {
   /** Dev capture: render one frame at a fixed size and post it to the server. */

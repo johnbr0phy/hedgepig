@@ -113,15 +113,12 @@ export class Chase {
          * a finger never holds still, and calling him somewhere you did not
          * mean is worse than missing a call. */
         if (this._drag.moved < 9 && quick) {
-          /* **Two taps mean roll.**  Near enough to the last one, soon enough
-           * after it.  The first tap has already sent him walking, so the
-           * second is an *upgrade* rather than a fresh call — which is why it
-           * feels immediate: he sets off, then tucks and goes. */
-          const t = this._lastTap;
-          const dbl = t && now - t.at < 340 &&
-            Math.hypot(this._drag.x - t.x, this._drag.y - t.y) < 44;
-          this.callAt(this._drag.x, this._drag.y, !!dbl);
-          this._lastTap = dbl ? null : { at: now, x: this._drag.x, y: this._drag.y };
+          /* Every tap sows, including the second of a double.  There used to
+           * be a double-tap-means-roll gesture here, and the second tap of it
+           * deliberately sowed nothing — two flowers in one spot being a
+           * stutter rather than a reward.  The roll is on the keys now, so a
+           * second tap is a second tap: you meant it. */
+          this.callAt(this._drag.x, this._drag.y);
         }
         this._drag = null;
       }

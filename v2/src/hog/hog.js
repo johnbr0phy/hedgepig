@@ -65,6 +65,16 @@ const _pole = new THREE.Vector3();
 const _sm = new THREE.Matrix4();
 const _srot = new THREE.Matrix4();
 
+/* How far he will deflect his *step* to get past something, nearest angle
+ * first.  It stops short of a right angle on purpose: past that he is
+ * crab-walking rather than squeezing by, and a hedgehog sliding sideways
+ * along a fence with his nose still pointed at it looks like a bug.
+ *
+ * Which means a **dead-on** press does not slide, and should not: every
+ * deflection under 90° still has a component into the thing you are pressing
+ * into.  He stops, complains, and you steer.  That is what an animal does. */
+const SLIDE = [0.42, -0.42, 0.85, -0.85, 1.28, -1.28];
+
 export class Hog {
   /**
    * `model: false` gives a hedgepig with no geometry — the walk, the gait,
@@ -128,6 +138,8 @@ export class Hog {
     this._wasAfloat = false;
     this.walked = 0;             // metres, for the HUD
     this.blocked = 0;            // how long he has been unable to move
+    /** The keys, when a hand is on them: a heading and a throttle. */
+    this._drive = { angle: 0, throttle: 0, roll: false };
 
     this._idleTimer = 2;
     this._glanceTo = 0;          // where the idle glance is easing his heading
@@ -166,6 +178,80 @@ export class Hog {
     this.target = null;
     this.arrived = true;
     this.rolling = false;
+  }
+
+  /**
+   * Drive him by hand: a heading in his own tangent frame — the same
+   * convention as `hd` and as `bearing().angle`, east at 0 — and a throttle.
+   *
+   * Set every frame from whatever is holding the keys. A live throttle
+   * **cancels any target**, because a hand on the keys and a crumb on the
+   * ground pulling in different directions is a hedgehog fighting itself, and
+   * the hand wins every time.
+   */
+  driveBy(angle, throttle, roll = false) {
+    const was = this._drive.throttle;
+    this._drive.angle = angle;
+    this._drive.throttle = clamp(throttle, 0, 1);
+    this._drive.roll = roll;
+    if (this._drive.throttle > 0.01 && this.target) {
+      this.target = null;
+      this.arrived = true;
+    }
+    /* **Letting go unfurls him.**  `rolling` is only ever *set* by whichever
+     * branch of `update` is moving him, and with the throttle at zero that
+     * branch stops running — so a roll begun by the keys stayed set for ever
+     * and he idled, snuffled and stood about still tucked into a ball.
+     *
+     * Edge-triggered on the release, not held at zero, because a *called*
+     * roll is somebody else's and the keys report a zero throttle on every
+     * frame nobody is touching them. */
+    if (was > 0.01 && this._drive.throttle <= 0.01) this.rolling = false;
+  }
+
+  /**
+   * Turn toward `aim` and ease the gait to `want`, and return the step he has
+   * earned this frame.
+   *
+   * Shared by the two things that can move him — a call and the keys — for the
+   * reason every shared thing here is shared: two copies of the turn rate, the
+   * bank and the facing ramp would drift apart, and the drift would show up as
+   * "he handles differently when you drive him", which is exactly the bug you
+   * cannot find by reading either copy.
+   */
+  _steer(aim, want, dt) {
+    // after a hit he veers off rather than walking straight back into it
+    if (this.repel > 0) aim = lerp(aim, this.repelHd, clamp(this.repel / 1.3, 0, 1) * 0.8);
+
+    const turn = wrapAng(aim - this.hd);
+    /* **Rolling costs him his steering.**  Twice the speed for less than
+     * half the turn rate, so the roll is a decision — commit to a line and
+     * take it — rather than a free speed button.  A ball with the agility of
+     * a walk would make walking pointless.
+     *
+     * The standing floor is high: at v1's 3.2 × 0.35 an about-face was two
+     * and a half seconds of creeping round on the spot before the walk was
+     * allowed to start, which read as him refusing to come. */
+    const rate = (4.6 - this.shiver * 1.8) * (0.55 + 0.45 * this.gait)
+      * (1 - 0.58 * this.ball);
+    const tStep = clamp(turn, -rate * dt, rate * dt);
+    this.hd = wrapAng(this.hd + tStep);
+    this.turning = damp(this.turning, tStep / Math.max(dt, 1e-6), 10, dt);
+    this._glanceTo = this.hd;     // a walk spends any idle glance
+    this._aimTurn = turn;         // and his eyes lead his feet round it
+
+    /* He banks into the turn — inside shoulder down, eased both ways.  The
+     * amount tracks how much turning is left, so it fades to level on its own
+     * as he comes round onto his line. */
+    this.roll = damp(this.roll, clamp(turn * 0.4, -0.2, 0.2) * this.gait * (1 - this.ball), 5, dt);
+
+    // he sets off in roughly the right direction before committing to speed
+    const facing = clamp(1 - Math.abs(turn) / 1.9, 0.15, 1);
+    this.gait = damp(this.gait, want * facing, 3.4, dt);
+
+    // rain hurries him — a hedgehog in the wet has somewhere to be
+    const hurry = 1 + (this.rainHurry || 0);
+    return this.speed * hurry * this.rollSpeed() * this.gait * dt;
   }
 
   /** A thorn or a car. Curls him up, knocks him back, and sends him off it. */
@@ -231,6 +317,13 @@ export class Hog {
       this.gait = damp(this.gait, 0, 8, dt);
       this.roll = damp(this.roll, 0, 8, dt);
       this.turning = damp(this.turning, 0, 10, dt);
+    } else if (this._drive.throttle > 0.01 && this.hurt <= 0) {
+      /* **The keys.**  No target, no arrival, no distance to clamp against:
+       * he goes the way he is pointed for as long as the key is held.  The
+       * roll is the drive's, so letting go of everything unfurls him. */
+      this.rolling = this._drive.roll;
+      const step = this._steer(this._drive.angle, this._drive.throttle, dt);
+      this.tryStep(step, dt);
     } else if (this.target && this.hurt <= 0) {
       /* **Great-circle, not flat.**  With content spread over the whole
        * planet, `hypot(Δx, Δz)` is wrong by a factor of `cos(latitude)` in
@@ -243,42 +336,10 @@ export class Hog {
         this.arrive();
       } else {
         want = 1;
-        let aim = bearing(this.x, this.z, this.target.x, this.target.z).angle;
-        // after a hit he veers off rather than walking straight back into it
-        if (this.repel > 0) aim = lerp(aim, this.repelHd, clamp(this.repel / 1.3, 0, 1) * 0.8);
-
-        const turn = wrapAng(aim - this.hd);
-        /* **Rolling costs him his steering.**  Twice the speed for less than
-         * half the turn rate, so the double tap is a decision — commit to a
-         * line and take it — rather than a free speed button.  A ball with
-         * the agility of a walk would make walking pointless.
-         *
-         * The standing floor is high: at v1's 3.2 × 0.35 an about-face was
-         * two and a half seconds of creeping round on the spot before the
-         * walk was allowed to start, which read as him refusing to come. */
-        const rate = (4.6 - this.shiver * 1.8) * (0.55 + 0.45 * this.gait)
-          * (1 - 0.58 * this.ball);
-        const tStep = clamp(turn, -rate * dt, rate * dt);
-        this.hd = wrapAng(this.hd + tStep);
-        this.turning = damp(this.turning, tStep / Math.max(dt, 1e-6), 10, dt);
-        this._glanceTo = this.hd;     // a walk spends any idle glance
-        this._aimTurn = turn;         // and his eyes lead his feet round it
-
-        /* He banks into the turn — inside shoulder down, eased both ways.
-         * The amount tracks how much turning is left, so it fades to level
-         * on its own as he comes round onto his line. */
-        this.roll = damp(this.roll, clamp(turn * 0.4, -0.2, 0.2) * this.gait * (1 - this.ball), 5, dt);
-
-        // he sets off in roughly the right direction before committing to speed
-        const facing = clamp(1 - Math.abs(turn) / 1.9, 0.15, 1);
-        this.gait = damp(this.gait, want * facing, 3.4, dt);
-
+        const aim = bearing(this.x, this.z, this.target.x, this.target.z).angle;
         /* Clamp the step to what is left, or the easing overshoots the
-         * target and he jitters on the spot for as long as you watch him.
-         * Rain hurries him — a hedgehog in the wet has somewhere to be. */
-        const hurry = 1 + (this.rainHurry || 0);
-        const step = Math.min(this.speed * hurry * this.rollSpeed() * this.gait * dt, dist);
-        this.tryStep(step, dt);
+         * target and he jitters on the spot for as long as you watch him. */
+        this.tryStep(Math.min(this._steer(aim, want, dt), dist), dt);
       }
     } else {
       this.gait = damp(this.gait, 0, 5, dt);
@@ -377,13 +438,46 @@ export class Hog {
     }
 
     if (this.canStand(nx, nz)) { this.x = nx; this.z = nz; this.blocked = 0; return true; }
-    // slide along whichever axis is still free, so a wall does not trap him
-    if (this.canStand(nx, this.z)) { this.x = nx; this.blocked = 0; return true; }
-    if (this.canStand(this.x, nz)) { this.z = nz; this.blocked = 0; return true; }
+
+    /* **Sliding is a deflection, not an axis.**
+     *
+     * This used to try (nx, z) and then (x, nz) — free up whichever of the
+     * two flat axes still worked.  Two things wrong with it, and the keys
+     * made both reachable where a call never had:
+     *
+     *  - x and z are *authoring* axes.  On a globe they are longitude and
+     *    latitude, so which one a wall lies along is an accident of where on
+     *    the planet you are standing, and the slide worked well in some
+     *    places and not at all in others.
+     *  - Walk due east and `dz` is exactly zero, so `canStand(x, nz)` is
+     *    `canStand(x, z)` — where he already is — which of course succeeds.
+     *    It returned true, reset `blocked`, and moved him **nowhere**.  He
+     *    pressed flat against a fence for as long as you held the key,
+     *    never sliding and never giving up, and the give-up path that would
+     *    have grumbled was unreachable.  A call would have expired; a held
+     *    key does not.
+     *
+     * Deflecting his *step* — not his heading, which stays where you aimed
+     * it — takes him along the wall, nearest angle first, and cannot fake a
+     * success out of a zero-length move.
+     */
+    for (const d of SLIDE) {
+      const h2 = this.hd + d;
+      const ax = this.x + (Math.cos(h2) * step) / cs;
+      const az = this.z + Math.sin(h2) * step;
+      if (this.canStand(ax, az)) { this.x = ax; this.z = az; this.blocked = 0; return true; }
+    }
     this.blocked += dt;
     // he gives up on a target he cannot reach rather than pressing into it
-    // giving up on somewhere he cannot reach is worth a small complaint
-    if (this.blocked > 1.1) { this.stop(); this.blocked = 0; this.onGrumble?.(); }
+    /* Giving up on somewhere he cannot reach is worth a small complaint —
+     * but only a *called* errand is given up on.  Driven by hand there is
+     * nothing to abandon: you are still holding the key, and stopping the
+     * drive would take the controls off you for pressing into a fence. */
+    if (this.blocked > 1.1) {
+      if (this._drive.throttle <= 0.01) this.stop();
+      this.blocked = 0;
+      this.onGrumble?.();
+    }
     return false;
   }
 

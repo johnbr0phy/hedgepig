@@ -591,6 +591,22 @@ export function createGame({ world, hog, hud, climate, audio = null }) {
     }
   }
 
+  /**
+   * A tap: **sow, and nothing else.**
+   *
+   * The tap used to do both — sow a thing and send him to it — and the two
+   * were welded together by the rule that sowing had to be the first line of
+   * `call`, because whatever was sown was the thing he then walked to.  With
+   * the keys driving him the two come apart cleanly: the tap is for putting
+   * things in the world, and where he goes is your hand's business.
+   *
+   * The solid-thing clearance still applies. A snowman sown on top of him is
+   * no less rude for his not having been sent there.
+   */
+  function sowAt(x, z) {
+    return sow(x, z).kind;
+  }
+
   /* -------------------------------- the call ------------------------------- */
   function call(x, z, roll = false) {
     /* Sown on **every** call, before any early return, because whatever is
@@ -855,5 +871,5 @@ export function createGame({ world, hog, hud, climate, audio = null }) {
     readouts(dt);
   }
 
-  return { state, call, update, placeBurrow, burrowObj, sown, note };
+  return { state, call, sowAt, update, placeBurrow, burrowObj, sown, note };
 }
