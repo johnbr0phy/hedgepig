@@ -200,6 +200,76 @@ export function buildSky(scene, radius = 300) {
   group.add(shoot);
   const meteor = { life: 0, wait: 8, dir: new THREE.Vector3() };
 
+  /* --- the aurora: three curtains for deep winter nights --- */
+  const auroraGroup = new THREE.Group();
+  {
+    const c = document.createElement('canvas');
+    c.width = 64; c.height = 128;
+    const x = c.getContext('2d');
+    const grad = x.createLinearGradient(0, 0, 0, 128);
+    grad.addColorStop(0, 'rgba(120,255,190,0)');
+    grad.addColorStop(0.35, 'rgba(120,255,190,0.5)');
+    grad.addColorStop(0.7, 'rgba(150,160,255,0.25)');
+    grad.addColorStop(1, 'rgba(150,160,255,0)');
+    x.fillStyle = grad;
+    x.fillRect(0, 0, 64, 128);
+    const tex = new THREE.CanvasTexture(c);
+    for (let i = 0; i < 3; i++) {
+      const m = new THREE.Mesh(
+        new THREE.PlaneGeometry(radius * (0.5 + i * 0.14), radius * 0.17, 20, 1),
+        new THREE.MeshBasicMaterial({
+          map: tex, transparent: true, opacity: 0, depthWrite: false,
+          fog: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+        })
+      );
+      const a = 2.2 + i * 0.5;
+      m.position.set(Math.cos(a) * radius * 0.5, radius * (0.5 + i * 0.05), Math.sin(a) * radius * 0.5);
+      m.lookAt(0, radius * 0.2, 0);
+      m.userData.ph = i * 2.1;
+      auroraGroup.add(m);
+    }
+    auroraGroup.visible = false;
+    group.add(auroraGroup);
+  }
+  let auroraNow = 0;
+
+  /* --- constellations: a few drawn lines between brighter stars, one of
+   * them unmistakably a hedgehog, because whose sky is this --- */
+  const constellations = new THREE.Group();
+  {
+    // hand-authored patterns: azimuth (rad), elevation (0..1), per point
+    const PATTERNS = [
+      // the hedgehog: a nose, a low back of spikes, a foot
+      [[0.0, 0.55], [0.10, 0.50], [0.20, 0.55], [0.26, 0.63], [0.34, 0.57], [0.42, 0.66], [0.50, 0.58], [0.56, 0.50], [0.44, 0.46]],
+      // the acorn
+      [[2.1, 0.70], [2.2, 0.76], [2.32, 0.71], [2.26, 0.62], [2.14, 0.63]],
+      // the long fence
+      [[4.2, 0.45], [4.35, 0.5], [4.5, 0.44], [4.65, 0.5], [4.8, 0.45]],
+    ];
+    const starPts = [];
+    const linePts = [];
+    for (const pat of PATTERNS) {
+      const pts = pat.map(([az, el]) => new THREE.Vector3(
+        Math.cos(az) * Math.sqrt(1 - el * el), el, Math.sin(az) * Math.sqrt(1 - el * el)
+      ).multiplyScalar(radius * 0.93));
+      starPts.push(...pts);
+      for (let i = 0; i < pts.length - 1; i++) linePts.push(pts[i], pts[i + 1]);
+    }
+    const lg = new THREE.BufferGeometry().setFromPoints(linePts);
+    const lines = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({
+      color: 0xaab6e0, transparent: true, opacity: 0, depthWrite: false, fog: false,
+    }));
+    const sg = new THREE.BufferGeometry().setFromPoints(starPts);
+    const bright = new THREE.Points(sg, new THREE.PointsMaterial({
+      size: radius * 0.02, map: starTex(), color: 0xfff6e0, transparent: true,
+      opacity: 0, depthWrite: false, fog: false, sizeAttenuation: true,
+    }));
+    constellations.add(lines, bright);
+    constellations.userData = { lines, bright };
+    constellations.visible = false;
+    group.add(constellations);
+  }
+
   /* --- the rainbow: five arcs opposite the sun, earned by rain --- */
   const rainbow = new THREE.Group();
   {
@@ -234,7 +304,13 @@ export function buildSky(scene, radius = 300) {
     group, dome, clouds, stars, disc, halo,
 
     /** Sky colours for the hour. `night` is 0 by day, 1 at full dark. */
-    setColors({ top, mid, haze, night = 0, cloud, cloudShade, moonPhase = 0.5 }) {
+    setColors({ top, mid, haze, night = 0, cloud, cloudShade, moonPhase = 0.5, aurora = 0 }) {
+      auroraNow = aurora;
+      const starA = clamp((night - 0.18) / 0.55, 0, 1);
+      const cu = constellations.userData;
+      cu.lines.material.opacity = starA * 0.16;
+      cu.bright.material.opacity = starA * 0.75;
+      constellations.visible = starA > 0.02;
       domeMat.uniforms.uTop.value.set(top);
       domeMat.uniforms.uMid.value.set(mid);
       domeMat.uniforms.uHaze.value.set(haze);
@@ -314,6 +390,15 @@ export function buildSky(scene, radius = 300) {
           Math.sin(u.ang) * u.rad
         );
         p.lookAt(0, u.baseY * 0.55, 0);
+      }
+
+      /* The aurora breathes: each curtain swells and sways on its own. */
+      auroraGroup.visible = auroraNow > 0.03;
+      if (auroraGroup.visible) {
+        auroraGroup.children.forEach((m, i) => {
+          m.material.opacity = auroraNow * 0.48 * (0.7 + 0.3 * Math.sin(skyT * 0.21 + m.userData.ph));
+          m.rotation.z = Math.sin(skyT * 0.09 + m.userData.ph) * 0.08;
+        });
       }
 
       /* A shooting star, once in a while, in the deepest dark. */

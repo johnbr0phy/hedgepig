@@ -106,6 +106,16 @@ export function buildPlaces(root) {
       },
 
       /**
+       * A rotating set of lines for an interactable — the second visit says
+       * something the first did not, which is the whole difference between
+       * a sign and an acquaintance.
+       */
+      lines(...msgs) {
+        let i = 0;
+        return () => shared.flash(msgs[i++ % msgs.length]);
+      },
+
+      /**
        * Scatter within the place's disc, refusing hard ground and water so
        * that no builder has to remember to — v1's thorns had exactly this
        * rule, and it is why they never once grew on the tarmac.
@@ -163,6 +173,7 @@ export function buildPlaces(root) {
     const obj = bramble({ seed: 2000 + thorns.length, r });
     obj.position.set(x, heightAt(x, z), z);
     obj.userData.planetRigid = true;
+    obj.userData.noMerge = true;      // the leg toggles each bush's visibility
     group.add(obj);
     /* The hitbox is the plant you can see, a little tighter than its
      * silhouette: being clipped by something that looked like a miss is the

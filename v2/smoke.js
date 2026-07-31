@@ -65,6 +65,8 @@ const { createAnimator, STRIDE, STANCE } = await import('./src/hog/anim.js');
 const { BALL_R } = await import('./src/hog/hog.js');
 const { createGame } = await import('./src/game/game.js');
 const { CULVERT_Z } = await import('./src/world/places/road.js');
+const { cel, applyPalette } = await import('./src/core/toon.js');
+const { createCritters } = await import('./src/world/critters.js');
 
 /* ------------------------------- reporting ------------------------------- */
 let checks = 0;
@@ -928,6 +930,76 @@ function sGrass() {
     `${over} over, ${empty} empty`);
 }
 
+function sPersist() {
+  /* The save: a browser thing, shimmed here.  What must hold is the round
+   * trip — one game writes its numbers, a second game built over the same
+   * store wakes up with them, at the right speed for its leg. */
+  const mem = {};
+  globalThis.localStorage = {
+    getItem: (k) => (k in mem ? mem[k] : null),
+    setItem: (k, v) => { mem[k] = String(v); },
+    removeItem: (k) => { delete mem[k]; },
+  };
+  try {
+    const { world, hog, hud, climate, put, centre } = makeWorld();
+    put(centre(plan.MEADOW).x, centre(plan.MEADOW).z);
+    const g1 = createGame({ world, hog, hud, climate });
+    g1.state.leg = 4;
+    hog.walked = 33;
+    g1.note('owl');
+    for (let i = 0; i < 60 * 7; i++) g1.update(1 / 60);   // past one periodic save
+    ok(!!mem['hedgepig.save'], 'seven quiet seconds write a save');
+
+    const g2 = createGame({ world, hog, hud, climate });
+    ok(g2.state.leg === 4 && g2.state.flags.owl === true,
+      'and a second game wakes up where the first left off',
+      `leg ${g2.state.leg}, ${Object.keys(g2.state.flags).length} first(s) remembered`);
+    ok(Math.abs(hog.speed - HOG_SPD * (1 + 0.08 * 3)) < 1e-9,
+      'at the pace leg four had earned', `${f(hog.speed, 3)} m/s`);
+  } finally {
+    delete globalThis.localStorage;
+  }
+}
+
+function sPalette() {
+  /* The role registry: season.js recolours materials by role, and the
+   * backlog notes it had no coverage at all. */
+  const m1 = cel({ color: 0x123456, role: 'leaf', cache: false });
+  const m2 = cel({ color: 0x445566, role: 'stem', cache: false });
+  applyPalette({ leaf: 0xff0000 });
+  ok(m1.color.getHex() === 0xff0000, 'a role material takes the palette that names it');
+  ok(m2.color.getHex() === 0x445566, 'and a role the palette does not name is left alone');
+  applyPalette({ stem: 0x00ff00 });
+  ok(m2.color.getHex() === 0x00ff00, 'stems answer to their own role, not to leaf',
+    '— the pumpkin-stem bug, locked out');
+}
+
+function sCritters() {
+  const scene = new THREE.Scene();
+  const c = createCritters(scene);
+  const hogLike = { x: plan.CENTRE[plan.BGARD].x, z: plan.CENTRE[plan.BGARD].z, gait: 0, ball: 0 };
+  const st = { night: 0, wet: 0, snow: 0, snowFall: 0, w: [0, 1, 0, 0], t: 0, dayPhase: 0.8 };
+  for (let i = 0; i < 240; i++) {
+    st.t += 1 / 60;
+    c.update(1 / 60, hogLike, st);
+  }
+  let bad = 0, seated = 0;
+  scene.traverse((o) => {
+    if (!o.matrix) return;
+    seated++;
+    for (const v of o.matrix.elements) {
+      if (!Number.isFinite(v)) { bad++; break; }
+    }
+  });
+  ok(bad === 0, 'four summer seconds of critters leave no non-finite matrix',
+    `${seated} objects checked`);
+  ok(c.bflies.every((b) => plan.distance(b.x, b.z, b.home.x, b.home.z) < 12),
+    'and the butterflies stay by their garden');
+  st.night = 1;
+  for (let i = 0; i < 120; i++) { st.t += 1 / 60; c.update(1 / 60, hogLike, st); }
+  ok(c.owl.obj.visible, 'and the owl is out once it is dark');
+}
+
 function sNan() {
   /* v1's harness flagged any non-finite coordinate reaching the canvas, and
    * it is still the cheapest bug-per-line in either build.  The equivalent
@@ -969,7 +1041,7 @@ const SCENARIOS = {
   plan: sPlan, terrain: sTerrain, planet: sPlanet, clock: sClock,
   open: sOpen, gait: sGait, roll: sRoll, face: sFace, walk: sWalk, idle: sIdle, back: sBack, water: sWater, boat: sBoat,
   road: sRoad, roadmiss: sRoadmiss, abandon: sAbandon,
-  burrow: sBurrow, grass: sGrass, nan: sNan,
+  burrow: sBurrow, grass: sGrass, persist: sPersist, palette: sPalette, critters: sCritters, nan: sNan,
 };
 
 const arg = process.argv[2] || 'all';

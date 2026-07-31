@@ -124,3 +124,78 @@ export function createPuffs(scene) {
 
   return { burst, update };
 }
+
+/* ------------------------------------------------------------------ *
+ * Footprints.  Only where the ground would take one — snow and rain-soft
+ * earth — spawned off the same footfall edge as the sound and the dust,
+ * left where they were made, and gone by melting: they shrink away rather
+ * than pop, which on snow is what actually happens to a print.
+ * ------------------------------------------------------------------ */
+
+const PRINTS = 48;
+
+export function createPrints(scene) {
+  const rng = rngKit(6607);
+  const geo = new THREE.PlaneGeometry(0.034, 0.024).rotateX(-Math.PI / 2);
+  const mat = new THREE.MeshBasicMaterial({
+    transparent: true, opacity: 0.34, depthWrite: false,
+    polygonOffset: true, polygonOffsetFactor: -1,
+  });
+  const mesh = new THREE.InstancedMesh(geo, mat, PRINTS);
+  mesh.renderOrder = 2;
+  mesh.frustumCulled = false;
+  mesh.userData.noOutline = true;
+  scene.add(mesh);
+
+  const base = Array.from({ length: PRINTS }, () => new THREE.Matrix4());
+  const life = new Float32Array(PRINTS);
+  const span = new Float32Array(PRINTS);
+  const _m = new THREE.Matrix4();
+  const _r = new THREE.Matrix4();
+  const _p = new THREE.Vector3();
+  const _c = new THREE.Color();
+  const _zero = new THREE.Matrix4().makeScale(0, 0, 0);
+  let head = 0;
+  let side = 1;
+  for (let i = 0; i < PRINTS; i++) mesh.setMatrixAt(i, _zero);
+
+  /** Stamp one print at his feet, alternating sides of his line. */
+  function stamp(x, y, z, hd, color = 0x8890ae) {
+    const k = head;
+    head = (head + 1) % PRINTS;
+    side = -side;
+    const b = basisAt(x, z);
+    _m.makeBasis(b.east, b.up, b.north);
+    _m.setPosition(positionAt(x, y + 0.004, z, _p));
+    _r.makeRotationY(-hd);
+    _m.multiply(_r);
+    _r.makeTranslation(0.02, 0, 0.05 * side);
+    _m.multiply(_r);
+    base[k].copy(_m);
+    span[k] = life[k] = rng.range(9, 13);
+    mesh.setColorAt(k, _c.set(color));
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  }
+
+  function update(dt) {
+    let any = false;
+    for (let i = 0; i < PRINTS; i++) {
+      if (life[i] <= 0) continue;
+      any = true;
+      life[i] -= dt;
+      const t = Math.max(0, life[i] / span[i]);
+      const s = Math.sqrt(t);               // melts fast at the end
+      if (t <= 0) {
+        mesh.setMatrixAt(i, _zero);
+      } else {
+        _r.makeScale(s, 1, s);
+        _m.copy(base[i]).multiply(_r);
+        mesh.setMatrixAt(i, _m);
+      }
+    }
+    mesh.visible = any;
+    if (any) mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  return { stamp, update };
+}

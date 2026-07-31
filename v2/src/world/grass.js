@@ -106,6 +106,7 @@ function windPatch(mat, u) {
     prev?.(shader);
     Object.assign(shader.uniforms, {
       uTime: u.time, uWind: u.wind, uLen: u.len, uHog: u.hog, uHogR: u.hogR,
+      uTrail: u.trail,
     });
     shader.vertexShader = `
       uniform float uTime;
@@ -113,6 +114,7 @@ function windPatch(mat, u) {
       uniform float uLen;
       uniform vec3  uHog;
       uniform float uHogR;
+      uniform vec4  uTrail[16];
     ` + shader.vertexShader.replace(
       '#include <begin_vertex>',
       /* glsl */ `
@@ -134,17 +136,41 @@ function windPatch(mat, u) {
         /* He pushes it aside.  Measured in world space and then brought back
          * into the tuft's own frame, because every blade on a sphere stands
          * in a different direction. */
+        vec3 ex = normalize( vec3( instanceMatrix[0][0], instanceMatrix[0][1], instanceMatrix[0][2] ) );
+        vec3 ez = normalize( vec3( instanceMatrix[2][0], instanceMatrix[2][1], instanceMatrix[2][2] ) );
         vec3 away = root - uHog;
         float d = length( away );
         if ( d < uHogR ) {
           float k = 1.0 - d / uHogR;
           k = k * k * ( 3.0 - 2.0 * k );
           vec3 dir = normalize( away + vec3( 1e-5 ) );
-          vec3 ex = normalize( vec3( instanceMatrix[0][0], instanceMatrix[0][1], instanceMatrix[0][2] ) );
-          vec3 ez = normalize( vec3( instanceMatrix[2][0], instanceMatrix[2][1], instanceMatrix[2][2] ) );
           transformed.x += dot( dir, ex ) * k * up * 0.45;
           transformed.z += dot( dir, ez ) * k * up * 0.45;
           transformed.y -= k * up * 0.30 * transformed.y;      // and flattens it
+        }
+
+        /* And the grass REMEMBERS him: a wake of recently-walked-over spots,
+         * each still half-bent and slowly standing back up.  Only the
+         * STRONGEST marker bends a given blade — markers overlap wherever he
+         * lingers, and summing them folded blades through the ground into
+         * little green diamonds lying all around him. */
+        float bk = 0.0;
+        vec3 bdir = vec3( 0.0 );
+        for ( int i = 0; i < 16; i++ ) {
+          float tw = uTrail[i].w;
+          if ( tw <= 0.0 ) continue;
+          vec3 taway = root - uTrail[i].xyz;
+          float td = length( taway );
+          if ( td < 0.26 ) {
+            float tk = ( 1.0 - td / 0.26 );
+            tk = tk * tk * tw;
+            if ( tk > bk ) { bk = tk; bdir = normalize( taway + vec3( 1e-5 ) ); }
+          }
+        }
+        if ( bk > 0.0 ) {
+          transformed.x += dot( bdir, ex ) * bk * up * 0.34;
+          transformed.z += dot( bdir, ez ) * bk * up * 0.34;
+          transformed.y -= bk * up * 0.38 * transformed.y;
         }
       `
     );
@@ -164,6 +190,7 @@ export function buildGrass(parent) {
     len: { value: 1 },
     hog: { value: new THREE.Vector3(1e6, 1e6, 1e6) },
     hogR: { value: 0.34 },
+    trail: { value: Array.from({ length: 16 }, () => new THREE.Vector4(0, 0, 0, 0)) },
   };
   let seasonDen = 1;
 
@@ -270,6 +297,7 @@ export function buildGrass(parent) {
   const live = new Map();
   let queue = [];
   let lastX = 1e9, lastZ = 1e9;
+  let trailX = 1e9, trailZ = 1e9, trailHead = 0;
   let blades = 0;
 
   function reseat(px, pz) {
@@ -346,6 +374,18 @@ export function buildGrass(parent) {
       uniforms.time.value += dt;
       positionAt(hogX, hogY + 0.05, hogZ, _hogWorld);
       uniforms.hog.value.copy(_hogWorld);
+
+      /* The wake: drop a marker every third of a metre of HIS ground (not
+       * per second — a standing hedgehog lays no trail), and let every
+       * marker stand back up over ten seconds. */
+      const trail = uniforms.trail.value;
+      for (const t of trail) if (t.w > 0) t.w = Math.max(0, t.w - dt / 10);
+      if (distance(hogX, hogZ, trailX, trailZ) > 0.32) {
+        trailX = hogX; trailZ = hogZ;
+        const slot = trail[trailHead];
+        trailHead = (trailHead + 1) % trail.length;
+        slot.set(_hogWorld.x, _hogWorld.y, _hogWorld.z, 1);
+      }
 
       if (distance(hogX, hogZ, lastX, lastZ) > CELL * 0.35) {
         reseat(hogX, hogZ);

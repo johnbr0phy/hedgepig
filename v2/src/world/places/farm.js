@@ -111,7 +111,11 @@ export function buildHens(root, ctx) {
   coop.rotation.y = -0.6;
   g.add(coop);
   ctx.block(-3.2, 2.4, 1.0);
-  ctx.interact(-1.9, 2.4, 'the coop', () => ctx.flash('warm, and full of grumbling'));
+  ctx.interact(-1.9, 2.4, 'the coop', ctx.lines(
+    'warm, and full of grumbling',
+    'an egg rolls somewhere inside',
+    'the grumbling stops. then starts again, about him.'
+  ));
 
   // scratched-over ground: straw, instanced and seated on the surface
   const strawMat = cel({ color: PAL.straw, bands: 2, tint: 0x6f628e, side: THREE.DoubleSide });
@@ -262,7 +266,11 @@ export function buildFarm(root, ctx) {
   barn.rotation.y = 0.3;
   g.add(barn);
   ctx.block(-1.5, 4.5, 2.6);
-  ctx.interact(-1.5, 2.0, 'the barn door', () => ctx.flash('it smells of hay and old rain'));
+  ctx.interact(-1.5, 2.0, 'the barn door', ctx.lines(
+    'it smells of hay and old rain',
+    'something above shifts its weight on a beam',
+    'at dusk the swallows stitch this doorway shut'
+  ));
 
   // bales stacked against the barn, and a few loose
   for (let i = 0; i < 6; i++) {
@@ -290,7 +298,11 @@ export function buildFarm(root, ctx) {
   ctx.put(trough, 4.5, -2.5);
   g.add(trough);
   ctx.block(4.5, -2.5, 0.8);
-  ctx.interact(4.5, -3.4, 'the trough', () => ctx.flash('he drinks for a long time'));
+  ctx.interact(4.5, -3.4, 'the trough', ctx.lines(
+    'he drinks for a long time',
+    'his reflection has a leaf on its nose. so, it turns out, does he',
+    'green water. wonderful, apparently.'
+  ));
 
   /* --- ruts: two dark bands worn across the yard --- */
   const rutMat = cel({ color: 0x4f4233, bands: 2, tint: 0x5f5286, transparent: true, opacity: 0.5 });

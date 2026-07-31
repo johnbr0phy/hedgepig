@@ -343,16 +343,5 @@ export function bale({ seed = 29, r = 0.42 } = {}) {
   return shadowify(m);
 }
 
-/** A soft painted shadow, for props whose real shadow is too small to read. */
-export function contactShadow(size = 0.6, opacity = 0.26) {
-  const m = new THREE.Mesh(
-    new THREE.PlaneGeometry(size, size),
-    flat({ color: 0x54486a, map: blobTex(), transparent: true, opacity, depthWrite: false, cache: false })
-  );
-  m.rotation.x = -Math.PI / 2;
-  m.userData.noOutline = true;
-  m.renderOrder = 1;
-  return m;
-}
-
-export { MAT as PROP_MAT };
+/* `contactShadow` and the `PROP_MAT` re-export lived here since the disc
+ * rebuild with no callers at all — deleted, as the backlog's debt list asks. */

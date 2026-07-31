@@ -101,3 +101,36 @@ Newest last. One line each: date, workstream, what landed, what the sweep found.
   far side is still bare of props; interactables still say one line;
   footprints and trampled-grass memory; merging the ~830 rigid props by
   material (draw-call bulk).
+- **2026-07-31 — the second fifty (interactive session).** Landed, 92/92
+  green, deployed to johnbr0phy.github.io/hedgepig/v2 by the new Pages
+  workflow (which runs the harness as a deploy gate). Him: footprints in
+  snow and mud off the real footfalls; the grass remembers his path (16
+  fading trail markers in the blade shader — strongest-only, because
+  summing them folded blades through the ground); he balks at the water's
+  edge, laps at the lake, nibbles what is edible, carries autumn leaves,
+  sneezes after a good sniff, darkens in the rain; home after dark sleeps
+  him to a visibly wound-forward dawn. Company: the hoglet celebrates
+  finding him, a second follows the first from leg six, N names them.
+  World: squirrel up the trunk, mice out of the straw, dragonflies over
+  the mire, snails after rain, moths round the town lamp, the cat's ear
+  and tail answer him, ducks with wake rings and dabbling, a dew-lit
+  spiderweb, barn swallows at dusk, molehills that accrue. Sky and
+  weather: dawn fog on the mire, puddles after rain, cicadas at summer
+  noon, distant lightning with late thunder, leaf-bursts off bumped
+  autumn trees, snow-dusted canopies, a winter aurora, constellations
+  (one of them a hedgehog — the birdbath mentions it). Sound: car
+  doppler, grass swish off his own gait, panned hoots, a dawn phrase,
+  boat creaks, culvert drips, M now cycles on/quiet/off. Quiet rewards:
+  every interactable owns three rotating lines, five thistles knit their
+  rings together with a flower path, autumn berries earn a fourth heart
+  for the leg, C photo mode auto-orbits and S keeps a shot, J opens a
+  journal of firsts, fireflies light him at deep night with the world's
+  only point light, and standing in all ten places blooms the start of
+  the world. Debt: the static merge folds 1 205 prop meshes into 78
+  (frame calls 1 104 → 837 at the measured view), contactShadow/PROP_MAT
+  deleted, and the harness gained persist/palette/critters scenarios.
+  **Sweep found / still open:** the orbit far side wants real props, not
+  just labels; footprint decals could rotate with the slope; the second
+  hoglet deserves its own name; the static merge leaves thorns and grass
+  as the remaining call bulk — instanced brambles would halve what is
+  left.

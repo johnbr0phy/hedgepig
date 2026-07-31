@@ -25,7 +25,7 @@ import { clamp, damp, wrapAng } from '../core/util.js';
 const SCALE = 0.55;
 const KEEP = 0.5;              // how far behind it settles
 
-export function createHoglet(scene) {
+export function createHoglet(scene, { seed = 909, phase = 41.7 } = {}) {
   const parts = buildHog();
   parts.root.matrixAutoUpdate = false;
   parts.root.visible = false;
@@ -34,11 +34,11 @@ export function createHoglet(scene) {
     parts.shadow.visible = false;
     scene.add(parts.shadow);
   }
-  const anim = createAnimator(parts, 909);
+  const anim = createAnimator(parts, seed);
 
   const h = {
     live: false, announced: false,
-    x: 0, z: 0, y: 0, hd: 0, gait: 0, turning: 0,
+    x: 0, z: 0, y: 0, hd: 0, gait: 0, turning: 0, cele: 0,
   };
 
   const _m = new THREE.Matrix4();
@@ -85,9 +85,11 @@ export function createHoglet(scene) {
       h.x = hog.x + (Math.cos(back) * 1.6) / cs;
       h.z = hog.z + Math.sin(back) * 1.6;
       h.hd = hog.hd;
+      h.cele = 1.1;              // it is VERY pleased to have found him
       if (!h.announced) { h.announced = true; event = 'arrived'; }
     }
     if (!h.live) return event;
+    if (h.cele > 0) h.cele = Math.max(0, h.cele - dt);
 
     const d = distance(h.x, h.z, hog.x, hog.z);
     /* Left too far behind (the boat, the culvert, a long roll), it simply
@@ -123,9 +125,10 @@ export function createHoglet(scene) {
     h.y = heightAt(h.x, h.z);
 
     anim.update({
-      gait: h.gait, speed: hog.speed * 1.12, curl: 0, ball: 0,
-      shiver: hog.shiver, lookYaw: 0, turning: h.turning, night: hog.night,
-    }, dt, now + 41.7);          // its own phase: not a mirror of his blinks
+      gait: h.gait, speed: (hog.speed || 0.85) * 1.12, curl: 0, ball: 0,
+      shiver: hog.shiver || 0, lookYaw: 0, turning: h.turning, night: hog.night || 0,
+      wet: hog.wet || 0, celebrate: h.cele,
+    }, dt, now + phase);         // its own phase: not a mirror of his blinks
     parts.root.visible = true;
     if (parts.shadow) parts.shadow.visible = true;
     seat();

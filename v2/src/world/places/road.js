@@ -455,14 +455,36 @@ export function buildTown(root, ctx) {
   tail.rotation.set(Math.PI / 2, 0, 0.4);
   cat.add(tail);
   cat.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  cat.userData.noMerge = true;        // her tail and ear animate in place
   const cu = Math.cos(2.4) * 8, cv = Math.sin(2.4) * 8;
   ctx.put(cat, cu, cv);
   cat.position.y += 0.44;      // asleep on the wall
   cat.rotation.y = 2.1;
   g.add(cat);
-  ctx.interact(cu * 0.86, cv * 0.86, 'the cat on the wall',
-    () => ctx.flash('one ear turns. that is all you get.'));
+  ctx.interact(cu * 0.86, cv * 0.86, 'the cat on the wall', ctx.lines(
+    'one ear turns. that is all you get.',
+    'the tail-tip counts him past: one (1) hedgehog',
+    'a slow blink. in cat, that is a kindness.'
+  ));
   ctx.out.cat = cat;
+
+  /* The line above is now literally true: a hedgehog underneath is worth
+   * one ear and a livelier tail, and precisely nothing else — a sleeping
+   * cat's whole opinion of the world.  The cat is seated rigidly, but its
+   * PARTS still animate locally under the seat. */
+  {
+    const catAt = ctx.at(cu, cv);
+    const ears = cat.children.filter((c) => c.geometry?.type === 'ConeGeometry');
+    let watch = 0, ct = 0;
+    ctx.updaters.push((dt, hog) => {
+      if (!hog) return;
+      ct += dt;
+      const dx = hog.x - catAt.x, dz = hog.z - catAt.z;
+      watch += (((dx * dx + dz * dz < 2.6) ? 1 : 0) - watch) * Math.min(1, 3 * dt);
+      tail.rotation.z = 0.4 + Math.sin(ct * (1.4 + watch * 4.5)) * (0.05 + watch * 0.28);
+      if (ears[0]) ears[0].rotation.y = watch * 0.6;
+    });
+  }
 
   root.add(g);
   return g;

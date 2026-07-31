@@ -172,6 +172,8 @@ export function createClimate({
       cloudShade: _a.set(PAL.cloudShade).lerp(_b.set(0x5c648e), n).getHex(),
       // thirteen lunations a year, so two evenings apart is a different moon
       moonPhase: (state.yearPhase * 13) % 1,
+      // the aurora belongs to deep winter nights and nowhere else
+      aurora: n * w[3],
     });
 
     /* Fog takes the horizon colour, so the world dissolves into its own sky.
@@ -230,6 +232,14 @@ export function createClimate({
     seasonColor('canopy', w, _c);
     seasonColor('leaf', w, _d);
     seasonColor('stem', w, _e);
+    /* Snow dusts the trees before night blues them: a winter wood should
+     * whiten, not just pale. */
+    if (state.snow > 0) {
+      _a.set(0xdfe8f0);
+      _c.lerp(_a, state.snow * 0.55);
+      _d.lerp(_a, state.snow * 0.40);
+      _e.lerp(_a, state.snow * 0.40);
+    }
     if (n > 0) {
       _a.set(0x46527e);
       _c.lerp(_a, n * 0.55);

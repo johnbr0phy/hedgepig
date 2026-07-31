@@ -10,12 +10,13 @@ import { buildPlaces } from './world/places/index.js';
 import { createClimate } from './world/season.js';
 import { createWeather } from './world/weather.js';
 import { R, CENTER, basisAt, positionAt } from './world/planet.js';
-import { placeAt, PLACE, CIRC } from './world/plan.js';
+import { placeAt, placeKindAt, PLACE, WOOD, CIRC, CENTRES } from './world/plan.js';
+import { waterDepthAt } from './world/terrain.js';
 import { Hog } from './hog/hog.js';
 import { createGame } from './game/game.js';
 import { createAudio } from './core/audio.js';
 import { createCritters } from './world/critters.js';
-import { createPuffs } from './core/puffs.js';
+import { createPuffs, createPrints } from './core/puffs.js';
 import { createHoglet } from './game/hoglet.js';
 
 /* ------------------------------------------------------------------ *
@@ -98,9 +99,24 @@ const hud = createHud();
 const weather = createWeather(scene);
 const climate = createClimate({ scene, sun, fill, bounce, hemi, sky, grass: world.grass, pipeline });
 const audio = createAudio();
-const critters = createCritters(scene, { plip: () => audio.plip(), hoot: () => audio.hoot() });
+const critters = createCritters(scene, {
+  plip: () => audio.plip(),
+  /* The hoot arrives from the owl's side of the frame. */
+  hoot: () => {
+    const owl = critters?.owl;
+    if (!owl) return audio.hoot();
+    const b = Math.atan2(owl.z - hog.z, owl.x - hog.x);
+    audio.hoot(Math.max(-0.8, Math.min(0.8, Math.sin(b - chase.yaw))));
+  },
+});
 const puffs = createPuffs(scene);
+const prints = createPrints(scene);
 const hoglet = createHoglet(scene);
+const hoglet2 = createHoglet(scene, { seed: 331, phase: 87.3 });
+/* The second hoglet follows the FIRST — a train, each watching the one
+ * ahead.  The adapter is mutated in place each frame; a hoglet is enough
+ * of a hedgehog for another hoglet's purposes. */
+const hoglet1Leader = { x: 0, z: 0, hd: 0, gait: 0, speed: 0.85, shiver: 0, night: 0, wet: 0 };
 const game = createGame({ world, hog, hud, climate, audio });
 
 /* The tap ripple: one ring, reused, spreading from wherever was called. */
@@ -137,8 +153,19 @@ hog.onFootfall = () => {
         : { n: 2, up: 0.07, spread: 0.06, px: 16, color: 0xc9ba90 };
     puffs.burst(hog.x, hog.y + 0.004, hog.z, kind);
   }
+  // and where the ground would take a print, it takes one
+  if (s.snow > 0.45) prints.stamp(hog.x, hog.y, hog.z, hog.hd, 0x8f9ab8);
+  else if (s.wet > 0.4) prints.stamp(hog.x, hog.y, hog.z, hog.hd, 0x5f5444);
 };
 hog.onSniff = () => audio.sniff();
+hog.onSneeze = () => {
+  audio.sneeze();
+  puffs.burst(hog.x, hog.y + 0.07, hog.z, { n: 3, up: 0.05, spread: 0.12, px: 12, color: 0xe8dcc8 });
+};
+hog.onNom = () => {
+  audio.nom();
+  puffs.burst(hog.x, hog.y + 0.05, hog.z, { n: 4, up: 0.08, spread: 0.08, px: 10, color: 0xd8c8a8 });
+};
 
 /* ------------------------------- the frame ------------------------------- */
 function resize() {
@@ -191,12 +218,44 @@ window.addEventListener('keydown', (e) => {
   // two quiet toggles, for seeing what the ink and the grade actually do
   if (e.code === 'KeyO') pipeline.enabled.ink = !pipeline.enabled.ink;
   if (e.code === 'KeyG') pipeline.enabled.grade = !pipeline.enabled.grade;
-  if (e.code === 'KeyM') hud.flash(audio.toggleMute() ? 'sound off' : 'sound on');
+  if (e.code === 'KeyM') {
+    const m = audio.toggleMute();
+    hud.flash(m === 'on' ? 'sound on' : m === 'quiet' ? 'just the weather' : 'sound off');
+  }
   if (e.code === 'KeyC') {
     const on = document.body.classList.toggle('photo');
     if (!on) hud.flash('back to the panels');
   }
+  if (e.code === 'KeyJ') {
+    const LABELS = {
+      thistle: 'found a golden thistle',
+      berries: 'ate three autumn berries at once',
+      hoglet: 'a hoglet found him',
+      hoglet2: 'and then another one',
+      boat: 'rode the boat across the lake',
+      culvert: 'went under the road',
+      rainbow: 'stood beneath a rainbow',
+      storm: 'weathered a storm',
+      winter: 'stood out in deep snow',
+      owl: 'heard the owl in the wood',
+      slept: 'slept a whole night in a burrow',
+      everywhere: 'stood in every place there is',
+    };
+    hud.toggleJournal(Object.keys(game.state.flags).map((k) => LABELS[k]).filter(Boolean));
+  }
+  if (e.code === 'KeyN') {
+    hogletName = HOGLET_NAMES[(HOGLET_NAMES.indexOf(hogletName) + 1) % HOGLET_NAMES.length];
+    localStorage.setItem('hedgepig.hoglet', hogletName);
+    hud.flash(`the hoglet answers to ${hogletName} now`);
+  }
+  if (e.code === 'KeyS' && document.body.classList.contains('photo') && import.meta.env?.DEV) {
+    window.__shot?.(`photo-${Math.floor(acc * 10)}`, 1400, 800);
+    hud.flash('kept, in .shots');
+  }
 });
+
+const HOGLET_NAMES = ['Pip', 'Bramble', 'Conker', 'Sorrel', 'Moss', 'Teasel', 'Hazel', 'Dot'];
+let hogletName = localStorage.getItem('hedgepig.hoglet') || 'Pip';
 
 hud.onStart = () => {};
 document.getElementById('start')?.addEventListener('click', () => hud.begin(), { once: true });
@@ -219,12 +278,113 @@ function seatLight(light, local, basis, origin, dist) {
   light.target.updateMatrixWorld();
 }
 
+/* ------------------------------ orbit labels ------------------------------ *
+ * From orbit the planet becomes a map: each place gets its name, floating
+ * over its centre, on the near side of the globe only. */
+const orbitLabels = [];
+{
+  const hudEl = document.getElementById('hud');
+  for (const c of CENTRES) {
+    const div = document.createElement('div');
+    div.textContent = PLACE[c.kind]?.name ?? '';
+    div.style.cssText =
+      'position:absolute;transform:translate(-50%,-50%);font-size:0.72rem;' +
+      'color:#443e58;background:rgba(255,253,248,0.6);border-radius:0.5rem;' +
+      'padding:0.06rem 0.4rem;display:none;white-space:nowrap;';
+    hudEl?.appendChild(div);
+    orbitLabels.push({ div, centre: c });
+  }
+}
+const _lp = new THREE.Vector3();
+function updateOrbitLabels(on) {
+  for (const L of orbitLabels) {
+    if (!on) { L.div.style.display = 'none'; continue; }
+    positionAt(L.centre.x, 1.5, L.centre.z, _lp);
+    // near side only: the label's surface point must face the camera
+    const facing = _lp.clone().sub(CENTER).normalize()
+      .dot(camera.position.clone().sub(CENTER).normalize());
+    _lp.project(camera);
+    const ok = facing > 0.15 && _lp.z < 1;
+    L.div.style.display = ok ? 'block' : 'none';
+    if (ok) {
+      L.div.style.left = `${(_lp.x * 0.5 + 0.5) * window.innerWidth}px`;
+      L.div.style.top = `${(-_lp.y * 0.5 + 0.5) * window.innerHeight}px`;
+    }
+  }
+}
+
 /* --------------------------------- loop --------------------------------- */
 const clock = new THREE.Clock();
 let acc = 0;
 let wetFor = 0;
 let rollPuffT = 0;
 let prevBallFx = 0;
+let carryIn = 30;
+let lapT = 0;
+let boltIn = 20;
+let thunderIn = -1;
+let prevBlocked = 0;
+let creakT = 0;
+let dripT = 0;
+let prevWetJ = 0;
+let lanternAmt = 0;
+const _lanternP = new THREE.Vector3();
+const _lanternM = new THREE.Matrix4();
+
+/* Rain on his quills: a scatter of glints over the mantle that light up in
+ * the wet and dry off slowly after.  Children of his trunk, so they curl
+ * when he curls. */
+const glints = (() => {
+  const N2 = 14;
+  const pos = new Float32Array(N2 * 3);
+  const grng = { s: 9901, next() { this.s = (this.s * 16807) % 2147483647; return this.s / 2147483647; } };
+  let placed = 0;
+  while (placed < N2) {
+    const y = grng.next() * 2 - 1;
+    const a = grng.next() * Math.PI * 2;
+    const r = Math.sqrt(Math.max(0, 1 - y * y));
+    const u = new THREE.Vector3(Math.cos(a) * r, y, Math.sin(a) * r);
+    if (u.dot(new THREE.Vector3(0.8, -0.6, 0).normalize()) > 0.1) continue;  // mantle only
+    pos[placed * 3] = u.x * 0.134;
+    pos[placed * 3 + 1] = u.y * 0.082;
+    pos[placed * 3 + 2] = u.z * 0.091;
+    placed++;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const pts = new THREE.Points(geo, new THREE.PointsMaterial({
+    size: 0.008, color: 0xeaf4ff, transparent: true, opacity: 0,
+    depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true,
+  }));
+  pts.visible = false;
+  hog.parts.trunk.add(pts);
+  return pts;
+})();
+let glintAmt = 0;
+
+/* The firefly lantern rig: one warm point light and three motes. */
+const lantern = new THREE.PointLight(0xd8f08a, 0, 1.9, 1.6);
+lantern.visible = false;
+scene.add(lantern);
+const flies = new THREE.Group();
+for (let i = 0; i < 3; i++) {
+  const f = new THREE.Mesh(
+    new THREE.SphereGeometry(0.008, 6, 5),
+    new THREE.MeshBasicMaterial({ color: 0xe4f89a, transparent: true, opacity: 0, fog: false, depthWrite: false })
+  );
+  f.userData.noOutline = true;
+  flies.add(f);
+}
+flies.visible = false;
+scene.add(flies);
+
+/* The lightning is DOM: a white wash over everything for a tenth of a
+ * second.  Cheaper than touching the lighting rig, and honester too — a
+ * flash at the eye is what lightning does to a frame. */
+const bolt = document.createElement('div');
+bolt.style.cssText =
+  'position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;transition:opacity 90ms ease;z-index:5;';
+document.body.appendChild(bolt);
 const _rippleM = new THREE.Matrix4();
 const _rippleS = new THREE.Vector3();
 
@@ -243,7 +403,57 @@ function frame() {
 
   hog.shiver = state.snow * 0.9;
   hog.night = state.night;
-  hog.rainHurry = state.wet * 0.18;    // rain hurries him along
+  hog.wet = state.wet;                 // rain darkens his coat
+  hog.rainHurry = state.wet * 0.18;    // and hurries him along
+
+  /* An autumn leaf worth carrying, every so often, while he is out walking. */
+  carryIn -= dt;
+  if (carryIn <= 0) {
+    carryIn = 34 + Math.random() * 40;
+    if (state.leafFall > 0.15 && hog.gait > 0.5 && hog.carry <= 0) hog.carry = 12 + Math.random() * 8;
+  }
+
+  /* Heavy rain carries the occasional distant storm: a flash, and its
+   * thunder arriving late, the way thunder does. */
+  if (state.wet > 0.55) {
+    boltIn -= dt;
+    if (boltIn <= 0) {
+      boltIn = 24 + Math.random() * 40;
+      bolt.style.opacity = '0.34';
+      setTimeout(() => { bolt.style.opacity = '0'; }, 110);
+      thunderIn = 1.2 + Math.random() * 2.2;
+    }
+  }
+  if (thunderIn > 0) {
+    thunderIn -= dt;
+    if (thunderIn <= 0) { audio.thunder(); thunderIn = -1; }
+  }
+
+  /* Brushing into an autumn tree shakes leaves loose over him. */
+  if (hog.blocked > 0.02 && prevBlocked === 0 && state.leafFall > 0.15 &&
+      placeKindAt(hog.x, hog.z) === WOOD) {
+    puffs.burst(hog.x, hog.y + 0.5, hog.z, { n: 6, up: -0.05, spread: 0.25, px: 30, color: 0xc98a45 });
+  }
+  prevBlocked = hog.blocked;
+
+  /* The boat creaks under him, and the culvert drips over him. */
+  creakT -= dt;
+  if (hog.afloat && creakT <= 0) { creakT = 1.6 + Math.random() * 2.8; audio.creak(); }
+  dripT -= dt;
+  if (hog.under && dripT <= 0) { dripT = 0.9 + Math.random() * 1.6; audio.drip(); }
+
+  /* Drinking: his nose down at the waterline is a nose in the water. */
+  lapT -= dt;
+  if (lapT <= 0 && (hog.anim?.face.nuzzleAmt || 0) > 0.75) {
+    const cs = Math.max(0.08, Math.cos(hog.z / R));
+    const nx = hog.x + (Math.cos(hog.hd) * 0.16) / cs;
+    const nz = hog.z + Math.sin(hog.hd) * 0.16;
+    if (waterDepthAt(nx, nz) > 0.004) {
+      lapT = 3.5;
+      audio.lap();
+      critters.splash(nx, nz);
+    }
+  }
   /* A good soaking earns a shake-off when the rain stops. */
   if (state.wet > 0.35) wetFor += dt;
   else if (wetFor > 5 && state.wet < 0.08) { hog.shake = Math.max(hog.shake, 1.1); wetFor = 0; }
@@ -253,7 +463,57 @@ function frame() {
   weather.update(dt, hog, camera, state);
   critters.update(dt, hog, state);
   if (hoglet.update(dt, hog, game.state.leg >= 3, acc) === 'arrived') {
-    hud.flash('a hoglet has found him — it will not be left behind');
+    hud.flash(`a hoglet has found him — ${hogletName}, and it will not be left behind`);
+    game.note('hoglet');
+  }
+  const h1 = hoglet.state;
+  Object.assign(hoglet1Leader, {
+    x: h1.x, z: h1.z, hd: h1.hd, gait: h1.gait,
+    speed: hog.speed, shiver: hog.shiver, night: hog.night, wet: hog.wet,
+  });
+  if (hoglet2.update(dt, hoglet1Leader, game.state.leg >= 6 && h1.live, acc) === 'arrived') {
+    hud.flash('another hoglet — a whole procession now');
+    game.note('hoglet2');
+  }
+
+  /* Firsts the game cannot see from where it stands. */
+  if (hog.afloat) game.note('boat');
+  if (hog.under) game.note('culvert');
+  if (state.snow > 0.6) game.note('winter');
+  if (prevWetJ > 0.4 && state.wet < 0.08 && state.night < 0.4) game.note('rainbow');
+  prevWetJ = state.wet;
+
+  /* The firefly lantern: at deep night a few of them take to him, and he
+   * walks in his own small light.  One real point light — the only one in
+   * the world besides the sun — and it is his. */
+  const lanternOn = state.night > 0.72 && state.snow < 0.5;
+  lanternAmt += ((lanternOn ? 1 : 0) - lanternAmt) * Math.min(1, 2 * dt);
+  lantern.visible = lanternAmt > 0.02;
+  if (lantern.visible) {
+    const b = basisAt(hog.x, hog.z);
+    positionAt(hog.x, hog.y + 0.28, hog.z, _lanternP);
+    lantern.position.copy(_lanternP);
+    lantern.intensity = lanternAmt * 0.55;
+    flies.visible = true;
+    flies.children.forEach((f, i) => {
+      const a = acc * (0.9 + i * 0.23) + i * 2.1;
+      f.position.set(Math.cos(a) * 0.16, Math.sin(a * 1.7) * 0.07, Math.sin(a) * 0.16);
+      f.material.opacity = lanternAmt * (0.5 + 0.5 * Math.sin(acc * 6 + i * 2.6));
+    });
+    flies.position.copy(_lanternP);
+    flies.quaternion.setFromRotationMatrix(_lanternM.makeBasis(b.east, b.up, b.north));
+  } else {
+    flies.visible = false;
+  }
+
+  /* Photo mode drifts: a slow orbit for as long as the panels are away. */
+  if (document.body.classList.contains('photo')) chase.yaw += dt * 0.045;
+
+  /* Wet quills glint; the shine dries off over half a minute after. */
+  glintAmt = Math.max(state.wet, glintAmt - dt / 32);
+  glints.visible = glintAmt > 0.03 && !hog.under;
+  if (glints.visible) {
+    glints.material.opacity = glintAmt * (0.35 + 0.35 * Math.sin(acc * 7));
   }
   audio.update(dt, hog, state, world);
 
@@ -268,6 +528,7 @@ function frame() {
   }
   prevBallFx = hog.ball;
   puffs.update(dt);
+  prints.update(dt);
 
   // the tap ripple spreading from the call
   if (rippleAt.t > 0) {
@@ -291,12 +552,14 @@ function frame() {
     camera.position.copy(CENTER).addScaledVector(orbitDir, R * 3.1);
     camera.up.set(0, 1, 0);
     camera.lookAt(CENTER);
+    updateOrbitLabels(true);
     sun.target.position.copy(CENTER);
     sun.position.copy(CENTER).add(new THREE.Vector3(-1.05, 0.95, 0.75).multiplyScalar(R * 2.2));
     sun.target.updateMatrixWorld();
     hemi.position.set(0, 1, 0);
     bounce.visible = false;
   } else {
+    updateOrbitLabels(false);
     bounce.visible = true;
     chase.update(dt);
     const b = basisAt(hog.x, hog.z);
@@ -317,7 +580,7 @@ function frame() {
 frame();
 
 /* a little exposed for tuning from the console */
-window.__hedgepig = { scene, camera, renderer, pipeline, world, hog, chase, climate, weather, game, sky, sun, fill, hemi, audio, critters, puffs, hoglet, THREE };
+window.__hedgepig = { scene, camera, renderer, pipeline, world, hog, chase, climate, weather, game, sky, sun, fill, hemi, audio, critters, puffs, prints, hoglet, THREE };
 
 if (import.meta.env?.DEV) {
   /** Dev capture: render one frame at a fixed size and post it to the server. */

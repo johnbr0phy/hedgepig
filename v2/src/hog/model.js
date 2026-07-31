@@ -243,6 +243,18 @@ export function buildHog() {
     }
   }
 
+  /* A leaf he sometimes carries — held at the mouth, hidden until the
+   * animator says otherwise.  Its own role, so autumn colours it. */
+  const leafInMouth = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.05, 0.038),
+    cel({ color: 0xc98a45, bands: 2, tint: 0x6a5a86, side: THREE.DoubleSide, role: 'leaf', cache: false })
+  );
+  leafInMouth.position.set(SNOUT.x + SNOUT.rx * 0.7, SNOUT.y - 0.008, 0);
+  leafInMouth.rotation.set(-Math.PI / 2 + 0.35, 0, 0.1);
+  leafInMouth.visible = false;
+  leafInMouth.userData.noOutline = true;
+  face.add(leafInMouth);
+
   /* Ears: small, low, and at the mantle's front edge — on the badge they are
    * barely more than two notches in the coat line. */
   const earMat = cel({ color: PAL.hogCreamShade, bands: 'soft', tint: 0x8f7a9a, flat: false });
@@ -543,6 +555,7 @@ export function buildHog() {
 
   return {
     root, trunk, body, mantle, face, snout, nose, eyes, ears, blushes, whiskers,
+    leafInMouth,
     legs, shadow, setLook, lookParts,
     coats: [coatDark, coatPale, coatMid],
     coatTuck,

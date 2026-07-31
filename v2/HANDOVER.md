@@ -269,6 +269,12 @@ across 250 instanced chunks.
   already does the geometry work), which would take the call count down by
   an order of magnitude. The `pixelBudget` guard (4.6 M px) already caps
   resolution on dense screens.
+  **Done (2026-07-31):** the static merge in `world/index.js` folds 1 205
+  prop meshes into 78 by (material, shadow flags, renderOrder) — frame
+  calls 1 104 → 837 at the same view. Excluded by `userData.noMerge`:
+  anything that toggles visibility (thorns, seasonal), animates in place
+  (the cat), is transparent, instanced, or pickable. The remaining bulk is
+  the 260 brambles and the grass chunks.
 - ~~No sound~~ — `core/audio.js` (2026-07-30): everything synthesised, nothing
   sampled. Footfalls come off the real gait (`anim.js` reports the frame a
   foot plants — the audio runs on that edge, not a timer), the beds follow

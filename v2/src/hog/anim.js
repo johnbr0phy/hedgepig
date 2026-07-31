@@ -93,9 +93,16 @@ export function createAnimator(parts, seed = 4242) {
     scratch: 0,
     scratchIn: 16,
     prevCele: 0,
+    prevNuzzle: 0,
+    sneeze: 0,
   };
 
   const state = { cycle: 0, bob: 0, roll: 0, pitch: 0, sway: 0 };
+
+  /* The coat's true colours, kept so the rain-darkening is set absolutely
+   * each frame — a multiply per frame compounds to black inside a minute. */
+  const quillMats = [...new Set([...parts.coats.map((c) => c.material), parts.mantle.material])];
+  const quillBases = quillMats.map((m) => m.color.clone());
 
   /**
    * @param s  the hedgepig: gait, speed, curl, shiver, lookYaw, walked
@@ -186,6 +193,21 @@ export function createAnimator(parts, seed = 4242) {
     if (face.scratch > 0) face.scratch = Math.max(0, face.scratch - dt / 1.2);
     const scratch = Math.sin(clamp(face.scratch, 0, 1) * Math.PI);
 
+    /* The balk: nose over the water, a head-shake, and a paw at it. */
+    const balk = Math.sin(clamp((s.balk || 0) / 1.4, 0, 1) * Math.PI);
+
+    /* And, rarely, coming up from a good long sniff: a sneeze. */
+    if (face.prevNuzzle > 0.6 && face.nuzzleAmt < 0.2 && rng() < 0.12) {
+      face.sneeze = 0.5;
+      s.onSneeze?.();
+    }
+    face.prevNuzzle = face.nuzzleAmt;
+    if ((face.sneeze || 0) > 0) face.sneeze = Math.max(0, face.sneeze - dt);
+    const snT = 1 - clamp((face.sneeze || 0) / 0.5, 0, 1);      // 0 start → 1 done
+    const sneeze = face.sneeze > 0
+      ? (snT < 0.35 ? (snT / 0.35) * 0.16 : -Math.sin(((snT - 0.35) / 0.65) * Math.PI) * 0.34)
+      : 0;
+
     /* ------------------------------ the legs ---------------------------- */
     for (const L of legs) {
       const p = (state.cycle + L.phase) % 1;
@@ -237,6 +259,15 @@ export function createAnimator(parts, seed = 4242) {
       _q.setFromUnitVectors(_from, _dir);
       L.obj.quaternion.copy(_q);
       L.obj.position.y = L.rest.y + 0.012 * scratch;
+    }
+
+    /* And the balk takes a front paw: raised and patting at the water. */
+    if (balk > 0.01) {
+      const L = legs[0];                       // front-left
+      _dir.set(0.75 + Math.sin(now * 9) * 0.25, -0.35, 0.1).normalize();
+      _q.setFromUnitVectors(_from, _dir);
+      L.obj.quaternion.copy(_q);
+      L.obj.position.y = L.rest.y + 0.010 * balk;
     }
 
     /* ------------------------------ the body ---------------------------- *
@@ -292,10 +323,14 @@ export function createAnimator(parts, seed = 4242) {
     const emerge = ball * ball;
     p.coatTuck.scale.setScalar(Math.max(0.0001, emerge));
     p.coatTuck.visible = ball > 0.3;
-    // and the skin between them goes coat-brown, so the gaps read as the
-    // shadow between needles rather than as bald cream — on emerge², so the
-    // dye is gone from his front before his face is anything but a ball
-    p.body.material.color.lerpColors(_skinCream, _skinQuill, emerge * emerge);
+    /* The skin between them goes coat-brown, so the gaps read as the shadow
+     * between needles rather than as bald cream — on emerge², so the dye is
+     * gone from his front before his face is anything but a ball.  And rain
+     * darkens the lot of him: a dry-looking coat in a downpour is the small
+     * wrongness you feel before you can name it. */
+    const wetDark = 1 - clamp(s.wet || 0, 0, 1) * 0.13;
+    p.body.material.color.lerpColors(_skinCream, _skinQuill, emerge * emerge).multiplyScalar(wetDark);
+    quillMats.forEach((m, i) => m.color.copy(quillBases[i]).multiplyScalar(wetDark));
 
     /* ------------------------------ the face ---------------------------- */
     p.setLook(s.lookYaw * (1 - ball));
@@ -326,9 +361,18 @@ export function createAnimator(parts, seed = 4242) {
     );
     const snuffle = (1 - moving) * (Math.sin(now * 5.2) * 0.5 + Math.sin(now * 2.1) * 0.5);
     p.face.rotation.z = state.pitch * (1 - ball) + snuffle * 0.05 * (1 - doze)
-      - face.nuzzleAmt * 0.42 - doze * 0.20 + yawn * 0.24;
+      - face.nuzzleAmt * 0.42 - doze * 0.20 + yawn * 0.24
+      - balk * 0.18 + sneeze;
     p.face.rotation.x = (state.roll + shakeRoll + scratch * 0.10) * (1 - ball);
-    p.face.rotation.y = wiggle;
+    // the head-shake of refusal rides the same axis as the glance
+    p.face.rotation.y = wiggle + Math.sin(now * 21) * 0.16 * balk;
+
+    /* The carried leaf, when he has one, bobbing with his step. */
+    if (p.leafInMouth) {
+      const carrying = (s.carry || 0) > 0 && ball < 0.3;
+      p.leafInMouth.visible = carrying;
+      if (carrying) p.leafInMouth.rotation.z = 0.1 + Math.sin(now * 6) * 0.08;
+    }
 
     /* Blinking.  Nothing blinked at all before, and an animal that never
      * blinks is the uncanniest thing in any scene.  Occasionally twice. */
@@ -392,5 +436,5 @@ export function createAnimator(parts, seed = 4242) {
     return state;
   }
 
-  return { update, state, legs };
+  return { update, state, legs, face };
 }

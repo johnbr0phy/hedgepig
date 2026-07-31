@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { cel, flat } from '../core/toon.js';
 import { PAL } from '../core/palette.js';
-import { starTex } from '../core/textures.js';
+import { starTex, petalTex } from '../core/textures.js';
 import { rngKit, clamp, lerp, TAU } from '../core/util.js';
 import { heightAt, waterDepthAt, walkableAt, lakeShore } from '../world/terrain.js';
 import { basisAt, positionAt } from '../world/planet.js';
@@ -9,7 +9,7 @@ import {
   PLACE, ORDER, COUNT, CENTRE, CENTRES, ROAD_HALF,
   placeKindAt, placeAt, offsetFrom, distance, bearing, hardAt,
   roadAlong, roadOffset, roadPoint,
-  LAKE, ROAD, WOOD, MGARD, HENS, TOWN, MIRE,
+  LAKE, ROAD, WOOD, MGARD, HENS, TOWN, MIRE, BGARD,
 } from '../world/plan.js';
 import { burrow as makeBurrow, mushroom, flowerClump, rock } from '../world/props.js';
 import { HOG_SPD } from '../hog/hog.js';
@@ -50,6 +50,12 @@ export function createGame({ world, hog, hud, climate, audio = null }) {
     invuln: 0,
     sown: 0,
     found: 0,                  // golden thistles, ever
+    sleeping: false,           // in the burrow, night on fast-forward
+    maxHearts: MAX_HEARTS,     // 4 while the berries last, else 3
+    berriesEaten: 0,
+    rings: [],                 // where the thistle rings were planted, ever
+    flags: {},                 // the journal of firsts
+    visited: [],               // place kinds he has stood in, ever
   };
 
   /* ------------------------------ persistence ------------------------------ *
@@ -59,12 +65,14 @@ export function createGame({ world, hog, hud, climate, audio = null }) {
    * the guard means it simply never persists there. */
   const store = (() => { try { return globalThis.localStorage || null; } catch { return null; } })();
   let saveT = 6;
+  let wasArrived = true;
   function save() {
     if (!store) return;
     try {
       store.setItem('hedgepig.save', JSON.stringify({
         leg: state.leg, hearts: state.hearts, walked: hog.walked, found: state.found,
         x: hog.x, z: hog.z, hd: hog.hd,
+        rings: state.rings, flags: state.flags, visited: state.visited,
       }));
     } catch { /* a full or refused store is not worth a crash */ }
   }
@@ -82,11 +90,23 @@ export function createGame({ world, hog, hud, climate, audio = null }) {
           hog.x = s.x; hog.z = s.z; hog.hd = s.hd || 0;
           hog.y = heightAt(s.x, s.z);
         }
+        state.rings = Array.isArray(s.rings) ? s.rings : [];
+        state.flags = s.flags && typeof s.flags === 'object' ? s.flags : {};
+        state.visited = Array.isArray(s.visited) ? s.visited : [];
       }
     } catch { /* an unreadable save is a fresh start, not an error */ }
   }
 
   world.setFlash?.((m) => hud.flash(m));
+
+  /** A first, for the journal.  Quietly: no toast, no chime — you find out
+   *  when you open the book. */
+  function note(flag) {
+    if (!state.flags[flag]) {
+      state.flags[flag] = true;
+      save();
+    }
+  }
 
   const _q = new THREE.Quaternion();
   const _fm = new THREE.Matrix4();
@@ -158,6 +178,112 @@ export function createGame({ world, hog, hud, climate, audio = null }) {
   }
   placeThistle();
 
+  /* ------------------------------ berry bushes ------------------------------ *
+   * Autumn only.  Three berries eaten in one leg is a fourth heart until the
+   * burrow — the season giving something back for its shorter days. */
+  const bushes = [];
+  {
+    const bushMat = cel({ color: 0x3e5e3a, bands: 3, tint: 0x4a5578, flat: false });
+    const berryMat = cel({ color: 0xc23a3a, bands: 2, tint: 0x7a4a66, flat: false });
+    const brng = rngKit(6210);
+    for (let i = 0; i < 3; i++) {
+      const g = new THREE.Group();
+      const blob = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), bushMat);
+      blob.scale.y = 0.75;
+      blob.position.y = 0.14;
+      blob.castShadow = true;
+      g.add(blob);
+      const berries = [];
+      for (let b = 0; b < 5; b++) {
+        const bm = new THREE.Mesh(new THREE.SphereGeometry(0.020, 8, 6), berryMat);
+        const a = brng.range(0, TAU);
+        bm.position.set(Math.cos(a) * 0.18, 0.14 + brng.range(-0.05, 0.12), Math.sin(a) * 0.18);
+        g.add(bm);
+        berries.push(bm);
+      }
+      g.matrixAutoUpdate = false;
+      g.visible = false;
+      scene.add(g);
+      let x = 0, z = 0, ok = false;
+      for (let tries = 0; tries < 200 && !ok; tries++) {
+        const a = brng.range(0, TAU);
+        const d = 3 + Math.sqrt(brng.next()) * 9;
+        const kind = [WOOD, MGARD, BGARD][i % 3];
+        const p = offsetFrom(CENTRE[kind], Math.cos(a) * d, Math.sin(a) * d);
+        x = p.x; z = p.z;
+        ok = walkableAt(x, z) && hardAt(x, z) < 0.2 && !world.blockedAt(x, z);
+      }
+      seat(g, x, z, heightAt(x, z), brng.range(0, TAU));
+      bushes.push({ obj: g, x, z, berries, left: 5 });
+    }
+  }
+
+  function updateBerries() {
+    const autumn = (climate.state.w?.[2] || 0) > 0.3;
+    for (const b of bushes) {
+      b.obj.visible = autumn;
+      if (!autumn) continue;
+      if (b.left > 0 && distance(hog.x, hog.z, b.x, b.z) < 0.55 && hog.gait < 0.3) {
+        b.left--;
+        b.berries[b.left].visible = false;
+        state.berriesEaten++;
+        hog.onNom?.('berry');
+        if (state.berriesEaten === 3 && state.maxHearts === MAX_HEARTS) {
+          state.maxHearts = MAX_HEARTS + 1;
+          state.hearts = Math.min(state.maxHearts, state.hearts + 1);
+          hud.setHearts(state.hearts, state.maxHearts);
+          hud.flash('three berries down — he feels twice his size');
+          note('berries');
+        }
+      }
+    }
+  }
+
+  /** A permanent ring of five clumps at (x, z) — seeded by ordinal, so a
+   *  reloaded save regrows exactly the rings it earned. */
+  function plantRing(x, z, ordinal) {
+    const rr = rngKit(4400 + ordinal * 13);
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * TAU + rr.range(-0.3, 0.3);
+      const f = flowerClump({
+        seed: 500 + ordinal * 7 + i, n: rr.int(4, 7),
+        color: rr.pick(BLOOMS), h: rr.range(0.14, 0.24),
+      });
+      f.matrixAutoUpdate = false;
+      scene.add(f);
+      const fx = x + (Math.cos(a) * 0.4) / Math.max(0.08, Math.cos(z / 47.746));
+      const fz = z + Math.sin(a) * 0.4;
+      seat(f, fx, fz, heightAt(fx, fz), rr.range(0, TAU));
+    }
+  }
+
+  /** And, once he has five, a path of flowers from the previous ring to the
+   *  new one: the walked world knitting itself together behind him. */
+  function plantTrail(a, b, ordinal) {
+    const rr = rngKit(7100 + ordinal * 17);
+    const steps = Math.min(24, Math.max(2, Math.floor(distance(a.x, a.z, b.x, b.z) / 1.4)));
+    for (let i = 1; i < steps; i++) {
+      const t = i / steps;
+      const cs = Math.max(0.08, Math.cos(lerp(a.z, b.z, t) / 47.746));
+      const fx = lerp(a.x, b.x, t) + rr.range(-0.5, 0.5) / cs;
+      const fz = lerp(a.z, b.z, t) + rr.range(-0.5, 0.5);
+      if (!walkableAt(fx, fz) || world.blockedAt?.(fx, fz)) continue;
+      const f = flowerClump({
+        seed: 800 + ordinal * 29 + i, n: rr.int(2, 4),
+        color: rr.pick(BLOOMS), h: rr.range(0.10, 0.18),
+      });
+      f.matrixAutoUpdate = false;
+      scene.add(f);
+      seat(f, fx, fz, heightAt(fx, fz), rr.range(0, TAU));
+    }
+  }
+
+  // regrow everything a previous session earned
+  state.rings.forEach((r, i) => {
+    plantRing(r.x, r.z, i + 1);
+    if (i > 0 && i + 1 >= 5) plantTrail(state.rings[i - 1], r, i + 1);
+  });
+
   function checkThistle() {
     if (!thistle.live) return;
     if (distance(hog.x, hog.z, thistle.x, thistle.z) > 0.5) return;
@@ -167,19 +293,13 @@ export function createGame({ world, hog, hud, climate, audio = null }) {
     hud.flash(state.found === 1
       ? 'a golden thistle — the meadow will remember this spot'
       : `a golden thistle — ${state.found} remembered`);
-    // the permanent ring: five clumps round where it stood, in the wild colours
-    for (let i = 0; i < 5; i++) {
-      const a = (i / 5) * TAU + rng.range(-0.3, 0.3);
-      const f = flowerClump({
-        seed: 500 + state.found * 7 + i, n: rng.int(4, 7),
-        color: rng.pick(BLOOMS), h: rng.range(0.14, 0.24),
-      });
-      f.matrixAutoUpdate = false;
-      scene.add(f);
-      const fx = thistle.x + Math.cos(a) * 0.4 / Math.max(0.08, Math.cos(thistle.z / 47.746));
-      const fz = thistle.z + Math.sin(a) * 0.4;
-      seat(f, fx, fz, heightAt(fx, fz), rng.range(0, TAU));
+    state.rings.push({ x: thistle.x, z: thistle.z });
+    plantRing(thistle.x, thistle.z, state.rings.length);
+    if (state.rings.length >= 5) {
+      plantTrail(state.rings[state.rings.length - 2], state.rings[state.rings.length - 1], state.rings.length);
+      if (state.rings.length === 5) hud.flash('five remembered — and now they reach for one another');
     }
+    note('thistle');
     if (thistle.obj) scene.remove(thistle.obj);
     thistle.obj = null;
     save();
@@ -290,15 +410,20 @@ export function createGame({ world, hog, hud, climate, audio = null }) {
         return { obj: g, tint: 0xfff0d0 };
       }
       case 'leaves': {
+        /* ON the ground, rounded, and nearly flat.  Bare quads hung at
+         * random angles up to 14 cm in the air read as a rendering glitch
+         * orbiting the hedgehog, not as leaves — a fallen leaf lies down. */
         const g = new THREE.Group();
         const leafMat = cel({
           color: 0xc98a45, bands: 2, tint: 0x6a5a86, side: THREE.DoubleSide, role: 'leaf',
+          map: petalTex(), alphaTest: 0.35,
         });
         for (let i = 0; i < 11; i++) {
           const l = new THREE.Mesh(new THREE.PlaneGeometry(0.09, 0.07), leafMat);
           const a = rng.range(0, TAU), r = rng.range(0.05, 0.3);
-          l.position.set(Math.cos(a) * r, 0.02 + rng.range(0, 0.12), Math.sin(a) * r);
-          l.rotation.set(rng.range(-1, 1), rng.range(0, TAU), rng.range(-1, 1));
+          l.position.set(Math.cos(a) * r, 0.008 + rng.range(0, 0.03), Math.sin(a) * r);
+          l.rotation.set(-Math.PI / 2 + rng.range(-0.45, 0.45), rng.range(0, TAU), 0);
+          l.userData.noOutline = true;
           g.add(l);
         }
         return { obj: g, tint: 0xe8a860 };
@@ -442,7 +567,8 @@ export function createGame({ world, hog, hud, climate, audio = null }) {
       const out = offsetFrom(CENTRE[LAKE],
         Math.cos(Math.atan2(b.north, b.east)) * (shore.d + 0.6),
         Math.sin(Math.atan2(b.north, b.east)) * (shore.d + 0.6));
-      hog.callTo(out.x, out.z, roll);
+      // refused: he goes to the edge and balks there, rather than wiggling
+      hog.callTo(out.x, out.z, roll, true);
       return;
     }
     hog.callTo(x, z, roll);
@@ -484,7 +610,7 @@ export function createGame({ world, hog, hud, climate, audio = null }) {
     state.invuln = 1.6;
     state.hearts--;
     audio?.hurt();
-    hud.setHearts(Math.max(0, state.hearts));
+    hud.setHearts(Math.max(0, state.hearts), state.maxHearts);
     hud.flash(what === 'thorns' ? 'ow — brambles' : 'a car! back to the verge');
 
     if (state.hearts <= 0) {
@@ -492,11 +618,13 @@ export function createGame({ world, hog, hud, climate, audio = null }) {
        * hedgehog in a meadow does not lose.  The leg resets and he carries
        * on, which costs progress and nothing else. */
       state.hearts = MAX_HEARTS;
+      state.maxHearts = MAX_HEARTS;
+      state.berriesEaten = 0;
       state.leg = 1;
       state.thornDensity = 0.18;
       hog.speed = HOG_SPD;
       applyThorns();
-      hud.setHearts(state.hearts);
+      hud.setHearts(state.hearts, state.maxHearts);
       hud.flash('he has had enough for today — but he is all right');
       placeBurrow();
     }
@@ -577,6 +705,16 @@ export function createGame({ world, hog, hud, climate, audio = null }) {
     if (hudT > 0) return;
     hudT = 0.25;
     const kind = placeKindAt(hog.x, hog.z);
+    /* Everywhere, once: standing in all ten places across one save plants
+     * one impossible flower at the very beginning of the world. */
+    if (!state.visited.includes(kind)) {
+      state.visited.push(kind);
+      if (state.visited.length === COUNT && !state.flags.everywhere) {
+        note('everywhere');
+        plantRing(3, 0, 99);
+        hud.flash('he has stood in every place there is — the start of the world blooms for it');
+      }
+    }
     const s = climate.state;
     const glyph = s.snowFall > 0.3 ? '❄' : s.wet > 0.35 ? '🌧' : s.night > 0.5 ? '🌙' : '☀';
     let weather = `${glyph} ${s.season} · ${s.hour}`;
@@ -587,7 +725,7 @@ export function createGame({ world, hog, hud, climate, audio = null }) {
     hud.setStatus(state.leg, hog.walked, ` · burrow ${d.toFixed(0)} m`);
   }
 
-  hud.setHearts(state.hearts);
+  hud.setHearts(state.hearts, state.maxHearts);
 
   /* ---------------------------------- loop --------------------------------- */
   function update(dt) {
@@ -609,22 +747,64 @@ export function createGame({ world, hog, hud, climate, audio = null }) {
       hog.speed = HOG_SPD * (1 + 0.08 * (state.leg - 1));
       state.thornDensity = Math.min(0.88, 0.18 + state.leg * 0.11);
       applyThorns();
-      state.hearts = Math.min(MAX_HEARTS, state.hearts + 1);
+      /* The leg's berry bonus expires at the door: back to three hearts,
+       * topped up one, and the bushes quietly restock for next time. */
+      state.maxHearts = MAX_HEARTS;
+      state.berriesEaten = 0;
+      for (const b of bushes) { b.left = 5; b.berries.forEach((bm) => { bm.visible = true; }); }
+      state.hearts = Math.min(state.maxHearts, state.hearts + 1);
+      if (climate.state.night > 0.5) note('slept');
       audio?.home();
-      hud.setHearts(state.hearts);
+      hud.setHearts(state.hearts, state.maxHearts);
       hud.flash(`home. leg ${state.leg} — and the brambles are thicker`);
       hog.stop();
+      /* Home after dark means BED.  He goes in, and the night is wound
+       * forward under him — visibly, sun and stars sweeping — until dawn
+       * lets him out yawning.  Not a fade to black: the whole point of a
+       * planet with a working sky is that you get to watch it. */
+      if (climate.state.night > 0.5) {
+        state.sleeping = true;
+        hog.under = true;
+        hud.flash('and he sleeps there until morning');
+      }
       placeBurrow();
       placeThistle();
       save();
     }
 
+    if (state.sleeping) {
+      climate.state.dayT += dt * 46;         // the night on fast-forward
+      const dp = (climate.state.dayT / climate.DAY) % 1;
+      if (climate.state.night < 0.12 && dp > 0.7 && dp < 0.98) {
+        state.sleeping = false;
+        hog.under = false;
+        if (hog.anim) hog.anim.face.yawn = 1;   // out he comes, mid-yawn
+        hud.flash('morning');
+      }
+    }
+
+    /* Arriving at something worth eating gets a nibble, not just a sniff.
+     * The edge is watched here because the game knows what was sown; how it
+     * looks and sounds is the caller's business, through the same kind of
+     * hook the footfalls use. */
+    if (!wasArrived && hog.arrived) {
+      for (const s of sown) {
+        if ((s.kind === 'mushroom' || s.kind === 'egg') &&
+            distance(hog.x, hog.z, s.x, s.z) < 0.5) {
+          hog.onNom?.(s.kind);
+          break;
+        }
+      }
+    }
+    wasArrived = hog.arrived;
+
     checkThistle();
+    updateBerries();
     saveT -= dt;
     if (saveT <= 0) { saveT = 6; save(); }
 
     readouts(dt);
   }
 
-  return { state, call, update, placeBurrow, burrowObj, sown };
+  return { state, call, update, placeBurrow, burrowObj, sown, note };
 }

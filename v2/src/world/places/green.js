@@ -87,6 +87,7 @@ export function buildMeadow(root, ctx) {
     ctx.block(u, v, 0.55);
   }
   g.add(bales);
+  bales.userData.noMerge = true;      // seasonal: shown and hidden whole
   ctx.seasonal.push({ obj: bales, at: (s) => s.w[2] > 0.25 });
 
   root.add(g);
@@ -165,7 +166,11 @@ export function buildGarden(root, ctx) {
   ctx.put(bath, 0, 0);
   g.add(bath);
   ctx.block(0, 0, 0.42);
-  ctx.interact(0, 1.0, 'the birdbath', () => ctx.flash('he drinks, and shakes his whiskers dry'));
+  ctx.interact(0, 1.0, 'the birdbath', ctx.lines(
+    'he drinks, and shakes his whiskers dry',
+    'a wren was here first. it left, with opinions.',
+    'look up tonight: the spiky stars over the wood are called the hedgepig'
+  ));
 
   root.add(g);
   return g;
@@ -238,8 +243,11 @@ export function buildWood(root, ctx) {
     door.add(panel, knob);
     ctx.put(door, host.u, host.v);
     g.add(door);
-    ctx.interact(host.u + 0.7, host.v, 'the little door',
-      () => ctx.flash('nobody answers, but something is listening'));
+    ctx.interact(host.u + 0.7, host.v, 'the little door', ctx.lines(
+      'nobody answers, but something is listening',
+      'a crumb he left last time is gone',
+      'tonight the knob is polished. somebody has visitors.'
+    ));
   }
 
   root.add(g);

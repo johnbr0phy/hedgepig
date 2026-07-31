@@ -120,6 +120,8 @@ export class Hog {
     this.lookLock = 0;
     this.snuffle = 0;
     this.celebrate = 0;          // seconds of arrival wiggle left
+    this.balk = 0;               // seconds of water's-edge refusal left
+    this.carry = 0;              // seconds left carrying his leaf
     this.shake = 0;              // seconds of shake-off left (rain, the boat)
     this.night = 0;              // fed by the clock, for the doze
     this._aimTurn = 0;           // how much turning is left, for the glance
@@ -152,10 +154,11 @@ export class Hog {
    * Call him.  This is the whole interface: a place, and he goes there.
    * Replaces any previous call outright — one live target, always.
    */
-  callTo(x, z, roll = false) {
+  callTo(x, z, roll = false, balkOnArrive = false) {
     this.target = { x, z };
     this.arrived = false;
     this.lookLock = 0;
+    this._balkOnArrive = balkOnArrive;
     if (roll) this.rolling = true;
   }
 
@@ -213,6 +216,8 @@ export class Hog {
     if (this.hurt > 0) this.hurt = Math.max(0, this.hurt - dt);
     if (this.repel > 0) this.repel = Math.max(0, this.repel - dt);
     if (this.celebrate > 0) this.celebrate = Math.max(0, this.celebrate - dt);
+    if (this.balk > 0) this.balk = Math.max(0, this.balk - dt);
+    if (this.carry > 0) this.carry = Math.max(0, this.carry - dt);
     if (this.shake > 0) this.shake = Math.max(0, this.shake - dt);
     // stepping off the boat earns a shake, like any wet dog would
     if (this._wasAfloat && !this.afloat) this.shake = Math.max(this.shake, 1.0);
@@ -327,8 +332,15 @@ export class Hog {
     this._idleTimer = 0.6;
     /* Getting there is worth a wiggle.  The flower was sown for him; an
      * arrival that looks exactly like running out of road reads as a
-     * machine reaching a coordinate. */
-    this.celebrate = 1.1;
+     * machine reaching a coordinate.  Unless it is the water's edge and
+     * the errand was refused — that gets the balk instead: a head-shake
+     * and a paw at the wet, which is a hedgehog saying no. */
+    if (this._balkOnArrive) {
+      this.balk = 1.4;
+      this._balkOnArrive = false;
+    } else {
+      this.celebrate = 1.1;
+    }
   }
 
   /**

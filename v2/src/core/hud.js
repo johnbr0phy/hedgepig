@@ -67,5 +67,31 @@ export function createHud() {
         if (toastT <= 0) el.toast?.classList.remove('on');
       }
     },
+
+    /**
+     * The journal: a small panel of firsts, toggled by J.  Built lazily —
+     * most sessions never open it, and that is fine; it is a book, not a
+     * scoreboard.
+     */
+    toggleJournal(lines) {
+      let j = document.getElementById('journal');
+      if (!j) {
+        j = document.createElement('div');
+        j.id = 'journal';
+        j.className = 'panel';
+        j.style.cssText =
+          'top:50%;left:50%;transform:translate(-50%,-50%);min-width:15rem;' +
+          'padding:0.9rem 1.2rem;line-height:1.85;display:none;';
+        document.getElementById('hud')?.appendChild(j);
+      }
+      if (j.style.display === 'none') {
+        j.innerHTML = `<b>the journal</b><br />${lines.length
+          ? lines.map((l) => `· ${l}`).join('<br />')
+          : '<small>nothing written yet — everything is still a first</small>'}`;
+        j.style.display = 'block';
+      } else {
+        j.style.display = 'none';
+      }
+    },
   };
 }
