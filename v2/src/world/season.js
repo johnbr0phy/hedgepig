@@ -131,6 +131,15 @@ export function moonDirAt(dp, phase, out = new THREE.Vector3()) {
     .normalize();
 }
 
+/* One Color each, reused every frame — see the note where they are filled. */
+const LIT = {
+  window: new THREE.Color(),
+  lamp: new THREE.Color(),
+  headlamp: new THREE.Color(),
+  lampPool: new THREE.Color(),
+  windowPool: new THREE.Color(),
+};
+
 const _a = new THREE.Color();
 const _b = new THREE.Color();
 const _c = new THREE.Color();
@@ -627,11 +636,30 @@ export function createClimate({
      * right across the field, which a real point light at this scale would
      * not. */
     const lit = clamp((dk - 0.30) / 0.35, 0, 1);
-    applyPalette({
-      window: _a.set(0x2b2130).lerp(_b.set(0xffd489), lit),
-      lamp: _a.set(0x6a6858).lerp(_b.set(0xfff0c0), lit),
-      headlamp: _a.set(0xfff2c8).lerp(_b.set(0xfffbe8), lit),
-    });
+    /* **Every one of these needs its OWN colour object.**
+     *
+     * This was five entries all written `_a.set(...).lerp(_b.set(...), lit)`,
+     * and `_a` is one shared temporary — so the object literal came out with
+     * all five keys pointing at the *same* Color, holding whatever the last
+     * line had put in it.  `applyPalette` then painted every lit thing in the
+     * world that colour.
+     *
+     * It had been that way since there were three of them, which is why the
+     * cottage windows have always come out headlamp white instead of the
+     * warm amber they are specified as: `window` was never `0xffd489`, it was
+     * whatever `headlamp` computed one line further down.  A shared scratch
+     * variable inside an object literal reads as thrift and is a bug. */
+    LIT.window.set(0x2b2130).lerp(_b.set(0xffd489), lit);
+    LIT.lamp.set(0x6a6858).lerp(_b.set(0xfff0c0), lit);
+    LIT.headlamp.set(0xfff2c8).lerp(_b.set(0xfffbe8), lit);
+    /* And what they throw on the ground.  These are **additive** discs, so
+     * black is an absent pool and there is nothing to switch: one ramp lights
+     * the bulb and the pavement under it, and they can never come on at
+     * different hours.  See `lightPool` in `props.js`.  Warmer and weaker
+     * than the source, because that is what a lamp does to a pavement. */
+    LIT.lampPool.set(0x000000).lerp(_b.set(0x8a5f28), lit);
+    LIT.windowPool.set(0x000000).lerp(_b.set(0x4a3214), lit);
+    applyPalette(LIT);
     state.lit = lit;
 
     // shade goes bluer and deeper after dark; ink goes with it

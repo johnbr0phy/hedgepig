@@ -1134,6 +1134,59 @@ by more than a carriageway's width, and — by name, so a future layout change
 fails legibly — that there is no tarmac at the centre of the lake or the
 mushroom garden.
 
+### A shared scratch Color made every lit thing the same colour
+
+`applyPalette` was being handed an object literal built like this:
+
+```js
+applyPalette({
+  window:   _a.set(0x2b2130).lerp(_b.set(0xffd489), lit),
+  lamp:     _a.set(0x6a6858).lerp(_b.set(0xfff0c0), lit),
+  headlamp: _a.set(0xfff2c8).lerp(_b.set(0xfffbe8), lit),
+});
+```
+
+`_a` is **one shared temporary**, so all three keys came out pointing at the
+same `Color`, holding whatever the last line had put in it. The literal is
+fully built before `applyPalette` ever sees it, so every lit material in the
+world was painted `headlamp`.
+
+That is why the cottage windows had always come out a cold headlamp white
+instead of the warm amber they are specified as: `window` was never
+`0xffd489`. It had been that way since there were three of them, and nothing
+looked broken — it looked like a slightly cold night.
+
+**A shared scratch variable inside an object literal reads as thrift and is a
+bug.** Each of these has its own `Color` now, reused across frames.
+
+### The one real light in the town had never been switched on
+
+`road.js` built a `PointLight` for the first street lamp, at intensity 0,
+stashed it in `ctx.out.lampLight` — and **nothing in the codebase ever read it
+back**. The comment above it said "only the first carries a real point light",
+describing a lamp that carried a dead one. It runs off `lit` now, through
+`ctx.updaters`.
+
+Note what those updaters are handed: the third argument is the climate
+**state**, not the climate. It is named `climate` where they are called, which
+is how the first version of this read `climate.state.lit` and got `undefined`.
+
+### Light on the ground is painted, not lit
+
+Lamps and windows glowed and nothing beneath either was any brighter for it,
+so the town after dark was a dark shape with bright stickers on it. There is
+one real light source in this world besides the sun — the firefly lantern he
+carries — and more would mean more shadow maps for what is meant to be a soft
+wash on a pavement.
+
+So `lightPool` in `props.js` is an additive disc lying on the ground, the same
+way his lantern's pool already was. **It is switched by its COLOUR, not its
+opacity**, and that is the whole trick: additive blending means black adds
+nothing, so a pool tinted black is exactly an absent pool. The role registry
+then drives it for free off the same `lit` ramp that warms the bulb above it —
+no per-frame pass, no visibility bookkeeping, and it cannot come on at a
+different hour from the lamp it belongs to.
+
 ## 5. Things that will bite the next change
 
 - **A pitched roof is `s * +angle`, not `s * -angle`.** Rotating about +x by a

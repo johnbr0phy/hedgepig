@@ -8,7 +8,7 @@ import { positionAt, basisAt } from '../planet.js';
 import { CIRC, ROAD_HALF, roadPoint, roadAlong, roadOffset, bearing } from '../plan.js';
 import {
   rock, flowerClump, drystone, gate, signpost, thistle, tussock, molehillProp,
-  crate, bucket,
+  crate, bucket, lightPool,
 } from '../props.js';
 
 /* ------------------------------------------------------------------ *
@@ -1233,6 +1233,15 @@ export function buildTown(root, ctx) {
     /* `turn: π` faces it across the street: with no turn a prop's +z looks at
      * the *near* side, and the terrace stands on the far one. */
     put(house, HOUSE_S[i], HOUSE_Q, { turn: Math.PI });
+    /* The light out of the front windows, on the path in front of them.  Only
+     * one pool a house rather than one a window: two overlapping additive
+     * discs 1.4 m apart read as one brighter patch anyway, and this is meant
+     * to be the suggestion of a lit room, not a spotlight. */
+    {
+      const pool = lightPool({ r: 1.5, role: 'windowPool' });
+      put(pool, HOUSE_S[i], FRONT_Q + 0.5);
+      g.add(pool);
+    }
     // two blockers to a front, so the corners of a 3.6 m house are covered
     // without a circle that reaches a metre out into its own garden
     for (const d of [-0.7, 0.7]) block(HOUSE_S[i] + d, HOUSE_Q, 1.4);
@@ -1384,14 +1393,38 @@ export function buildTown(root, ctx) {
   const lampA = lampPost();
   const lp = put(lampA, -2.4, -5.6);
   block(-2.4, -5.6, 0.2);
+  /* **This light had never once been on.**  It was built at intensity 0,
+   * stashed in `ctx.out.lampLight`, and nothing in the entire codebase ever
+   * read it back — so the comment above, which says one lamp carries a real
+   * light, described a lamp that carried a dead one.  It is driven off `lit`
+   * now, which is the same dusk ramp that warms the bulb itself. */
   const glow = new THREE.PointLight(0xffd08a, 0, 7, 2);
   glow.position.copy(positionAt(lp.x, heightAt(lp.x, lp.z) + 2.5, lp.z, new THREE.Vector3()));
   ctx.out.lampLight = glow;
   root.add(glow);
+  ctx.updaters.push((dt, hog, state) => {
+    /* The third argument is the climate **state**, not the climate — the
+     * parameter is called `climate` where the updaters are run, and the
+     * seasonal hooks beside it read `s.w[0]` straight off it.  2.6 is what it
+     * takes to read as a lamp against a night sky this world deliberately
+     * never lets go fully black. */
+    glow.intensity = (state?.lit ?? 0) * 2.6;
+  });
 
   const lampB = lampPost();
   put(lampB, 8.2, 5.6);
   block(8.2, 5.6, 0.2);
+
+  /* --- and the pools they throw --- *
+   * The point light is one object and cannot be afforded twice, so the second
+   * lamp and every window get a *painted* pool instead — see `lightPool`.
+   * They switch on their own colour through the role registry, so they cannot
+   * come on at a different hour from the bulbs above them. */
+  for (const [u, v] of [[-2.4, -5.6], [8.2, 5.6]]) {
+    const pool = lightPool({ r: 2.4, role: 'lampPool' });
+    put(pool, u, v);
+    g.add(pool);
+  }
 
   /* --- the cat.  Every place like this has one, and it is always asleep. --- */
   const cat = new THREE.Group();

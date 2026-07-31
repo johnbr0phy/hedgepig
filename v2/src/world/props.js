@@ -1042,3 +1042,47 @@ export function molehillProp({ seed = 83, r = 0.12 } = {}) {
 
 /* `contactShadow` and the `PROP_MAT` re-export lived here since the disc
  * rebuild with no callers at all — deleted, as the backlog's debt list asks. */
+
+/* ------------------------------------------------------------------ *
+ * A pool of light on the ground.
+ *
+ * **The lamps and the windows were paint.**  A lamp glowed, a window glowed,
+ * and nothing beneath either of them was any brighter for it — so the town
+ * after dark was a dark shape with bright stickers stuck on it.  There is
+ * exactly one real light source in this world besides the sun (the firefly
+ * lantern he carries), and adding more would mean more shadow maps for
+ * something that is meant to be a soft wash on a pavement.
+ *
+ * So it is painted, the same way his lantern's pool is painted: an additive
+ * disc lying on the ground with a soft blob falloff.
+ *
+ * **It is switched by its COLOUR, not by its opacity**, and that is the whole
+ * trick.  Additive blending means black adds nothing — a pool tinted to black
+ * is exactly an absent pool, at no cost and with nothing to update.  So the
+ * role registry drives it for free: `season.js` already ramps `window` and
+ * `lamp` from dark to warm across dusk, and these ramp from *black* on the
+ * same clock.  No per-frame pass, no visibility bookkeeping, and it can never
+ * disagree with the lamp it belongs to, because one number lights both.
+ */
+export function lightPool({ r = 2.2, role = 'lampPool', lift = 0.05 } = {}) {
+  const mat = flat({
+    color: 0x000000, map: blobTex(), transparent: true, opacity: 0.85,
+    depthWrite: false, fog: false, cache: false, role,
+  });
+  /* Set here rather than passed in: `flat` does not take a blending mode, and
+   * handing it one is silently dropped — which would leave a black square
+   * lying on the pavement instead of a glow. */
+  mat.blending = THREE.AdditiveBlending;
+  const m = new THREE.Mesh(
+    new THREE.PlaneGeometry(r * 2, r * 2).rotateX(-Math.PI / 2),
+    mat
+  );
+  m.position.y = lift;
+  /* No ink outline round a glow, and drawn after the ground it lies on. */
+  m.userData.noOutline = true;
+  m.userData.noShadow = true;
+  m.renderOrder = 3;
+  m.castShadow = false;
+  m.receiveShadow = false;
+  return m;
+}
