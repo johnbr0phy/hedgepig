@@ -12,6 +12,7 @@ import { createWeather } from './world/weather.js';
 import { R, CENTER, basisAt, positionAt } from './world/planet.js';
 import { placeAt, placeKindAt, PLACE, WOOD, CIRC, CENTRES } from './world/plan.js';
 import { waterDepthAt } from './world/terrain.js';
+import { blobTex } from './core/textures.js';
 import { Hog } from './hog/hog.js';
 import { createGame } from './game/game.js';
 import { createAudio } from './core/audio.js';
@@ -362,10 +363,12 @@ const glints = (() => {
 })();
 let glintAmt = 0;
 
-/* The firefly lantern rig: one warm point light and three motes. */
-const lantern = new THREE.PointLight(0xd8f08a, 0, 1.9, 1.6);
-lantern.visible = false;
-scene.add(lantern);
+/* The firefly lantern rig: three glowing motes and a PAINTED pool of warm
+ * on the ground.  The first version used a real PointLight, and this file's
+ * own lighting note says exactly why that was wrong: there is no light
+ * source in this world but the sky, and a point light under the cel ramp
+ * quantises into a huge banded dome — a searchlight, not a firefly.  A
+ * lamp here is a colour, not a light. */
 const flies = new THREE.Group();
 for (let i = 0; i < 3; i++) {
   const f = new THREE.Mesh(
@@ -377,6 +380,18 @@ for (let i = 0; i < 3; i++) {
 }
 flies.visible = false;
 scene.add(flies);
+const lanternPool = new THREE.Mesh(
+  new THREE.PlaneGeometry(0.55, 0.55).rotateX(-Math.PI / 2),
+  new THREE.MeshBasicMaterial({
+    color: 0x8a8a58, map: blobTex(), transparent: true, opacity: 0,
+    depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
+  })
+);
+lanternPool.matrixAutoUpdate = false;
+lanternPool.visible = false;
+lanternPool.renderOrder = 3;
+lanternPool.userData.noOutline = true;
+scene.add(lanternPool);
 
 /* The lightning is DOM: a white wash over everything for a tenth of a
  * second.  Cheaper than touching the lighting rig, and honester too — a
@@ -488,12 +503,9 @@ function frame() {
    * the world besides the sun — and it is his. */
   const lanternOn = state.night > 0.72 && state.snow < 0.5;
   lanternAmt += ((lanternOn ? 1 : 0) - lanternAmt) * Math.min(1, 2 * dt);
-  lantern.visible = lanternAmt > 0.02;
-  if (lantern.visible) {
+  if (lanternAmt > 0.02) {
     const b = basisAt(hog.x, hog.z);
     positionAt(hog.x, hog.y + 0.28, hog.z, _lanternP);
-    lantern.position.copy(_lanternP);
-    lantern.intensity = lanternAmt * 0.55;
     flies.visible = true;
     flies.children.forEach((f, i) => {
       const a = acc * (0.9 + i * 0.23) + i * 2.1;
@@ -502,8 +514,16 @@ function frame() {
     });
     flies.position.copy(_lanternP);
     flies.quaternion.setFromRotationMatrix(_lanternM.makeBasis(b.east, b.up, b.north));
+    // the painted pool: faint, breathing with the flies, ON the ground
+    _lanternM.makeBasis(b.east, b.up, b.north);
+    _lanternM.setPosition(positionAt(hog.x, hog.y + 0.012, hog.z, _lanternP));
+    lanternPool.matrix.copy(_lanternM);
+    lanternPool.matrixWorldNeedsUpdate = true;
+    lanternPool.visible = true;
+    lanternPool.material.opacity = lanternAmt * (0.10 + 0.03 * Math.sin(acc * 5));
   } else {
     flies.visible = false;
+    lanternPool.visible = false;
   }
 
   /* Photo mode drifts: a slow orbit for as long as the panels are away. */
@@ -527,7 +547,7 @@ function frame() {
     puffs.burst(hog.x, hog.y + 0.01, hog.z, { n: 6, up: 0.15, spread: 0.18, px: 22, color: 0xc9ba90 });
   }
   prevBallFx = hog.ball;
-  puffs.update(dt);
+  puffs.update(dt, state.night);
   prints.update(dt);
 
   // the tap ripple spreading from the call

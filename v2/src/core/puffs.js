@@ -40,7 +40,10 @@ export function createPuffs(scene) {
   const mat = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
-    uniforms: { uTex: { value: blobTex() } },
+    uniforms: {
+      uTex: { value: blobTex() },
+      uNight: { value: 0 },
+    },
     vertexShader: /* glsl */ `
       attribute float aLife, aSpan, aSize;
       attribute vec3 aCol;
@@ -51,18 +54,25 @@ export function createPuffs(scene) {
         vA = smoothstep( 0.0, 0.25, t ) * smoothstep( 1.05, 0.55, t );
         vCol = aCol;
         vec4 mv = modelViewMatrix * vec4( position, 1.0 );
-        // puffs swell as they die
-        gl_PointSize = aSize * ( 1.6 - t * 0.6 ) * ( 300.0 / -mv.z );
+        /* Puffs swell as they die — and the size is CLAMPED.  Unclamped,
+         * a puff near the camera grew without bound, and a run's worth of
+         * them stacked into one glowing dome around the hedgehog. */
+        float px = aSize * ( 1.6 - t * 0.6 ) * ( 5.0 / max( 0.2, -mv.z ) );
+        gl_PointSize = min( px, 90.0 );
         gl_Position = projectionMatrix * mv;
       }
     `,
     fragmentShader: /* glsl */ `
       uniform sampler2D uTex;
+      uniform float uNight;
       varying float vA;
       varying vec3 vCol;
       void main() {
         vec4 t = texture2D( uTex, gl_PointCoord );
-        gl_FragColor = vec4( vCol, t.a * vA * 0.42 );
+        /* Dust is lit by the day it flies in.  Left at its daylight colour
+         * it GLOWED after dark — the one pale thing on a night meadow. */
+        vec3 col = vCol * mix( 1.0, 0.20, uNight );
+        gl_FragColor = vec4( col, t.a * vA * 0.42 * mix( 1.0, 0.55, uNight ) );
       }
     `,
   });
@@ -100,7 +110,8 @@ export function createPuffs(scene) {
     }
   }
 
-  function update(dt) {
+  function update(dt, night = 0) {
+    mat.uniforms.uNight.value = night;
     let any = false;
     for (let i = 0; i < N; i++) {
       if (life[i] <= 0) continue;
