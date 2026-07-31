@@ -552,6 +552,44 @@ bright, and they were at a third strength over an orange horizon.
 fireflies, glints, the aurora, a lit window seen from outside — must be
 additive. If it can darken what is behind it, it is not a light.
 
+### The flattest thing on the planet was the road's own verge
+
+The world had **1.44 m of relief across the whole of it** — four sine octaves
+summing to less than a metre and a half, on a globe 300 m round walked by an
+animal 26 cm long. Nothing was ever hidden behind anything: you could see the
+whole visible world from anywhere in it, and it read as one flat green wash
+however much was scattered on it. That is most of what "sparse" means here,
+and no amount of extra props fixes it.
+
+Raising it is nearly free, because `heightAt` is the only answer to ground
+height and the globe mesh, every prop, every blade and his feet all read it.
+Two things had to be found by measuring rather than reasoning:
+
+- **The steepest ground on the planet was not a hill.** `reliefMask` faded the
+  entire relief to zero over 4.7 m beside the road, which at 1.44 m was a
+  gentle verge and at 3.4 m is a **38° bank running the whole way round the
+  world**. A grading mask has a gradient of about `relief × 1.5 / width`, so
+  its width has to scale with the relief. It is 21 m wide now. Any future
+  landform taller than this one wants checking here *first* — I spent three
+  tuning passes on the wave amplitudes before looking at the mask, and the
+  waves were never the problem.
+- **`walkableAt` refuses water and nothing else**, so no slope can ever stop
+  him and relief has to be self-limiting. The harness's 0.22 m per 0.4 m
+  ceiling — 29° — is the real constraint, and it is scar tissue from the lake
+  basin's `l ** 0.8` cliff. The world now peaks at 22.6°.
+
+And a **landform hook**: a term belonging to one place, faded in by that
+place's own weight, exactly as `basin` and `dishes` already do for the lake
+and the mire. Written as a function of `dot(surface direction, axis)` for the
+same reason the relief is — that form is smooth and single-valued over a
+sphere by construction, so a landform that breaks at a pole or a seam cannot
+be written in it.
+
+The harness asserts the relief **as a floor** as well as a ceiling, because
+the failure mode is a quiet flattening: a mask widened or an amplitude
+trimmed, and the world goes back to a table top with nothing looking wrong in
+the diff.
+
 ## 5. Things that will bite the next change
 
 - **A pitched roof is `s * +angle`, not `s * -angle`.** Rotating about +x by a

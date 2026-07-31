@@ -237,6 +237,23 @@ function sTerrain() {
     const d = Math.abs(heightAt(x + e, z) - heightAt(x, z));
     if (d > steep) { steep = d; at = [x, z]; }
   }
+  /* **And there is genuinely something to walk over.**  The planet had 1.44 m
+   * of relief across the whole of it, so nothing was ever hidden behind
+   * anything and it read as one flat wash however much was scattered on it.
+   * Asserted as a floor, because the failure mode is a quiet flattening: a
+   * mask widened or an amplitude trimmed, and the world goes back to a table
+   * top without anything looking wrong in the diff. */
+  let lo2 = 9, hi2 = -9;
+  for (let i = 0; i < 20000; i++) {
+    const z = R * Math.asin(-1 + (2 * i) / 20000);
+    const x = (i * 13.7) % CIRC;
+    if (!terrain.walkableAt(x, z)) continue;
+    const h = heightAt(x, z);
+    lo2 = Math.min(lo2, h); hi2 = Math.max(hi2, h);
+  }
+  ok(hi2 - lo2 > 3.5, 'and there is real ground to walk over, not a table top',
+    `${f(hi2 - lo2, 2)} m from the lowest walkable ground to the highest`);
+
   ok(steep < 0.22, 'no cliffs anywhere he can stand',
     `worst rise ${f(steep, 3)} m per 0.4 m at ${at && at.map((v) => f(v, 1)).join(', ')}`);
 
