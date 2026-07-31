@@ -107,17 +107,22 @@ export function buildSky(scene, radius = 300) {
    * share a sky, which they do most evenings of the real world.
    *
    * They are separate objects now, each simply drawn where it is, each fading
-   * out as it goes under.  The moon's phase is carved by a second circle slid
-   * across the first, and its phase and its position are the *same number* —
-   * see `moonDirAt`. */
+   * out as it goes under, and its phase and its position are the *same
+   * number* — see `moonDirAt`.
+   *
+   * **The sun is a disc and the moon is a ball**, and the asymmetry is the
+   * point rather than an oversight.  The sun has to be drawn unlit — a lit
+   * sphere shows a terminator, and a sun with a terminator is a crescent —
+   * and an unlit sphere four degrees across is pixel-for-pixel the disc it
+   * would replace, so it would be triangles for nothing.  The moon is the
+   * opposite case: its whole character is that it *is* lit, from one side,
+   * by something else in the same sky. */
   const discMat = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
     fog: false,
     uniforms: {
       uColor: { value: new THREE.Color(0xfff6de) },
-      uNight: { value: 0 },
-      uBite: { value: 3.0 },
       uOpacity: { value: 0.95 },
     },
     vertexShader: /* glsl */ `
@@ -129,34 +134,121 @@ export function buildSky(scene, radius = 300) {
     `,
     fragmentShader: /* glsl */ `
       uniform vec3 uColor;
-      uniform float uNight, uBite, uOpacity;
+      uniform float uOpacity;
       varying vec2 vUv;
       void main() {
         vec2 c = vUv * 2.0 - 1.0;
-        float r = length( c );
-        float disc = 1.0 - smoothstep( 0.86, 0.98, r );
-        // the phase: a bite of sky slid across the moon by the year clock
-        float bite = 1.0 - smoothstep( 0.80, 1.04, length( c - vec2( uBite, 0.20 ) ) );
-        float a = disc * ( 1.0 - bite * uNight );
-        // three seas, faint, and only by night
-        float cr = 1.0 - smoothstep( 0.10, 0.26, length( c - vec2( -0.26, 0.12 ) ) );
-        cr += 1.0 - smoothstep( 0.06, 0.18, length( c - vec2( 0.22, -0.30 ) ) );
-        cr += 1.0 - smoothstep( 0.05, 0.14, length( c - vec2( 0.04, 0.44 ) ) );
-        vec3 col = uColor * ( 1.0 - cr * 0.09 * uNight );
-        gl_FragColor = vec4( col, a * uOpacity );
+        float disc = 1.0 - smoothstep( 0.86, 0.98, length( c ) );
+        gl_FragColor = vec4( uColor, disc * uOpacity );
       }
     `,
   });
-  const moonMat = discMat.clone();
-  moonMat.uniforms = THREE.UniformsUtils.clone(discMat.uniforms);
-  moonMat.uniforms.uNight.value = 1;                 // the moon is always a moon
+
+  /* ------------------------------- the moon ------------------------------- *
+   *
+   * A real ball, lit by the real sun, and **the phase is not drawn at all —
+   * it is what happens.**
+   *
+   * It used to be a flat quad with a second circle slid across it to bite a
+   * crescent out.  That works for a crescent and cannot work for anything
+   * else: subtracting one circle from another can only ever give you a lens,
+   * and a gibbous moon's terminator is a half-ELLIPSE — the lit limb stays a
+   * perfect semicircle and the terminator narrows and then crosses over.  A
+   * bite gets the shape wrong for half of every month.
+   *
+   * The geometry to do it properly was already here.  `moonDirAt` puts the
+   * moon `phase` of a turn along the sun's own arc, so its elongation from
+   * the sun *is* its phase — which is the actual astronomy, and it means
+   * lighting the ball by `sunDir` reproduces `moonPhase` exactly, with no
+   * second copy of the number to keep in step.  The old hack and the real
+   * thing were the same fact, one written twice.
+   *
+   * Three details it buys, none of which a quad can have:
+   *
+   *  - the terminator is elliptical, and **soft**, because the far limb of a
+   *    real moon is grazing light on rough ground rather than a knife edge;
+   *  - the dark side is not black, it is `uEarth` — earthshine, the sunlight
+   *    our own world throws back at it.  A crescent with a black remainder
+   *    reads as a moon with a piece missing; a crescent with the ghost of the
+   *    rest of the ball behind it reads as a *sphere*, which is the entire
+   *    difference this change was made for;
+   *  - and the alpha follows the light, so a new moon fades out where it
+   *    stands instead of hanging there as a grey ball among the stars.
+   *
+   * `uSun` arrives in the mesh's **own object space**, and that is not a
+   * detail.  The first version compared a view-space normal against a
+   * view-space sun, which needs `camera.matrixWorldInverse` — and the
+   * renderer sets that at *draw* time, not when `update` runs, so the sun
+   * arrived a frame stale and the terminator sat wherever the camera had
+   * last been pointing.  It read as a permanently full moon.  `_sunDir` is
+   * already in the group's frame and the moon is a child of the group, so
+   * the object-space sun is just the inverse of the mesh's own turn — no
+   * camera in it anywhere, and nothing to be stale.
+   */
+  const moonMat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    fog: false,
+    uniforms: {
+      uColor: { value: new THREE.Color(0xe9eeff) },
+      uEarth: { value: new THREE.Color(0x2a3350) },
+      uSun: { value: new THREE.Vector3(1, 0, 0) },
+      uOpacity: { value: 0.9 },
+      uNight: { value: 1 },
+    },
+    vertexShader: /* glsl */ `
+      varying vec3 vN;
+      varying vec3 vLocal;
+      void main() {
+        // object space, both of them: uSun comes in the same frame
+        vN = normalize( normal );
+        vLocal = normalize( position );
+        gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uColor, uEarth, uSun;
+      uniform float uOpacity, uNight;
+      varying vec3 vN;
+      varying vec3 vLocal;
+      void main() {
+        float d = dot( normalize( vN ), normalize( uSun ) );
+        /* Banded, like everything else in this world, but only two steps and
+         * a wide soft edge: the moon is the one lit thing here with no hard
+         * shadow line on it, and a crisp toon ramp on a 4-degree ball reads
+         * as a bitten biscuit. */
+        float lit = smoothstep( -0.16, 0.30, d );
+        lit = mix( lit, smoothstep( 0.0, 0.85, d ), 0.45 );
+
+        /* Three seas, on the face, and only worth seeing after dark.  In
+         * LOCAL space, so they ride round with the mesh as it turns to the
+         * camera and the same face is always the one you see. */
+        float cr = 1.0 - smoothstep( 0.10, 0.26, length( vLocal.xy - vec2( -0.26, 0.12 ) ) );
+        cr += 1.0 - smoothstep( 0.06, 0.18, length( vLocal.xy - vec2( 0.22, -0.30 ) ) );
+        cr += 1.0 - smoothstep( 0.05, 0.14, length( vLocal.xy - vec2( 0.04, 0.44 ) ) );
+
+        vec3 col = mix( uEarth, uColor, lit ) * ( 1.0 - cr * 0.09 * lit * uNight );
+        /* A hair of softening right on the limb.  The moon is about a
+         * hundred pixels across in a game frame, so even at forty segments
+         * the silhouette is a visible polygon -- and a polygonal moon reads
+         * as a rock.  vLocal.z goes to zero exactly at the edge, so this
+         * costs one smoothstep and takes the facets with it.
+         * (No back-quotes in here: this is inside a template literal, and a
+         * stray one ends the shader mid-source.  It has happened once.) */
+        float rim = smoothstep( 0.0, 0.30, vLocal.z );
+        // earthshine is a hint, not a second moon
+        float a = uOpacity * ( 0.11 + 0.89 * lit ) * rim;
+        gl_FragColor = vec4( col, a );
+      }
+    `,
+  });
 
   const disc = new THREE.Mesh(new THREE.PlaneGeometry(radius * 0.104, radius * 0.104), discMat);
   disc.renderOrder = -9;
   disc.frustumCulled = false;
   group.add(disc);
 
-  const moon = new THREE.Mesh(new THREE.PlaneGeometry(radius * 0.072, radius * 0.072), moonMat);
+  const moon = new THREE.Mesh(new THREE.SphereGeometry(radius * 0.036, 40, 26), moonMat);
   moon.renderOrder = -9;
   moon.frustumCulled = false;
   group.add(moon);
@@ -340,6 +432,7 @@ export function buildSky(scene, radius = 300) {
   const _moonDir = new THREE.Vector3(0, -1, 0);
   const _anti = new THREE.Vector3();
   const _flat = new THREE.Vector3();
+  const _mq = new THREE.Quaternion();
   const sunLocal = new THREE.Vector3(0, 1, 0);
   const _b = new THREE.Matrix4();
   let skyT = 0;
@@ -390,19 +483,24 @@ export function buildSky(scene, radius = 300) {
       _c.set(0xfff6de);
       if (glow) _c.lerp(_g.set(glow), clamp(glowAmt, 0, 1) * 0.75);
       discMat.uniforms.uColor.value.copy(_c);
-      discMat.uniforms.uNight.value = 0;
       discMat.uniforms.uOpacity.value = 0.95 * sunUp;
       disc.visible = sunUp > 0.01;
       haloMat.opacity = 0.30 * sunUp * (0.7 + 0.6 * clamp(glowAmt, 0, 1));
       halo.visible = disc.visible;
 
       const fullness = 0.5 - 0.5 * Math.cos(moonPhase * Math.PI * 2);   // 0 new, 1 full
-      // uBite slides the bite *away*: 0 eats the whole disc, 2.6 leaves it whole
-      moonMat.uniforms.uBite.value = fullness * 2.6;
       /* A daylight moon is a pale grey wafer, not a lamp; the same moon after
        * dark is the brightest thing in the sky. */
       moonMat.uniforms.uColor.value.set(0xe9eeff);
-      moonMat.uniforms.uOpacity.value = moonUp * (0.22 + 0.74 * night) * (0.25 + 0.75 * fullness);
+      moonMat.uniforms.uNight.value = clamp(night, 0, 1);
+      /* **No `fullness` term here, and that is the change.**  The old flat
+       * moon had to be faded out toward new, because its bite was a drawing
+       * and the drawing had to be told to go away.  A lit ball needs no such
+       * help: a crescent is as bright per pixel as a full moon and there is
+       * simply less of it, which is now what the shader does.  Multiplying by
+       * `fullness` as well would make a thin crescent both thin AND
+       * transparent, and count the same fact twice. */
+      moonMat.uniforms.uOpacity.value = moonUp * (0.22 + 0.74 * night);
       moon.visible = moonMat.uniforms.uOpacity.value > 0.02;
       moonHaloMat.opacity = moonUp * night * fullness * 0.22;
       moonHalo.visible = moonHaloMat.opacity > 0.01;
@@ -483,9 +581,22 @@ export function buildSky(scene, radius = 300) {
       if (moonDir) {
         _moonDir.copy(moonDir).normalize();
         moon.position.copy(_moonDir).multiplyScalar(radius * 0.9);
+        /* Turned to face the camera even though it is a ball: a sphere looks
+         * the same whichever way you spin it, but its SEAS do not, and a moon
+         * is tidally locked — you get the one face for ever.  Turning it is
+         * how that stays true as you walk round the planet. */
         moon.lookAt(camera.position);
         moonHalo.position.copy(_moonDir).multiplyScalar(radius * 0.88);
         moonHalo.lookAt(camera.position);
+
+        /* The light on it, in the ball's **own** space.  `_sunDir` is already
+         * in the group's frame and the moon is a child of the group, so
+         * undoing the mesh's own turn is the whole transform — no camera
+         * matrix in it, which is the point: the camera's inverse is written
+         * by the renderer at draw time and reading it here gets you last
+         * frame's, which lit the moon from wherever you were looking. */
+        _mq.copy(moon.quaternion).invert();
+        moonMat.uniforms.uSun.value.copy(_sunDir).applyQuaternion(_mq);
       }
 
       /* Each cloud on its own ring at its own pace, some against the rest —

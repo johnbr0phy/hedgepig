@@ -31,6 +31,13 @@ last run did *not* touch.
 2. **The road is a featureless mass.** From the town it is the largest single
    thing in frame and it has no camber, no markings, no verge, no litter and
    no wear. `places/road.js`.
+2b. **Nothing in the sky glows.** There is no bloom pass — the pipeline is
+   ink, grade, fxaa. The sun is a pale disc with a painted halo quad rather
+   than a source: it does not bleed over the horizon, or over anything
+   standing in front of it, and neither does the moon or a lit window. One
+   half-res threshold-blur-add would do all of them at once, and it is the
+   only thing on this list with real per-frame cost — measure it focused,
+   not from a hidden tab, and put it behind a toggle like `O` and `G`.
 3. **Post-rain glints on the quills** — a wet hedgehog, for the thirty seconds
    after a front clears. `front` now falls to zero on its own, so there is an
    event to hang it on.
@@ -317,3 +324,31 @@ Newest last. One line each: date, workstream, what landed, what the sweep found.
   the one the clouds want, is the honest fix for both. And there is nothing
   to *do* at the pad: it is the largest object in the world and it is
   scenery.
+- **2026-07-31 — the moon stopped being a drawing (interactive session).**
+  224/224, deployed. Asked whether the sun and moon were real light-emitting
+  3D objects. Half the answer was already yes and better than expected: there
+  is one directional light and `keyDir` follows the sun by day and the **moon**
+  by night, so the moon has always cast the night shadows, and both discs read
+  the same `sunDir`/`moonDir`. Directional is also the right physics for a
+  body that far off — a point light would be worse geometry and six shadow
+  renders. So the sun stays a flat disc, because an unlit sphere four degrees
+  across is pixel-for-pixel the disc it replaces. The **moon** became a real
+  lit ball, and with it its phase stopped being drawn: `moonDirAt` already put
+  it `phase` of a turn along the sun's arc, so elongation *is* phase and
+  lighting the ball reproduces `moonPhase` for free — the old bite-a-circle
+  hack and the real thing were one fact written twice. Gibbous phases were
+  wrong before and could not have been right: a subtracted circle gives a
+  lens, and a real terminator is a half-ellipse. Earthshine on the dark side,
+  a soft limb, alpha that follows the light. 2 000 triangles and 0.03 ms
+  against a 4.6 ms spread — unmeasurable.
+  **Two faults made and caught while doing it:** the lighting was first done
+  in view space, which needs `camera.matrixWorldInverse` — written by the
+  renderer at draw time, so the sun was a frame stale and the moon was full
+  every night; and a back-quote in a comment *inside* a GLSL template literal
+  ended the shader source and took the module down. The harness now asserts
+  the lit fraction `(1 + uSun.z)/2` against `fullness` over seven phases,
+  which is exactly the number the view-space bug pinned at 1.0.
+  **Sweep found / still open:** there is no bloom, so nothing in the sky
+  actually *glows* — the sun is a pale disc with a painted halo rather than a
+  source, and that is the one remaining thing that would make either body read
+  as emitting. It is also the only option here with real frame cost.

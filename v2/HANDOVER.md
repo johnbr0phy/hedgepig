@@ -778,6 +778,63 @@ Who has been met lives in `game.state.met`, in the save, **not** in
 written from one place, and a second thing keeping its own key in
 localStorage is how two saves come to disagree about which run you are on.
 
+### The moon is a ball, the sun is a disc, and the asymmetry is the point
+
+**The moon's phase is no longer drawn. It is what happens.**
+
+It used to be a flat quad with a second circle slid across it to bite a
+crescent out. That works for a crescent and cannot work for anything else:
+subtracting one circle from another can only give you a lens, and a gibbous
+moon's terminator is a half-*ellipse* — the lit limb stays a perfect
+semicircle while the terminator narrows, flattens and crosses over. The bite
+was wrong for half of every month.
+
+The geometry to do it properly was already in the file. `moonDirAt` puts the
+moon `phase` of a turn along the sun's own arc, so **its elongation from the
+sun *is* its phase** — which is the real astronomy — and that means lighting a
+ball by `sunDir` reproduces `moonPhase` exactly, with no second copy of the
+number to keep in step. The hack and the truth were the same fact written
+twice; deleting the hack was the whole change.
+
+Three things it buys that a quad cannot have: an elliptical terminator, soft
+because the far limb of a real moon is grazing light on rough ground; a dark
+side that is **earthshine** rather than black, so a crescent reads as a
+*sphere* with the rest of it faintly there instead of a moon with a piece
+missing; and an alpha that follows the light, so a new moon fades out where it
+stands rather than hanging about as a grey ball among the stars.
+
+**The sun stays a disc, deliberately.** It has to be drawn unlit — a lit
+sphere has a terminator, and a sun with a terminator is a crescent — and an
+unlit sphere four degrees across is pixel-for-pixel the disc it would replace.
+It would be triangles for nothing.
+
+Two traps, both of which bit:
+
+- **Light it in the mesh's OWN object space, never in view space.** The first
+  version compared `normalMatrix * normal` against a view-space sun, which
+  needs `camera.matrixWorldInverse` — and the renderer writes that at *draw*
+  time, not when `update` runs. The sun arrived a frame stale, the terminator
+  sat wherever the camera had last been pointing, and the moon was full every
+  night of the month. `_sunDir` is already in the sky group's frame and the
+  moon is a child of that group, so undoing the mesh's own turn is the entire
+  transform and no camera comes into it.
+- **No back-quotes inside the GLSL template literals.** A single one in a
+  comment ended the shader source mid-string and took the whole module out
+  with a `SyntaxError` a hundred lines from the cause.
+
+The mesh is turned to face the camera even though it is a ball: a sphere looks
+the same however you spin it, but its *seas* do not, and a moon is tidally
+locked. And there is a `smoothstep` on the limb — at forty segments the
+silhouette is still a visible polygon at a hundred pixels across, and a
+polygonal moon reads as a rock.
+
+**Cost: none that can be measured.** 2 000 triangles against the frame's
+1.92 M, one draw call, one shader program. Timed interleaved with `gl.finish()`
+it comes out at 0.03 ms against a 4.6 ms run-to-run spread — which is to say,
+below the noise. Note the interleaving: a straight A-then-B run in a hidden tab
+reported that *deleting* the moon cost 17 ms, which is §4's rule about
+measurements all over again.
+
 ## 5. Things that will bite the next change
 
 - **A pitched roof is `s * +angle`, not `s * -angle`.** Rotating about +x by a

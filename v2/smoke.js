@@ -1121,6 +1121,74 @@ function sSky() {
   ok(a.dot(m) < 0, 'sun and moon are two objects, on opposite sides when they should be');
   ok(sky.disc.visible && sky.moon.visible, 'and both can be in the sky at the same time');
 
+  /* ------------------------------- the moon ------------------------------- *
+   *
+   * It is a lit ball, so its phase is not drawn — it is what happens when the
+   * sun falls on it.  That only stays true while `moonDirAt` keeps putting it
+   * `phase` of a turn along the sun's own arc, which makes its elongation and
+   * its phase the same number.  Break that and nothing throws, nothing looks
+   * obviously wrong on any single night, and the moon quietly starts showing
+   * a phase that disagrees with where it is in the sky.
+   */
+  ok(sky.moon.geometry.type === 'SphereGeometry', 'the moon is a ball, not a quad');
+  ok(!!sky.moon.material.uniforms.uSun, 'and it is told where the sun is');
+  ok(!sky.moon.material.uniforms.uBite,
+    'and nothing bites a crescent out of it any more');
+
+  const _sd = new THREE.Vector3(), _md = new THREE.Vector3();
+  let phaseWorst = 0;
+  for (const dp of [0, 0.13, 0.29, 0.5, 0.67, 0.84]) {
+    for (const ph of [0, 0.25, 0.5, 0.75]) {
+      season.sunDirAt(dp, _sd);
+      season.moonDirAt(dp, ph, _md);
+      /* Elongation is the angle between them; the lit fraction a viewer sees
+       * is `(1 - cos(elongation)) / 2`, and `fullness` in `sky.js` is
+       * `(1 - cos(phase*TAU)) / 2`.  The two must be the same number. */
+      const lit = (1 - _sd.dot(_md)) / 2;
+      const want = 0.5 - 0.5 * Math.cos(ph * Math.PI * 2);
+      phaseWorst = Math.max(phaseWorst, Math.abs(lit - want));
+    }
+  }
+  ok(phaseWorst < 1e-6, 'and where it stands in the sky IS its phase',
+    `worst disagreement ${phaseWorst.toExponential(1)} over 24 nights`);
+
+  /* New moon beside the sun, full moon opposite it — the two ends of that,
+   * stated in the terms anybody would check it in. */
+  season.sunDirAt(0.3, _sd);
+  ok(season.moonDirAt(0.3, 0, _md).dot(_sd) > 0.9999, 'a new moon is beside the sun');
+  ok(season.moonDirAt(0.3, 0.5, _md).dot(_sd) < -0.9999, 'and a full moon is opposite it');
+
+  /* **And the light that reaches the shader agrees with both.**
+   *
+   * `uSun` is handed to the moon in its own object space, and the mesh is
+   * turned so its local +z faces the camera — so `uSun.z` is the cosine of
+   * the phase angle, and the lit fraction a viewer sees is `(1 + uSun.z)/2`.
+   * That must equal `fullness`, which is what every other part of the sky
+   * reads off `moonPhase`.
+   *
+   * This is worth a check rather than an eyeball because the first version
+   * of it did the lighting in VIEW space, which needs
+   * `camera.matrixWorldInverse` — and the renderer writes that at draw time,
+   * not when `update` runs.  The sun arrived one frame stale, the terminator
+   * sat wherever the camera had last pointed, and what you saw was a moon
+   * that was full every night of the month.  `uSun.z` was pinned at 1.0 the
+   * whole time and this line says so in one number.
+   */
+  let litWorst = 0;
+  for (const ph of [0.08, 0.2, 0.25, 0.4, 0.5, 0.66, 0.85]) {
+    season.sunDirAt(0.42, st.sunDir);
+    season.moonDirAt(0.42, ph, st.moonDir);
+    st.moonAlt = st.moonDir.y;
+    sky.setColors({ top: 0x101838, mid: 0x18224a, haze: 0x222c55, night: 1,
+      moonPhase: ph, moonUp: 1, sunUp: 0, sun: st.sunDir });
+    sky.update(1 / 60, cam, st, b);
+    const seen = (1 + sky.moon.material.uniforms.uSun.value.z) / 2;
+    const want = 0.5 - 0.5 * Math.cos(ph * Math.PI * 2);
+    litWorst = Math.max(litWorst, Math.abs(seen - want));
+  }
+  ok(litWorst < 0.002, 'and the light the shader is given draws exactly that phase',
+    `worst lit fraction off by ${f(litWorst, 4)} over seven phases`);
+
   // orbit view takes the rotation off with the position, or the dome tilts
   sky.setOrbit(true);
   ok(sky.group.position.lengthSq() === 0 && Math.abs(sky.group.quaternion.w - 1) < 1e-9,
