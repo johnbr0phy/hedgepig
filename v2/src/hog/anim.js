@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { clamp, lerp, damp, mulberry32, TAU } from '../core/util.js';
 import { BALL_R } from './hog.js';
+import { HOG_BODY } from './model.js';
 
 /* ------------------------------------------------------------------ *
  * How he moves.
@@ -96,10 +97,24 @@ export function createAnimator(parts, seed = 4242) {
      * not, and the visuals do not care which. */
     const ball = Math.max(s.curl || 0, s.ball || 0);
 
+    /* The tuck, computed once and used by everything below.  He is 26 cm
+     * long and 17.6 cm wide, so curling has to squash his length and swell
+     * his height until he is a sphere of `BALL_R` — an ellipsoid rolling end
+     * over end is funny exactly once. */
+    const { A, B, C, BODY_Y } = HOG_BODY;
+    const bx = lerp(1, BALL_R / A, ball);
+    const by = lerp(1, BALL_R / B, ball);
+    const bz = lerp(1, BALL_R / C, ball);
+    const lift = ball * (BALL_R - BODY_Y);
+    /* Everything that is not the ball **shrinks into it** rather than
+     * blinking out.  A `visible = false` at a threshold is a pop, and a pop
+     * mid-roll reads as a glitch however brief it is. */
+    const tuck = Math.max(0.0001, 1 - ball * 1.25);
+
     /* ---------------------------- the cycle ---------------------------- *
      * Advanced by **ground covered**, never by time.  This one line is why
      * the feet do not skate. */
-    const ground = s.speed * s.gait * dt;
+    const ground = s.speed * s.gait * dt * (1 - ball);
     state.cycle = (state.cycle + ground / STRIDE) % 1;
 
     /* ------------------------------ the legs ---------------------------- */
@@ -134,46 +149,62 @@ export function createAnimator(parts, seed = 4242) {
       _q.setFromUnitVectors(_from, _dir);
       L.obj.quaternion.copy(_q);
       L.obj.position.copy(L.rest);
-      L.obj.visible = ball < 0.55;
+      L.obj.position.y = L.rest.y + lift * 0.6;
+      L.obj.scale.setScalar(tuck);
+      L.obj.visible = tuck > 0.02;
     }
 
     /* ------------------------------ the body ---------------------------- *
      * Twice the stride, because both couplets land in one cycle; the roll is
      * once, because the supporting diagonal swaps once. */
+    /* **Damped away as he tucks.**  A ball that is also bobbing, rolling and
+     * swaying is a ball with something loose inside it, and that jitter was
+     * most of what "goes super weird" meant.  A rolling hedgehog has exactly
+     * one motion, and `seat` owns it. */
+    const walkish = moving * (1 - ball);
     const beat = state.cycle * TAU;
-    state.bob = Math.sin(beat * 2 + Math.PI / 2) * 0.008 * moving;
-    state.roll = Math.sin(beat) * 0.085 * moving;
-    state.pitch = -Math.sin(beat * 2) * 0.035 * moving - 0.06 * moving;
-    state.sway = Math.sin(beat) * 0.010 * moving;
+    state.bob = Math.sin(beat * 2 + Math.PI / 2) * 0.008 * walkish;
+    state.roll = Math.sin(beat) * 0.085 * walkish;
+    state.pitch = -Math.sin(beat * 2) * 0.035 * walkish - 0.06 * walkish;
+    state.sway = Math.sin(beat) * 0.010 * walkish;
 
     // he settles a little lower the faster he goes: a scurry is a crouch
-    const crouch = 0.006 * moving;
+    const crouch = 0.006 * walkish;
 
     const p = parts;
     /* Curling makes him **round**, which an ellipsoid is not.  He is 26 cm
      * long and 17.6 cm wide, so tucking has to squash the length and swell
      * the height until he is a sphere of `BALL_R` — otherwise the roll is an
      * egg going end over end, which is funny once. */
-    const bx = lerp(1, BALL_R / 0.13, ball);
-    const by = lerp(1, BALL_R / 0.079, ball);
-    const bz = lerp(1, BALL_R / 0.088, ball);
-
     p.body.position.set(
       Math.sin(now * 34) * 0.0016 * s.shiver,
-      0.083 + state.bob - crouch + ball * (BALL_R - 0.083),
+      BODY_Y + state.bob - crouch + lift,
       state.sway
     );
     p.body.scale.set(bx, by, bz);
+
+    /* The coat has to squash about **his middle**, not about his feet.
+     * Instanced quills live in root space, so scaling them straight put the
+     * shell 4 mm off the body it stands on and squashed it 32 % along him
+     * while the body underneath went spherical — quills sinking in at the
+     * flanks and splaying at the ends, which is the other half of "weird".
+     * `p' = C + S(p − C)` is the transform, so the offset is `C(1 − S)`. */
     for (const coat of p.coats) {
       coat.scale.set(bx, by, bz);
-      coat.position.y = ball * (BALL_R - 0.083);
+      coat.position.y = BODY_Y * (1 - by) + lift;
     }
-    p.ears.forEach((ear) => { ear.visible = ball < 0.5; });
+
+    p.ears.forEach((ear) => {
+      ear.scale.setScalar(tuck);
+      ear.visible = tuck > 0.02;
+    });
 
     /* ------------------------------ the face ---------------------------- */
     p.setLook(s.lookYaw * (1 - ball));
-    p.face.visible = ball < 0.7;
-    p.face.position.y = 0.083 + state.bob - crouch;
+    p.face.scale.setScalar(tuck);
+    p.face.visible = tuck > 0.02;
+    // the face group's origin *is* the body centre, so it collapses inward
+    p.face.position.y = BODY_Y + state.bob - crouch + lift;
     p.face.position.z = state.sway;
 
     // he nods into the walk, and dips his nose when he is standing about

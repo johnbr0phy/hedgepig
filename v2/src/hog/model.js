@@ -433,18 +433,24 @@ export function buildHog() {
   /* A painted contact shadow.  The real shadow map is doing its job, but at
    * this scale it is a smudge four pixels across; the blob is what actually
    * sits him on the ground. */
+  /* **Not a child of him.**  It used to be, and then he learned to roll: the
+   * spin is applied to his root, so his contact shadow rolled with him — a
+   * flat disc turning edge-on through the ground, fighting the surface for
+   * the same depth on every frame.  That was the flicker.  A shadow belongs
+   * to the *ground*, not to the animal, so `hog.js` seats it separately with
+   * the tangent frame and nothing else. */
+  const shadowGeo = new THREE.PlaneGeometry(HOG_LEN * 1.5, HOG_LEN * 1.15);
+  shadowGeo.rotateX(-Math.PI / 2);
   const shadow = new THREE.Mesh(
-    new THREE.PlaneGeometry(HOG_LEN * 1.5, HOG_LEN * 1.15),
+    shadowGeo,
     flat({
       color: 0x54486a, map: blobTex(), transparent: true, opacity: 0.32,
       depthWrite: false, fog: true, cache: false,
     })
   );
-  shadow.rotation.x = -Math.PI / 2;
-  shadow.position.y = 0.006;
   shadow.userData.noOutline = true;
   shadow.renderOrder = 1;
-  root.add(shadow);
+  shadow.matrixAutoUpdate = false;
 
   /* ------------------------------- looking ------------------------------- *
    * **The yaw is done in the body's own space, not in world space.**

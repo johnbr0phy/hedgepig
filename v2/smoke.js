@@ -492,6 +492,45 @@ function sRoll() {
   ok(turnRoll < turnWalk * 0.75, 'and rolling costs him a good part of his steering',
     `${f(turnRoll, 2)} rad against ${f(turnWalk, 2)} in the same third of a second`);
 
+  /* ---- the three faults that made the roll flicker, locked down ---- */
+  {
+    const parts = buildHog();
+    const a = createAnimator(parts, 7);
+    const st = { gait: 1, speed: HOG_SPD, curl: 0, ball: 1, shiver: 0, lookYaw: 0 };
+    for (let i = 0; i < 30; i++) a.update(st, 1 / 60, i / 60);
+
+    /* **The shadow is not his.**  It was a child of his root, so the spin
+     * rolled it too: a flat disc turning edge-on through the ground, fighting
+     * the surface for depth on every frame.  That was the flicker. */
+    let underRoot = false;
+    parts.root.traverse((o) => { if (o === parts.shadow) underRoot = true; });
+    ok(!underRoot, 'his shadow is not parented to him, so the spin cannot roll it');
+
+    /* **The coat stays concentric with the body.**  Instanced quills live in
+     * root space, so scaling them straight — rather than about his middle —
+     * put the shell 4 mm off the body it stands on and squashed it along him
+     * while the body went spherical underneath. */
+    const { BODY_Y } = HOG_BODY;
+    const coat = parts.coats[0];
+    const coatCentre = coat.position.y + BODY_Y * coat.scale.y;
+    ok(Math.abs(coatCentre - parts.body.position.y) < 1e-9,
+      'and his coat squashes about his middle, not about his feet',
+      `coat centre ${f(coatCentre, 6)} against body ${f(parts.body.position.y, 6)}`);
+
+    /* **Nothing walks inside the ball.**  A ball that is also bobbing and
+     * swaying is a ball with something loose in it. */
+    const still = Math.abs(a.state.bob) + Math.abs(a.state.roll) +
+      Math.abs(a.state.pitch) + Math.abs(a.state.sway);
+    ok(still < 1e-9, 'and the walk stops entirely once he is tucked',
+      `bob+roll+pitch+sway = ${still.toExponential(1)}`);
+
+    /* And he is a sphere, not an egg. */
+    const { A, B, C } = HOG_BODY;
+    const r = [A * parts.body.scale.x, B * parts.body.scale.y, C * parts.body.scale.z];
+    ok(Math.max(...r) - Math.min(...r) < 1e-9, 'and he is a sphere while he rolls',
+      `${r.map((v) => f(v, 4)).join(' × ')} m`);
+  }
+
   // arriving puts him back on his feet
   put(c.x, c.z);
   game.call(plan.offsetFrom(c, 1.2, 0).x, plan.offsetFrom(c, 1.2, 0).z, true);

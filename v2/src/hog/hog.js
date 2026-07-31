@@ -62,6 +62,8 @@ const _q = new THREE.Quaternion();
 const _rot = new THREE.Matrix4();
 const _slope = { nx: 0, nz: 0 };
 const _pole = new THREE.Vector3();
+const _sm = new THREE.Matrix4();
+const _srot = new THREE.Matrix4();
 
 export class Hog {
   /**
@@ -78,6 +80,8 @@ export class Hog {
     if (this.root) {
       this.root.matrixAutoUpdate = false;
       scene?.add(this.root);
+      // the shadow belongs to the ground, not to him — see `model.js`
+      if (parts.shadow) scene?.add(parts.shadow);
     }
 
     /* flat coordinates — x along the walk, z across the field */
@@ -391,5 +395,19 @@ export class Hog {
     this.root.matrix.copy(_m);
     this.root.matrixWorldNeedsUpdate = true;
     this.root.visible = !this.under;
+
+    /* The shadow, seated on its own: the tangent frame and his heading, and
+     * none of the spin, lean or roll.  It stays lying on the ground however
+     * he is tumbling above it. */
+    const sh = this.parts.shadow;
+    if (sh) {
+      _sm.makeBasis(b.east, b.up, b.north);
+      _sm.setPosition(positionAt(this.x, this.y + 0.006, this.z, _v));
+      _srot.makeRotationY(-this.hd);
+      _sm.multiply(_srot);
+      sh.matrix.copy(_sm);
+      sh.matrixWorldNeedsUpdate = true;
+      sh.visible = !this.under;
+    }
   }
 }
