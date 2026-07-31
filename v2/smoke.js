@@ -854,10 +854,20 @@ function sBoat() {
 }
 
 /** Cross the road, one way or the other, and report whether it cost a heart. */
-function crossing({ atCulvert, runs = 12 }) {
+function crossing({ atCulvert, runs = 24 }) {
   const w = makeWorld();
   const { hog, game, step, put, world } = w;
   const cv = world.out.culvert;
+  /* **Reset what the scenarios before this one left behind.**  The world is
+   * shared and cached, so whatever ran earlier hands this its leftovers, and
+   * the two that matter here both change how long he is exposed: his speed
+   * (a later leg is faster and crosses sooner) and any invulnerability still
+   * running.  Without these the same road measured 8 in twelve alone and 7
+   * inside `all`, which is a test reporting the scenario order rather than
+   * the game.  Twenty-four runs rather than twelve for the same reason the
+   * comment below gives for twelve rather than six. */
+  hog.speed = HOG_SPD;
+  game.state.invuln = 0;
   // in the road's own frame: `along` the ring, `across` it
   const along = atCulvert ? cv.along : cv.along + 9;
   let bitten = 0;

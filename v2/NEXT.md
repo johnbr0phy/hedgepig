@@ -18,6 +18,13 @@ last run did *not* touch.
 
 ### Graphics
 
+0. **The road runs through the middle of the lake, and the mushroom garden.**
+   `roadOffset` is 0.00 at the centres of LAKE, MGARD, ROAD and TOWN — the road
+   is a great circle and four of the ten antiprism vertices lie on it. Stand at
+   the lake's centre and you are on tarmac. Structural, pre-existing since the
+   layout was written, and now very visible because the road has markings. It
+   wants either the road's path bent off those centres or those places moved.
+
 1. **The orbit far side is bare.** Press `P` and half the planet is a 4-band
    ramp with nothing on it. Real props at reduced density, not labels. Flagged
    by three consecutive sweeps and taken by none of them.
@@ -127,6 +134,11 @@ last run did *not* touch.
 - **`main.js` is 670 lines** and owns fireflies, the rainbow, photo mode,
   puddles, hoglet names and the frame loop. The exception guard in `frame()`
   is protecting a lot of unrelated code.
+- **The scene got much heavier with the zone pass.** 472 calls, **1.92 M
+  triangles** and **101 shader programs** at 1260x693, 27.7 ms hidden-tab. The
+  triangle count roughly tripled and the program count nearly doubled — every
+  `cache: false` material is its own program, and the new props make a lot of
+  them. Worth a pass to share materials before adding more.
 - **The frame is measured but from a hidden tab.** 503 calls, 201 k triangles,
   45 programs at 1260×693, 22.1 ms with a real `gl.finish()`. A focused
   measurement would settle it.

@@ -590,6 +590,41 @@ the failure mode is a quiet flattening: a mask widened or an amplitude
 trimmed, and the world goes back to a table top with nothing looking wrong in
 the diff.
 
+### `bakeToPlanet` maps an instanced mesh's positions *for* you
+
+The bake treats each instance's position as **flat authoring coordinates** and
+maps it onto the sphere itself (`planet.js`, the `isInstancedMesh` branch). A
+builder that seats instances with `positionAt`/`basisAt` before the bake is
+therefore mapping them **twice**: a point already 47.7 m out comes back at a
+longitude of 47.7 m, which is a radian round the planet.
+
+`road.js` had done exactly that since it was written, so the road's centre
+line, all 502 kerbstones and the town's paving have been **inside the planet**
+for their whole existence. The backlog item that said "the road is a
+featureless mass with no markings" was not describing missing work — the
+markings were there, they were just never anywhere near the road.
+
+**The rule: instanced meshes are handed flat coordinates and left alone.**
+Rigid props go through `ctx.put`/`ctx.scatter`, which set `planetRigid`;
+instances go through the bake. Neither wants `positionAt` called on it first.
+
+### A statistical test that reports the scenario order
+
+`roadmiss` measures how many road crossings cost a heart and needs 60 %. It
+passed alone and failed inside `all`, one crossing either side of the line —
+and its own comment already recorded that this had happened before at six runs
+and been "fixed" by going to twelve.
+
+The cause is that the harness shares one cached world, so this scenario
+inherits whatever the ones before it left: **his speed** above all, since a
+later leg crosses sooner and is exposed for less time. It resets speed and
+invulnerability now and runs twenty-four crossings, and it sits at 17/24 on
+every run rather than wandering.
+
+The general point, since this is twice: **a shared cached world makes every
+threshold test order-dependent.** If a scenario measures a rate, it has to
+reset the state that rate depends on, or it is measuring the suite.
+
 ## 5. Things that will bite the next change
 
 - **A pitched roof is `s * +angle`, not `s * -angle`.** Rotating about +x by a

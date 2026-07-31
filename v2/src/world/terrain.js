@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { clamp, sstep } from '../core/util.js';
 import {
-  R, CENTRE, LAKE, FARM, HENS, MIRE, MGARD, MEADOW,
-  dirAt, lakeAt, townAt, roadOffset, placeAmt, offsetFrom,
+  R, COUNT, CENTRE, BGARD, WOOD, MGARD, LAKE, MIRE, HENS, FARM, ROAD, TOWN, MEADOW,
+  dirAt, lakeAt, townAt, roadOffset, placeWeights, offsetFrom, ROAD_AXIS,
 } from './plan.js';
 
 /* ------------------------------------------------------------------ *
@@ -75,8 +75,14 @@ function relief(dir) {
  * How much relief survives here.  Built ground is graded flat, and the road
  * gets a corridor of its own because it circles the planet and is laid at a
  * fixed height across its whole width.
+ *
+ * This grades the *wave field* only — the noise — and not the landforms
+ * below, which are drawn by hand and graded by hand.  See the landform
+ * section for why that separation had to exist.
+ *
+ * `w` is the place weights, already computed once by `heightAt`.
  */
-function reliefMask(x, z) {
+function reliefMask(x, z, w) {
   /* **The grading ramp is a cliff if it is short enough.**  This was
    * `sstep(4.8, 9.5)` — the whole relief faded in over 4.7 m — which at the
    * old 1.44 m of relief was a gentle verge and at 3.4 m is a 38° bank
@@ -88,8 +94,14 @@ function reliefMask(x, z) {
    * future landform that is taller than this one wants checking here first. */
   let m = sstep(5.0, 26.0, Math.abs(roadOffset(x, z)));
   m *= 1 - 0.92 * townAt(x, z);
-  m *= 1 - 0.85 * placeAmt(x, z, FARM);
-  m *= 1 - 0.80 * placeAmt(x, z, HENS);
+  m *= 1 - 0.85 * w[FARM];
+  m *= 1 - 0.80 * w[HENS];
+  /* And the mire, which is the one *natural* place that has to be flat: a
+   * mire is what a hollow does when nothing drains out of it, and thirty-four
+   * puddles laid as flat discs on ground with 1.9 m of wave in it float at
+   * one edge and sink at the other.  Half, not all — a mire with no shape at
+   * all is a car park. */
+  m *= 1 - 0.50 * w[MIRE];
   return clamp(m, 0, 1);
 }
 
@@ -104,8 +116,8 @@ function basin(x, z) {
 }
 
 /** The mire is a shallow dish, and the mushroom garden dips a little. */
-function dishes(x, z) {
-  return -0.24 * placeAmt(x, z, MIRE) - 0.08 * placeAmt(x, z, MGARD);
+function dishes(w) {
+  return -0.24 * w[MIRE] - 0.08 * w[MGARD];
 }
 
 /* ------------------------------ landforms ------------------------------ *
@@ -125,20 +137,87 @@ function dishes(x, z) {
  *
  * Multiplied by a weight that reaches zero at the place's edge, so no
  * landform can ever step against its neighbour.
+ *
+ * **Landforms do not go through `reliefMask`, and that is not an oversight.**
+ * The first cut of this passed them through it with the waves, and four of
+ * the ten places came out wrong in ways that took a map to see.  The road is
+ * a great circle through the roadside, the town, *the mushroom garden and the
+ * middle of the lake* — four of the ten centres lie on it — so the corridor
+ * that keeps the tarmac flat was cutting a ten-metre causeway straight
+ * through the middle of the hollow and the basin.  `basin` and `dishes` have
+ * always escaped the mask for exactly that reason; a landform is the same
+ * kind of thing.  And the farm, the hens and the town are damped to 15–20 %
+ * there, which turned "a flat pad standing on a rise" into a saucer with a
+ * raised rim, because the damping lifts as the place's weight falls.
+ *
+ * So the mask grades the *noise*, and each landform grades itself.  The bill
+ * for that is real and is paid here: nothing else is checking these, and the
+ * two numbers that matter — 0.22 m of rise per 0.4 m of ground, and the
+ * relief floor — are both in `smoke.js terrain`.
+ *
+ * Two rules came out of drawing ten of them:
+ *
+ *  - **What a form is worth at the place's rim is a scarp all the way round
+ *    it.**  The weight goes 1 → 0.5 over about 4.5 m, so a form still worth a
+ *    metre out at 22 m lays a 0.1 m/m ring round the place — invisible in the
+ *    code and perfectly visible on the ground.  Every form here is written to
+ *    come back to something small before it gets there, which is why several
+ *    of them are a shelf up followed by a shelf down.
+ *  - **A radial form has to be flat at its own centre.**  Distance from a
+ *    centre has a corner at zero, so anything with a slope in it becomes a
+ *    cone point standing in the middle of the place.  `pad` and a `bank`
+ *    centred on zero both are flat there; `shelf(d, …)` would not be.
  */
 
-/** An axis across a place, for laying a ridge or a valley along. */
-function acrossAxis(centre, turn = 0) {
+/** The east/north frame at a place's centre — the one the builders lay their
+ *  (u, v) out in, so a turn measured here means the same thing there. */
+function placeFrame(centre) {
   const up = new THREE.Vector3(0, 0, 1);
   const e = new THREE.Vector3().crossVectors(up, centre.dir);
   if (e.lengthSq() < 1e-9) e.set(1, 0, 0);
   e.normalize();
-  const n = new THREE.Vector3().crossVectors(centre.dir, e).normalize();
+  return { e, n: new THREE.Vector3().crossVectors(centre.dir, e).normalize() };
+}
+
+/** An axis across a place, for laying a ridge or a valley along. */
+function acrossAxis(centre, turn = 0) {
+  const { e, n } = placeFrame(centre);
   return e.multiplyScalar(Math.cos(turn)).addScaledVector(n, Math.sin(turn)).normalize();
 }
 
+/**
+ * The turn that aims that axis at something — a neighbouring place, the road.
+ *
+ * Seven of the ten below are aimed at something `plan.js` already knows —
+ * five at a neighbouring place, two at the road — and the first cut had
+ * their bearings as measured constants: `-2.83`, `2.20`, `-0.94`.  Every one
+ * of those is a fact about the antiprism, and the antiprism is in `plan.js`;
+ * writing them down here is the same class of mistake as a feature finding
+ * his face with a literal.  Move a centre and these follow it.
+ *
+ * The other three — the meadow, the lake, the mire — are aimed at something
+ * a *builder* laid out, so they stay as turns in the place's own (u, v): the
+ * lake's east is where the jetty is, and the mire's north is across the line
+ * of stepping stones.
+ */
+function turnToward(centre, dir) {
+  const { e, n } = placeFrame(centre);
+  return Math.atan2(dir.dot(n), dir.dot(e));
+}
+const towardPlace = (from, to) => turnToward(CENTRE[from], CENTRE[to].dir);
+
 /** A gaussian bank: `a` metres high, `w` metres wide, centred `at` metres along. */
 const bank = (t, at, w, a) => a * Math.exp(-(((t - at) / w) ** 2));
+
+/** A shelf: flat at nothing below `at - w`, flat `a` metres up above `at + w`.
+ *  A step down is a shelf with a negative `a`; a table is one of each. */
+const shelf = (t, at, w, a) => a * sstep(at - w, at + w, t);
+
+/** A round pad: `a` metres up out to radius `r`, off the edge over a `w` skirt. */
+const pad = (d, r, w, a) => a * (1 - sstep(r - w, r + w, d));
+
+/** Metres of arc from a place's centre — still a function of `dot(n, axis)`. */
+const arcOf = (n, centre) => R * Math.acos(clamp(n.dot(centre.dir), -1, 1));
 
 /* The long meadow: a ridge you walk over with a hollow behind it.  On a
  * planet whose horizon is eleven metres, a two-metre ridge is genuinely
@@ -149,20 +228,165 @@ function meadowForm(n) {
   return bank(t, 6.0, 11.0, 1.90) - bank(t, -9.0, 12.0, 1.00) + bank(t, 21, 8.0, 0.70);
 }
 
-function landform(x, z) {
+/* The butterfly garden: terraced.  One broad step down, with the four beds
+ * straddling the riser, and a bank across the top of the slope, because a
+ * garden with butterflies in it is a garden with something taking the wind
+ * off.
+ *
+ * **The step runs the way the ground already falls, and it had to be turned
+ * round to get there.**  Cut the other way it was worth nothing: the wave
+ * field drops 1.7 m across this place toward the mushroom garden, a step of
+ * 0.95 m against it very nearly cancelled, and the garden measured *flatter*
+ * with a terrace in it than without one.  Which is the honest lesson —
+ * a terrace is what you make when the ground is already sloping, so a
+ * landform's first question is which way the relief under it goes. */
+const BGARD_AXIS = acrossAxis(CENTRE[BGARD], towardPlace(BGARD, MEADOW) + Math.PI);
+function gardenForm(n) {
+  const t = n.dot(BGARD_AXIS) * R;
+  return shelf(t, 3, 5.0, -0.90) + bank(t, -13, 6.0, 0.70);
+}
+
+/* The wood: the ground climbs as you go in, all the way to a bank across the
+ * back of it.  Trees on a rise are visible from much further off than trees
+ * on the flat, which is most of what makes a wood somewhere you head for. */
+const WOOD_AXIS = acrossAxis(CENTRE[WOOD], towardPlace(WOOD, LAKE));
+function woodForm(n) {
+  const t = n.dot(WOOD_AXIS) * R;
+  return pad(arcOf(n, CENTRE[WOOD]), 8, 8, 1.60) + bank(t, 14, 5.0, 1.30);
+}
+
+/* The mushroom garden: a damp hollow at the foot of the wood's rise, with
+ * the wood's side of it a metre higher than the lake's, so it sits in the
+ * lee of the hill and everything that falls on the hill ends up in it.  The
+ * dish `dishes` digs is 80 mm; this is what gives it a shape. */
+const MGARD_AXIS = acrossAxis(CENTRE[MGARD], towardPlace(MGARD, WOOD));
+function mgardForm(n) {
+  const t = n.dot(MGARD_AXIS) * R;
+  return -pad(arcOf(n, CENTRE[MGARD]), 8, 8, 1.25) + shelf(t, 0, 14, 1.00);
+}
+
+/* The lake: a steep bank up one side and a long shingle slope opposite,
+ * which is what a pond in a field looks like — one side undercut, one side
+ * walked into by everything that drinks there.
+ *
+ * Both terms are worth nothing at the middle on purpose: the basin is dug to
+ * a depth, and a landform that lifted the centre would silently drain it.
+ *
+ * **The bank is a shelf and not a gaussian, and that is the whole reason it
+ * fits.**  `basin` already spends 0.152 of the 0.22 ceiling on its own rim at
+ * the waterline, so anything with a tail there adds straight onto it — a
+ * gaussian crest 5 m back from the water measured **0.262**, half again over
+ * the limit, and no amplitude that still read as a bank got it under.  A
+ * smoothstep has compact support: it is *exactly* flat below its riser, so
+ * the bank can start a metre outside the waterline and owe the basin nothing.
+ * Negating `t` puts the riser on the far side from the shingle.
+ *
+ * The shingle is the same shape at a third of the pitch, and it is a shelf
+ * for a second reason: **anything that lifts the ground near the waterline
+ * drags the waterline inward, onto a steeper part of the dish.**  A wide
+ * gaussian worth half a metre at the shore pulled it in from 10.85 m to
+ * 10.10 m and the rise there went from 0.152 to 0.207 — the lake got
+ * *smaller* and *steeper* from a term whose whole purpose was to be gentle,
+ * and nothing about it looked like a mistake. */
+const LAKE_AXIS = acrossAxis(CENTRE[LAKE], 0);      // +t is the jetty's side
+function lakeForm(n) {
+  const t = n.dot(LAKE_AXIS) * R;
+  return shelf(-t, 16.5, 3.75, 1.55) + shelf(t, 20, 8.0, 0.60);
+}
+
+/* The mire: flat and low — `reliefMask` holds the waves down here — with two
+ * tussocky swells, set either side of the line of stepping stones rather
+ * than across it.  A swell you have to climb over on the one dry route is a
+ * landform arguing with a builder. */
+const MIRE_AXIS = acrossAxis(CENTRE[MIRE], Math.PI / 2);   // across the stones
+function mireForm(n) {
+  const t = n.dot(MIRE_AXIS) * R;
+  return bank(t, -11, 5.0, 0.42) + bank(t, 9, 4.2, 0.34);
+}
+
+/* The hen run: the yard is levelled a metre up, and the ground falls off it
+ * on the side away from the farm — so you walk in on the level from the
+ * farmyard and the run stands over everything on the mire side. */
+const HENS_AXIS = acrossAxis(CENTRE[HENS], towardPlace(HENS, FARM) + Math.PI);
+function hensForm(n) {
+  const t = n.dot(HENS_AXIS) * R;
+  return shelf(t, -19, 8.0, 1.15) - shelf(t, 10, 4.0, 1.15);
+}
+
+/* The farmyard: a flat pad standing on a rise.  The pad is the yard — a
+ * barn, a trough and a gate all want one plane under them — and the rise is
+ * set a little to one side of it, so it reads as a hill somebody levelled
+ * the top of rather than as a cone with a farm on it. */
+const FARM_AXIS = acrossAxis(CENTRE[FARM], towardPlace(FARM, TOWN));
+function farmForm(n) {
+  const t = n.dot(FARM_AXIS) * R;
+  return pad(arcOf(n, CENTRE[FARM]), 11.5, 5.0, 1.25) + bank(t, -9, 14, 0.40);
+}
+
+/* The roadside: a cutting.  A bank either side and the tarmac down between
+ * them, which is the one piece of ground on this planet that is there
+ * because somebody dug it.  Laid on the road's own across-axis, so both
+ * banks run parallel to the carriageway; they are worth 45 mm on the
+ * centreline, so the road itself stays as flat as the corridor made it. */
+const ROAD_ACROSS = acrossAxis(CENTRE[ROAD], turnToward(CENTRE[ROAD], ROAD_AXIS));
+function roadForm(n) {
+  const t = n.dot(ROAD_ACROSS) * R;
+  return bank(t, -12, 6.0, 1.15) + bank(t, 12.5, 6.5, 0.95);
+}
+
+/* The town: the ground steps up, twice, to where the terrace stands, and the
+ * square and the wall and the cat stay down on the lower step.
+ *
+ * The axis is the road's own *along* direction and that is the whole trick.
+ * Step across the road and the tarmac is banked over its 9.6 m width by the
+ * full height of the riser; step along it and the street simply climbs, which
+ * is what a street in a town on a hill does. */
+const TOWN_AXIS = acrossAxis(CENTRE[TOWN], turnToward(CENTRE[TOWN], ROAD_AXIS) + Math.PI / 2);
+function townForm(n) {
+  const t = n.dot(TOWN_AXIS) * R;
+  return shelf(t, 3.0, 2.8, 0.80) + shelf(t, 12, 3.5, 0.45);
+}
+
+/**
+ * Every place's own shape, weighed by how much of that place is here.
+ *
+ * The weights are **exactly** zero for any place more than `XF` further off
+ * than the nearest one, so this loop does two or three of these at a typical
+ * point and never all ten.  That exactness is why there is no epsilon cutoff
+ * any more: the old `> 0.004` test dropped a term that was worth up to 6 mm,
+ * which is a step, and this file's whole claim is that it has none.
+ */
+const FORMS = [
+  [MEADOW, meadowForm], [BGARD, gardenForm], [WOOD, woodForm], [MGARD, mgardForm],
+  [LAKE, lakeForm], [MIRE, mireForm], [HENS, hensForm], [FARM, farmForm],
+  [ROAD, roadForm], [TOWN, townForm],
+];
+
+function landform(n, w) {
   let h = 0;
-  const wm = placeAmt(x, z, MEADOW);
-  if (wm > 0.004) h += meadowForm(_n) * wm;
+  for (let i = 0; i < FORMS.length; i++) {
+    const a = w[FORMS[i][0]];
+    if (a > 0) h += FORMS[i][1](n) * a;
+  }
   return h;
 }
 
-/** The one answer to how high the ground is at flat coordinates (x, z). */
+/** The one answer to how high the ground is at flat coordinates (x, z).
+ *
+ * The place weights are worked out **once** and handed to everything that
+ * wants them.  They used to be recomputed by every caller — `reliefMask`
+ * twice, `dishes` twice, `landform` once — and each call is ten arc-cosines,
+ * so the cheapest way to make ten landforms affordable was to stop asking
+ * the same question five times. */
+const _w = new Float64Array(COUNT);
+
 export function heightAt(x, z) {
   dirAt(x, z, _n);
-  let h = relief(_n) * reliefMask(x, z);
-  h += landform(x, z) * reliefMask(x, z);
+  placeWeights(x, z, _w);
+  let h = relief(_n) * reliefMask(x, z, _w);
+  h += landform(_n, _w);
   h += basin(x, z);
-  h += dishes(x, z);
+  h += dishes(_w);
   return h;
 }
 
