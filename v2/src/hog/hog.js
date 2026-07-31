@@ -159,6 +159,9 @@ export class Hog {
     this.vy = 0;
     this.air = 0;
     this.stood = null;
+    /** Pace gathered rolling downhill, spent climbing and standing up. */
+    this.momentum = 0;
+    this.grade = 0;              // fall of the ground along his heading
     this.landed = 0;            // seconds since the last landing, for the squash
 
     this._idleTimer = 2;
@@ -392,6 +395,7 @@ export class Hog {
     this.ball = damp(this.ball, this.rolling && this.hurt <= 0 ? 1 : 0, 7, dt);
 
     const before = { x: this.x, z: this.z };
+    this.gather(dt);
     this.settle(dt);
     const ground = this.gait * this.speed * (1 + (this.rainHurry || 0)) * this.rollSpeed() * dt;
     this.stride += ground * 7.2 / this.speed;
@@ -421,7 +425,44 @@ export class Hog {
   }
 
   /** Twice the speed, once he is properly tucked. */
-  rollSpeed() { return 1 + this.ball; }
+  /**
+   * How much faster the ball is than the walk.
+   *
+   * `1 + ball` was the whole of it: a tuck was worth exactly double, on the
+   * flat, up a hill and down one alike. With the world now carrying nearly
+   * six metres of relief that is the wrong answer in the most noticeable
+   * possible place — a ball that does not gather pace down a slope is not a
+   * ball, it is a fast walk with the legs hidden.
+   *
+   * `momentum` is the fix and it is deliberately *not* a per-frame slope
+   * multiplier: it accumulates while he is going downhill and bleeds off on
+   * the flat and against a rise, so a long descent leaves him genuinely
+   * quick for a few seconds at the bottom and a climb costs him what he
+   * gained. That memory is the difference between rolling and sliding.
+   */
+  rollSpeed() { return (1 + this.ball) * (1 + this.momentum); }
+
+  /**
+   * Gather and lose pace on a slope.  `grade` is the fall of the ground along
+   * his own heading — positive downhill — and the ball only listens to it
+   * while it is actually a ball.
+   */
+  gather(dt) {
+    slopeAt(this.x, this.z, _slope);
+    const grade = -(_slope.nx * Math.cos(this.hd) + _slope.nz * Math.sin(this.hd));
+    this.grade = damp(this.grade, grade, 6, dt);
+
+    const ball = this.ball;
+    /* Downhill builds, uphill and the flat take it back. Drag is higher than
+     * gain so it cannot run away, and the cap is 1.6x on top of the tuck —
+     * fast enough to feel like you have committed to something, slow enough
+     * that the 4.6 rad/s steering can still put him where you meant. */
+    const gain = Math.max(0, this.grade) * 2.4 * ball;
+    const drag = (0.55 + Math.max(0, -this.grade) * 4.2) * (0.35 + 0.65 * ball);
+    this.momentum = clamp(this.momentum + (gain - drag * this.momentum) * dt, 0, 1.6);
+    // and standing up spends it: the legs are not a wheel
+    if (ball < 0.5) this.momentum = damp(this.momentum, 0, 3.5, dt);
+  }
 
   arrive() {
     this.target = null;

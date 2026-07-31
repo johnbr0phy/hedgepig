@@ -152,44 +152,152 @@ export function bramble({ seed = 9, r = 0.42 } = {}) {
   const rng = rngKit(seed * 8677);
   const g = new THREE.Group();
 
-  const mass = new THREE.Mesh(new THREE.IcosahedronGeometry(r * 0.72, 1), MAT.thorn());
-  mass.position.y = r * 0.4;
-  mass.scale.set(1.25, 0.62, 1.15);
-  g.add(mass);
+  /* **A bramble is arching canes, and nothing else about it reads.**
+   *
+   * This was a squashed icosahedron with twenty-six cones stuck through it,
+   * which is a very good model of a spiky turtle and no model at all of a
+   * thorn bush. The thing your eye actually uses to name a bramble is the
+   * *arch*: a cane leaves the ground, sweeps up and out, and comes back down
+   * to root again at the tip. Half a dozen of those crossing each other is a
+   * bramble even with no thorns on it — and a dome is not one however many
+   * spines you add.
+   */
+  const CANES = 7;
+  const segs = [];
+  const thornAt = [];
+  const leafAt = [];
+  const caneGeo = new THREE.CylinderGeometry(1, 1, 1, 5, 1, true);
+  const p0 = new THREE.Vector3();
+  const p1 = new THREE.Vector3();
 
-  const spikeGeo = new THREE.ConeGeometry(0.018, 1, 4);
-  spikeGeo.translate(0, 0.5, 0);
-  const spikeMat = cel({ color: 0x2a3a2c, bands: 3, tint: 0x4a5a78 });
-  const n = 26;
-  const im = new THREE.InstancedMesh(spikeGeo, spikeMat, n);
-  const m = new THREE.Matrix4();
-  const q = new THREE.Quaternion();
-  const up = new THREE.Vector3(0, 1, 0);
-  const dir = new THREE.Vector3();
-  for (let i = 0; i < n; i++) {
-    const a = rng.range(0, TAU);
-    const el = rng.range(0.1, 1.25);
-    dir.set(Math.cos(a) * Math.cos(el), Math.sin(el), Math.sin(a) * Math.cos(el)).normalize();
-    q.setFromUnitVectors(up, dir);
-    m.compose(
-      new THREE.Vector3(dir.x * r * 0.5, r * 0.35 + dir.y * r * 0.3, dir.z * r * 0.5),
-      q,
-      new THREE.Vector3(1, rng.range(0.16, 0.34), 1)
-    );
-    im.setMatrixAt(i, m);
+  for (let c = 0; c < CANES; c++) {
+    const a = (c / CANES) * TAU + rng.range(-0.35, 0.35);
+    const reach = r * rng.range(0.92, 1.35);
+    const rise = r * rng.range(0.70, 1.05);
+    // a lazy sideways wander, so the canes cross instead of radiating
+    const bend = rng.range(-0.5, 0.5);
+    const N = 7;
+    const at = (t) => {
+      const aa = a + bend * t * t;
+      const d = reach * t;
+      /* Up and back down: the tip returns to the ground, which is what
+       * "arching" means and is why a bramble is a tangle and not a bush. */
+      return p0.set(Math.cos(aa) * d, Math.sin(t * Math.PI * 0.96) * rise, Math.sin(aa) * d);
+    };
+    let prev = new THREE.Vector3(Math.cos(a) * r * 0.06, 0, Math.sin(a) * r * 0.06);
+    for (let i = 1; i <= N; i++) {
+      const t = i / N;
+      const now = at(t).clone();
+      const thick = lerp(0.016, 0.005, t) * (r / 0.42);
+      segs.push({ geometry: caneGeo, matrix: tubeBetween(prev, now, thick) });
+      if (i % 2 === 0 || i === N) {
+        p1.copy(now).sub(prev).normalize();
+        thornAt.push({ at: now.clone(), along: p1.clone(), t });
+      }
+      if (i === 2 || i === 4 || i === 6) leafAt.push({ at: now.clone(), t, a });
+      prev = now;
+    }
   }
-  im.instanceMatrix.needsUpdate = true;
+
+  const canes = new THREE.Mesh(bake(segs), MAT.thorn());
+  canes.castShadow = true;
+  g.add(canes);
+
+  /* Thorns: down the cane and hooked *backwards*, which is the way a real one
+   * points and the reason they catch. Small — the silhouette is the arch, and
+   * a thorn you can count from two metres is a cactus. */
+  const spikeGeo = new THREE.ConeGeometry(0.009 * (r / 0.42), 0.05 * (r / 0.42), 4);
+  spikeGeo.translate(0, 0.025 * (r / 0.42), 0);
+  const spikeMat = cel({ color: 0x37432f, bands: 3, tint: 0x4a5a78 });
+  const im = new THREE.InstancedMesh(spikeGeo, spikeMat, thornAt.length * 2);
+  {
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const up = new THREE.Vector3(0, 1, 0);
+    const dir = new THREE.Vector3();
+    const side = new THREE.Vector3();
+    let n = 0;
+    for (const th of thornAt) {
+      for (const s of [-1, 1]) {
+        side.set(-th.along.z, 0, th.along.x).normalize();
+        dir.copy(side).multiplyScalar(s * 0.8).addScaledVector(th.along, -0.55).normalize();
+        q.setFromUnitVectors(up, dir);
+        m.compose(th.at, q, new THREE.Vector3(1, rng.range(0.7, 1.15), 1));
+        im.setMatrixAt(n++, m);
+      }
+    }
+    im.count = n;
+    im.instanceMatrix.needsUpdate = true;
+  }
   im.castShadow = true;
   g.add(im);
 
-  const berryMat = cel({ color: PAL.berry, bands: 3, tint: 0x6a4a80, flat: false });
-  for (let i = 0; i < 5; i++) {
-    const a = rng.range(0, TAU);
-    const b = new THREE.Mesh(new THREE.SphereGeometry(0.022, 6, 5), berryMat);
-    b.position.set(Math.cos(a) * r * 0.6, r * rng.range(0.4, 0.8), Math.sin(a) * r * 0.6);
-    g.add(b);
+  /* Bramble leaves come in fives, so a leaf here is a little rosette rather
+   * than one blade — at this size the count does not read but the *raggedness*
+   * does, and one quad reads as a flag. */
+  const leaves = [];
+  const leafGeo = new THREE.CircleGeometry(0.035 * (r / 0.42), 5);
+  for (const lf of leafAt) {
+    for (let k = 0; k < 5; k++) {
+      const spread = 0.055 * (r / 0.42);
+      const ang = (k / 5) * TAU + lf.a;
+      const p = new THREE.Vector3(
+        lf.at.x + Math.cos(ang) * spread,
+        lf.at.y + rng.range(-0.01, 0.02),
+        lf.at.z + Math.sin(ang) * spread
+      );
+      const q = new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(-Math.PI / 2 + rng.range(-0.5, 0.5), ang, rng.range(-0.3, 0.3))
+      );
+      leaves.push({ geometry: leafGeo, matrix: new THREE.Matrix4().compose(p, q, _one) });
+    }
   }
+  const leaf = new THREE.Mesh(bake(leaves), cel({
+    color: 0x3e6038, bands: 3, tint: 0x4a5a78, side: THREE.DoubleSide, role: 'leaf',
+  }));
+  leaf.castShadow = true;
+  g.add(leaf);
+
+  // and the fruit, on the canes rather than floating in the middle of it
+  const berryMat = cel({ color: PAL.berry, bands: 3, tint: 0x6a4a80, flat: false });
+  const berries = [];
+  const bGeo = new THREE.SphereGeometry(0.018 * (r / 0.42), 6, 5);
+  for (let i = 0; i < 6; i++) {
+    const lf = leafAt[rng.int(0, leafAt.length - 1)];
+    berries.push({
+      geometry: bGeo,
+      matrix: new THREE.Matrix4().compose(
+        new THREE.Vector3(lf.at.x + rng.range(-0.03, 0.03), lf.at.y - 0.02, lf.at.z + rng.range(-0.03, 0.03)),
+        _noSpin, _one
+      ),
+    });
+  }
+  g.add(new THREE.Mesh(bake(berries), berryMat));
+
   return shadowify(g);
+}
+
+/** One tapered length of cane between two points, as a matrix for `bake`. */
+const _one = new THREE.Vector3(1, 1, 1);
+const _noSpin = new THREE.Quaternion();
+const _tbP = new THREE.Vector3();
+const _tbS = new THREE.Vector3();
+const _tbA = new THREE.Vector3();
+const _tbQ = new THREE.Quaternion();
+const _tbUp = new THREE.Vector3(0, 1, 0);
+function tubeBetween(a, b, thick) {
+  _tbA.subVectors(b, a);
+  const len = _tbA.length();
+  /* A zero-length segment normalises to NaN and the NaN goes straight into
+   * the baked geometry, where the harness finds it and nothing else would.
+   * Two arc samples can coincide at the tip, where the curve flattens. */
+  if (!(len > 1e-6)) _tbA.set(0, 1, 0); else _tbA.divideScalar(len);
+  _tbQ.setFromUnitVectors(_tbUp, _tbA);
+  return new THREE.Matrix4().compose(
+    _tbP.set((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2),
+    _tbQ,
+    _tbS.set(thick, Math.max(len, 1e-4), thick)
+  );
 }
 
 /** A clump of flowers: stems plus a flat head, merged into one mesh. */

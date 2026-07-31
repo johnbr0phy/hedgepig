@@ -294,8 +294,31 @@ export function townAt(x, z) {
   return 1 - sstep(TOWN_R - 4, TOWN_R, arcTo(CENTRE[TOWN], x, z));
 }
 
+/* ------------------------------ the launch pad ---------------------------- *
+ *
+ * The apron in the mire lives here rather than in `starbase.js` for one
+ * reason: **concrete is hard ground**, and hard ground is decided in this
+ * file.  Left out of `hardAt`, the meadow grass grew straight up through the
+ * pad — the grass field takes its cue from here and from nowhere else, and
+ * the first version of the pad was a launch site with a lawn on it.
+ *
+ * It is deliberately NOT in `reliefMask` with the town and the road, which
+ * grade the terrain flat under themselves.  The apron follows the ground
+ * instead of levelling it, so that the mire is still a mire under the
+ * concrete and `heightAt` remains the only answer to how high anything is.
+ */
+export const PAD_U = 3, PAD_V = -11, PAD_R = 13;
+export const PAD = (() => {
+  const p = offsetFrom(CENTRE[MIRE], PAD_U, PAD_V);
+  return { x: p.x, z: p.z, dir: dirAt(p.x, p.z, new THREE.Vector3()) };
+})();
+export function padAt(x, z) {
+  return 1 - sstep(PAD_R - 2.5, PAD_R, arcTo(PAD, x, z));
+}
+
 /** Ground that grass will not grow on, and brambles must not seed on. */
-export const hardAt = (x, z) => Math.max(lakeAt(x, z), roadAt(x, z), townAt(x, z));
+export const hardAt = (x, z) =>
+  Math.max(lakeAt(x, z), roadAt(x, z), townAt(x, z), padAt(x, z));
 
 /* ------------------------------ longitude ------------------------------ */
 

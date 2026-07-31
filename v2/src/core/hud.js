@@ -42,7 +42,7 @@ export function createHud() {
   const cx2 = cvs?.getContext('2d');
   const S = 168, MID = S / 2, RING = 66;
 
-  function drawCompass({ places = [], home = null, here = -1 } = {}) {
+  function drawCompass({ places = [], home = null, here = -1, folk = [] } = {}) {
     if (!cx2) return;
     cx2.clearRect(0, 0, S, S);
 
@@ -97,6 +97,56 @@ export function createHud() {
       cx2.beginPath();
       cx2.arc(MID + cos * r, MID + sin * r, 6, 0, Math.PI * 2);
       cx2.fill();
+    }
+
+    /* The residents.  Red, because they are the one thing on this ring that
+     * is a *creature* — the ticks are geography and the wedge is home, and
+     * neither of those has ever been red.
+     *
+     * Drawn on the same grammar as the burrow's dot: a bearing, and a
+     * distance that is a position rather than a figure.  Once met the dot
+     * goes hollow with a tick through it, which is the whole idea — the
+     * ring is a list of who is out there, and meeting somebody crosses them
+     * off it rather than deleting them.  A met resident that vanished would
+     * take the "go back and see her again" with it, and going back is the
+     * entire point of a resident.
+     *
+     * They are all in one wood, so from the far side of the planet the four
+     * of them stack into one blip on one bearing and separate as you close.
+     * That is correct: four animals sixteen metres apart ARE one blip from a
+     * hundred and fifty metres away.
+     *
+     * **Their `near` is not the burrow's.**  The burrow is measured against
+     * half a lap, because it can genuinely be half a lap away.  Measured the
+     * same way, the residents — who are only ever interesting within a wood's
+     * width — all landed inside eight pixels of the middle and piled up into
+     * one unreadable smudge on top of him.  `FOLK_FAR` in `main.js` is the
+     * scale they use instead, and the rim here is pulled in so a dot at full
+     * stretch does not sit on the place ticks.
+     */
+    for (const p of folk) {
+      const a = p.angle - Math.PI / 2;
+      const r = (RING - 10) * Math.min(1, p.near);
+      const x = MID + Math.cos(a) * r, y = MID + Math.sin(a) * r;
+      if (p.met) {
+        cx2.strokeStyle = 'rgba(184, 58, 44, 0.55)';
+        cx2.lineWidth = 1.6;
+        cx2.beginPath();
+        cx2.arc(x, y, 5, 0, Math.PI * 2);
+        cx2.stroke();
+        // the tick: down-right, up-right, and short enough to stay inside
+        cx2.lineWidth = 2;
+        cx2.beginPath();
+        cx2.moveTo(x - 2.6, y + 0.2);
+        cx2.lineTo(x - 0.6, y + 2.4);
+        cx2.lineTo(x + 3.0, y - 2.6);
+        cx2.stroke();
+      } else {
+        cx2.fillStyle = 'rgba(184, 58, 44, 0.92)';
+        cx2.beginPath();
+        cx2.arc(x, y, 4, 0, Math.PI * 2);
+        cx2.fill();
+      }
     }
 
     // him, in the middle, facing up because the ring turns instead of he does

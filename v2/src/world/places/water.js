@@ -7,6 +7,7 @@ import { heightAt, waterDepthAt, lakeShore, WATER_Y } from '../terrain.js';
 import { CENTRE, LAKE, LAKE_R, offsetFrom, distance, bearing } from '../plan.js';
 import { positionAt, basisAt } from '../planet.js';
 import { reeds, reed, rock, log, flowerClump, tussock, plank } from '../props.js';
+import { buildStarbase } from './starbase.js';
 
 /* ------------------------------------------------------------------ *
  * The lake, and the mire at its edge.
@@ -1079,6 +1080,29 @@ export function buildMire(root, ctx) {
     s.scale.y = 0.45;
     return s;
   }).forEach((p) => g.add(p.obj));
+
+  /* --------------------------------- the pad -------------------------------- *
+   * A Starship, at actual size, on the far side of the mire from the
+   * boardwalk.  See `starbase.js` for why it is here and not somewhere else,
+   * and for the three rules that keep a 123 m object standing on a 48 m
+   * planet instead of curling round it.
+   *
+   * Built **last**, so the mire is already full when it lands — and then
+   * everything the mire put down inside the apron is taken away again.
+   * Reeds growing up through the concrete is funny exactly once. */
+  const pad = buildStarbase(root, ctx);
+  ctx.out.pad = pad;
+  const clearPad = (parent) => {
+    for (const child of [...parent.children]) {
+      const p = child.position;
+      /* A holder still at the origin has not been seated — its own children
+       * carry the positions.  Descend rather than measuring it, or the whole
+       * bog cotton goes on whether (0, 0) happens to be near the pad. */
+      if (p.x === 0 && p.z === 0) { clearPad(child); continue; }
+      if (distance(p.x, p.z, pad.at.x, pad.at.z) < pad.apronR + 0.6) child.removeFromParent();
+    }
+  };
+  clearPad(g);
 
   root.add(g);
   return g;

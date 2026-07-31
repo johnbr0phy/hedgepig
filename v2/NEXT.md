@@ -39,6 +39,12 @@ last run did *not* touch.
    the shadow camera has bitten twice before — read HANDOVER §3 first.
 5. **Cel banding on large smooth surfaces** — the lake sheet and the sky dome
    in orbit. The ramp was tuned on props at two metres, not on a 47 m sphere.
+5b. **Neither the rocket nor the clouds cast anything on the ground**, and it
+   is one fix for both. The shadow camera is ±17 m around him, so a 123 m
+   Starship in it is a black wall rather than a long shadow and it is
+   switched off above the mount — the largest object in the world sits on the
+   bog casting nothing. A projected mask would serve the rocket and the
+   clouds at once.
 6. **The clouds do not cast anything on the ground.** They dim the key light
    when one crosses the sun, which is the feel of it; an actual moving pool of
    shade on the meadow is the sight of it, and the shadow camera at ±17 m
@@ -68,15 +74,23 @@ last run did *not* touch.
    grass shader already carries 16 trail markers to build it on.
 6. **The wood is one tree at one density.** A clearing, a deadfall, a stand of
    one species.
+6b. **The wood is the only place anybody lives.** Four residents, one place in
+   ten — deliberate, because a resident is a destination, but it does mean
+   nine places have nobody in them. The farm and the town are the obvious
+   next addresses.
 7. **The mire, the hen run and the farmyard read as one brown wash** at ground
    level — the moss/soil mottle helps in the meadow and does nothing here.
 
 ### The hedgepig
 
+0. **He is the only one who talks.** Four residents in the wood have forty
+   lines each and he answers none of them — the panel is one-sided. Either he
+   gets a voice in it or the lines should stop being addressed to him.
 1. **He does not shelter.** `rainHurry` is half of it; the other half is going
    *somewhere* — under the barn eave, into the wood — and waiting it out.
-2. **Uphill and downhill look identical.** Gait, body pitch and speed should
-   all answer the slope he is on. `slopeAt` is right there.
+2. **Uphill and downhill look identical** *— part done: the ball now gathers
+   pace downhill and spends it climbing (`hog.momentum`). On his legs nothing
+   answers the slope at all: gait and body pitch are still flat-ground.*
 3. **No fatigue.** Speed is constant within a leg. A late-leg tiredness that
    shows in the gait and nowhere else.
 4. **He never looks at anything.** The glance tracks the pointer and nothing
@@ -104,6 +118,9 @@ last run did *not* touch.
 6. **Sowing has no consequence past the 26-item pool.** What you sowed in
    place 3 could still be there next lap, and the golden thistle proves the
    idea works.
+6b. **The pad is scenery.** The biggest thing in the world and there is
+   nothing to do at it: no climbing the tower, no ride, no launch, no reason
+   to walk over there twice. Five lines on the apron is all it has.
 7. **Photo mode goes nowhere.** `S` keeps a shot and nothing ever shows it
    again; a contact sheet in the journal closes the loop.
 8. **The journal has no second page.** Nothing gets harder or stranger to earn
@@ -258,3 +275,45 @@ Newest last. One line each: date, workstream, what landed, what the sweep found.
   cent of the time until they went on a dome; and the occlusion cone has to be
   wider than the cloud, because at the true radius it is a one-per-cent event
   you never see.
+- **2026-07-31 — the four who live in the wood (interactive session).**
+  203/203. A badger at his sett, a robin that comes to you, a toad under the
+  deadfall and a wood mouse under the birches, forty lines each, said through
+  the typing panel in `core/dialogue.js`. Space is the hop and the advance
+  both, and the advance swallows the key or one press finishes the line and
+  hops him away from whoever is saying it. Three things needed working out
+  rather than writing: they are **pinned**, unlike every critter, because a
+  resident is a destination and not a butterfly; **reach is per animal**,
+  because the robin keeps 1.15 m off you by design and would have been
+  unreachable on the 0.8 m every interactable uses; and the resident is
+  **held out to `talk + 0.45`**, or a hedgehog snuffling on the spot walks
+  out of the conversation mid-sentence. Also landed: brambles rebuilt as
+  arching canes with backward-hooked thorns, leaves in fives and fruit on the
+  cane (a dome with spines in it was a spiky turtle, not a thorn bush); and
+  the ball gathers pace downhill and spends it climbing, which is the first
+  thing in the game that answers the relief the world grew two commits ago.
+  **Sweep found / still open:** he is the only one who talks — forty lines
+  each, addressed to a hedgehog who cannot answer; and the wood is the only
+  place anybody lives.
+- **2026-07-31 — a Starship in the bog, and the residents on the ring
+  (interactive session, two reported asks).** 217/217. A full stack at
+  **actual size** in the mire — 71 m booster, 1.8 m hot-stage ring, 52 m
+  ship, 123 m of it, beside a 146 m catch tower with its chopsticks out, on
+  a planet whose radius is 47.75 m. It comes up over the horizon from the far
+  side of the world. The mire because Starbase is on a coastal wetland and
+  the mire is this world's. Four things had to be worked out and all four are
+  in HANDOVER §4: nothing vertical may be bent onto the planet; each standing
+  thing needs its own rigid group *and* legs that reach below their own datum
+  by `d²/2R`, or the outer ones stand on tiptoe; the apron is a skin that
+  follows `heightAt` rather than a plinth that clears it, because the plinth
+  version stood a metre proud and he could not hop onto his own launch site;
+  and concrete is hard ground, which is decided in `plan.js` — without
+  `padAt` the meadow grew straight up through the pad. The residents are red
+  dots on the compass now, hollow with a tick once met, and their scale is
+  20 m rather than the burrow's half-lap because on the burrow's scale four
+  animals in one wood collapsed into one smudge in the middle of the ring.
+  **Sweep found / still open:** the rocket casts no shadow at all, because a
+  123 m object does not fit in a ±17 m shadow frustum and what it produces
+  there is a black wall rather than a long shadow — a projected mask, like
+  the one the clouds want, is the honest fix for both. And there is nothing
+  to *do* at the pad: it is the largest object in the world and it is
+  scenery.

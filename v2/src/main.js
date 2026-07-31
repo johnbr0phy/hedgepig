@@ -18,6 +18,8 @@ import { Hog } from './hog/hog.js';
 import { createGame } from './game/game.js';
 import { createAudio } from './core/audio.js';
 import { createCritters } from './world/critters.js';
+import { createCharacters } from './world/characters.js';
+import { createDialogue } from './core/dialogue.js';
 import { createPuffs, createPrints } from './core/puffs.js';
 import { createHoglet } from './game/hoglet.js';
 
@@ -111,6 +113,8 @@ const critters = createCritters(scene, {
     audio.hoot(Math.max(-0.8, Math.min(0.8, Math.sin(b - chase.yaw))));
   },
 });
+const characters = createCharacters(scene);
+const dialogue = createDialogue();
 const puffs = createPuffs(scene);
 const prints = createPrints(scene);
 const hoglet = createHoglet(scene);
@@ -320,7 +324,12 @@ window.addEventListener('keydown', (e) => {
   /* **Space is the hop.**  It used to stop him, which the keys now do by
    * being let go of — a stop key made sense when a click sent him somewhere
    * and you had no other way to change your mind. */
-  if (e.code === 'Space') { hog.jump(); e.preventDefault(); }
+  /* Space is the hop — unless somebody is talking to him, in which case it
+   * is the one interaction convention everybody already knows.  `advance`
+   * says whether it did anything, and swallowing that is the whole point:
+   * without it the same press finishes the line AND hops him away from the
+   * animal saying it. */
+  if (e.code === 'Space') { if (!dialogue.advance()) hog.jump(); e.preventDefault(); }
   if (e.code === 'Escape') { hog.stop(); held.clear(); rollHeld = false; }
   if (e.code === 'KeyP') {
     setPlanetView(!planetView);
@@ -351,6 +360,7 @@ window.addEventListener('keydown', (e) => {
       owl: 'heard the owl in the wood',
       slept: 'slept a whole night in a burrow',
       everywhere: 'stood in every place there is',
+      everyone: 'met everyone who lives in the wood',
     };
     hud.toggleJournal(Object.keys(game.state.flags).map((k) => LABELS[k]).filter(Boolean));
   }
@@ -533,6 +543,75 @@ document.body.appendChild(bolt);
 const _rippleM = new THREE.Matrix4();
 const _rippleS = new THREE.Vector3();
 
+/* ---------------------------- the residents ---------------------------- *
+ *
+ * Four animals in the wood who live at fixed addresses and have opinions.
+ * Walking up to one opens the panel; walking off closes it; standing there
+ * gets you the next thing they have to say.
+ *
+ * Two things here are deliberate and neither is obvious:
+ *
+ *  - **What they are told is the two states merged.**  A line's condition may
+ *    ask about the weather (`climate.state`) or about how he is doing
+ *    (`game.state.hearts`, `.found`), and neither object knows the other
+ *    exists.  Merged in place rather than spread fresh, because it is read
+ *    on a frame that is already the busiest one there is.
+ *  - **He keeps a resident once he has one, out to `talk + 0.45`.**  Leaving
+ *    at the same radius he arrived at means a hedgehog snuffling on the spot
+ *    crosses it and the panel blinks out mid-sentence.
+ */
+const _talkState = {};
+let metResident = null;
+let talkIn = 0;
+
+/* One line every this long while he stands there.  Comfortably longer than
+ * the longest line in the cast takes to type itself on (0.018 s a character
+ * plus its punctuation, so about three seconds for the toad's worst), because
+ * `open` replaces what is being said and replacing a line half-read is worse
+ * than a silence. */
+const TALK_GAP = 5.5;
+
+/* The rim of the compass, for a resident's dot.  Twenty metres, not half a
+ * lap: they all live inside one wood, so on the burrow's scale the four of
+ * them collapsed into a single smudge in the middle of the ring and the whole
+ * point of having bearings went with it.  Past this they simply sit on the
+ * rim, which reads as "that way, and a long way" — which is true. */
+const FOLK_FAR = 20;
+
+function speakTo(c, state) {
+  talkIn = TALK_GAP;
+  Object.assign(_talkState, state, { hearts: game.state.hearts, found: game.state.found });
+  dialogue.open(c.name, c.say(_talkState, hog));
+  /* Ticked off on the ring, once, ever.  The toast is the only place the
+   * count is ever spoken out loud — the compass itself stays wordless, which
+   * is the rule the whole thing was built under. */
+  if (game.meet(c.key)) {
+    const left = characters.all.length - game.state.met.length;
+    hud.flash(left
+      ? `met ${c.name} — ${left} more of them out there`
+      : `met ${c.name}. that is all four of them, and the wood knows you now`);
+    if (!left) game.note('everyone');
+  }
+}
+
+function meetResidents(dt, state) {
+  talkIn -= dt;
+  const busy = hog.under || hog.afloat;
+  if (metResident) {
+    if (busy || distance(hog.x, hog.z, metResident.x, metResident.z) > metResident.talk + 0.45) {
+      metResident = null;
+      dialogue.close();
+      return;
+    }
+    // stand and listen and there is more of it
+    if (talkIn <= 0) speakTo(metResident, state);
+    return;
+  }
+  if (busy) return;
+  const near = characters.nearest(hog.x, hog.z);
+  if (near) { metResident = near; speakTo(near, state); }
+}
+
 function frame() {
   /* Armed first, not last.  Re-arming at the end means any exception
    * anywhere in the frame stops the loop permanently — the game freezes and
@@ -609,6 +688,9 @@ function frame() {
   world.update(dt, hog, state);
   weather.update(dt, hog, camera, state);
   critters.update(dt, hog, state);
+  characters.update(dt, hog, state);
+  meetResidents(dt, state);
+  dialogue.update(dt);
   if (hoglet.update(dt, hog, game.state.leg >= 3, acc) === 'arrived') {
     hud.flash(`a hoglet has found him — ${hogletName}, and it will not be left behind`);
     game.note('hoglet');
@@ -746,6 +828,15 @@ function frame() {
          * be on a planet you can walk round, so that is the rim. */
         near: clamp(distance(hog.x, hog.z, bur.x, bur.z) / (CIRC / 2), 0, 1),
       },
+      /* The residents are read off their live positions, not their addresses:
+       * the robin is the one that moves, and a dot that stayed on its perch
+       * while the bird itself hopped along beside you would be the one blip
+       * on the ring you could prove wrong by looking up. */
+      folk: characters.all.map((c) => ({
+        angle: rel(c.x, c.z),
+        near: clamp(distance(hog.x, hog.z, c.x, c.z) / FOLK_FAR, 0, 1),
+        met: game.state.met.includes(c.key),
+      })),
     });
   }
   hud.update(dt);
@@ -755,10 +846,11 @@ function frame() {
 frame();
 
 /* a little exposed for tuning from the console */
-/* `driveHog` is on here for the same reason `__shot` exists: a hidden tab has
- * no rAF, so nothing that only ever runs inside `frame()` can be exercised
- * from a console — and the keys are exactly that. */
-window.__hedgepig = { scene, camera, renderer, pipeline, world, hog, chase, climate, weather, game, sky, sun, fill, hemi, audio, critters, puffs, prints, hoglet, driveHog, THREE };
+/* `driveHog` and `meetResidents` are on here for the same reason `__shot`
+ * exists: a hidden tab has no rAF, so nothing that only ever runs inside
+ * `frame()` can be exercised from a console — and the keys and the
+ * conversation are exactly that. */
+window.__hedgepig = { scene, camera, renderer, pipeline, world, hog, chase, climate, weather, game, sky, sun, fill, hemi, audio, critters, characters, dialogue, hud, puffs, prints, hoglet, driveHog, meetResidents, THREE };
 
 if (import.meta.env?.DEV) {
   /** Dev capture: render one frame at a fixed size and post it to the server. */

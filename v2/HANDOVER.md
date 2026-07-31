@@ -625,6 +625,159 @@ The general point, since this is twice: **a shared cached world makes every
 threshold test order-dependent.** If a scenario measures a rate, it has to
 reset the state that rate depends on, or it is measuring the suite.
 
+### A resident is a destination, and it needs a reach of its own
+
+`world/characters.js` puts four animals in the wood — a badger at his sett, a
+robin, a toad under the deadfall, a wood mouse under the birches — and they
+are the first thing in this world that is **pinned on purpose**. Everything in
+`critters.js` re-homes near him, because a butterfly nobody is standing next to
+may as well not exist; a badger must not, because the whole value of a badger
+is going back to the same badger.
+
+Three things about them are load-bearing:
+
+- **Ranged and culled off *him*, never off the camera** (`SEE = 15`). A
+  character that noticed the camera would notice you from orbit, on the far
+  side of the planet. Same invariant as the grass chunks and the insects.
+- **Reach is per animal.** Every interactable in this world is met at 0.8 m
+  because every interactable stands still. The robin does not — it hops to
+  within 1.15 m of him and keeps that distance by design, so on the shared
+  0.8 m the one character that *comes to you* was the one you could never
+  speak to. `TEMPER.talk` is 1.05 / 1.60 / 0.80 / 0.85, and the harness
+  asserts both halves of it: the robin is reachable at its own distance and
+  is not at an interactable's.
+- **He keeps the resident he has, out to `talk + 0.45`.** Leaving at the
+  radius he arrived at means a hedgehog snuffling on the spot crosses it and
+  the panel blinks out mid-sentence.
+
+The panel itself is `core/dialogue.js`, and it is deliberately dumb: it types,
+it waits, and it never closes itself. What closes it is walking away, Space, or
+the next line. **Space is the hop and the advance both**, and `advance()`
+returns whether it did anything precisely so the key can be swallowed —
+without that, one press finishes the line *and* hops him away from the animal
+saying it.
+
+`speaker()` enforces the two rules the interactables' lines were built on: never
+the same line twice running, and **never two conditional lines back to back**,
+or a character who is asked about a rainy night answers with a second remark
+about the weather and reads as a forecast rather than an animal.
+
+The lines are given the climate's state and the game's merged — `hearts` and
+`found` live in `game.state`, the weather in `climate.state`, neither knows the
+other exists — and **every predicate reads defensively**, because `say` is
+called from inside `frame()` and one exception in a per-frame path has already
+cost this project a whole game.
+
+### A bramble is arching canes, and nothing else about it reads
+
+It was a squashed icosahedron with twenty-six cones stuck through it, which is
+an excellent spiky turtle and not a thorn bush at all. What your eye actually
+names a bramble by is the **arch**: a cane leaves the ground, sweeps up and
+out, and roots again at the tip. Half a dozen of those crossing each other is a
+bramble with no thorns on it; a dome is not one however many spines you add.
+
+Two details that mattered more than the geometry: the thorns hook *backwards*
+down the cane, which is why real ones catch, and they are small — a thorn you
+can count from two metres is a cactus. And `tubeBetween` guards a zero-length
+segment, because two arc samples coincide where the curve flattens at the tip,
+and the NaN goes straight into the baked geometry where only the harness would
+ever find it.
+
+### A ball that does not gather pace downhill is a fast walk with the legs hidden
+
+`rollSpeed()` was `1 + ball` — a tuck worth exactly double, on the flat, up a
+hill and down one alike. With nearly six metres of relief in the world that is
+the wrong answer in the most noticeable possible place.
+
+`hog.momentum` is deliberately **not** a per-frame slope multiplier: it
+accumulates going downhill and bleeds off on the flat and against a rise, so a
+long descent leaves him genuinely quick for a few seconds at the bottom and a
+climb costs him what he gained. That memory is the whole difference between
+rolling and sliding. Drag is higher than gain so it cannot run away, and the cap
+is 1.6× on top of the tuck — fast enough to feel committed to, slow enough that
+4.6 rad/s of steering can still put him where you meant. Standing up spends it:
+the legs are not a wheel.
+
+### A Starship, at actual size, on a planet 300 m round
+
+There is a full Starship stack in the mire — a 71 m booster, a 1.8 m hot-stage
+ring and a 52 m ship, so 123 m of it, beside a 146 m catch tower. Nothing is
+scaled down. The planet's radius is 47.75 m, so the stack is **2.6 planet
+radii** tall and the tower is **3.1**, and it comes up over the horizon from
+the far side of the world like a mast. `places/starbase.js`.
+
+The mire is not an arbitrary address: Starbase stands on a coastal wetland at
+Boca Chica, and the mire is this world's flat wet place at the edge of the
+water. It is the one spot on the planet that is *right*.
+
+Four things had to be got right and every one of them is a rule that will
+apply to the next big thing anybody builds here:
+
+- **Nothing vertical may be bent onto the planet.** `bakeToPlanet` wraps flat
+  geometry round the sphere, which is correct for ground and catastrophic for
+  a rocket: a 123 m cylinder wrapped round a 48 m sphere curls past its own
+  base and comes out the other side. Everything that stands up is in a
+  `planetRigid` group, re-seated whole on the tangent frame at its own foot.
+- **Each standing thing needs its OWN rigid group.** A rigid group stands on
+  one tangent plane, and a tangent plane leaves the sphere by `d²/2R` — 2.1 m
+  at 14 m out. Put the rocket and the tower in one group seventeen metres
+  apart and one of them floats two metres in the air. Every leg, column and
+  tank is also drawn reaching *below* its own datum by that amount (`SINK`),
+  so the outermost feet meet the ground and the innermost are buried. A rigid
+  structure on a small planet either does that or stands on tiptoe.
+- **The apron follows the ground; it does not raise it.** The first version
+  was a plinth clearing the highest terrain under its footprint, and the mire
+  has 0.9 m of wave in it across twenty-six metres — so it stood a metre proud
+  and the hedgepig, whose hop peaks at 0.42 m, could not get onto his own
+  launch site. Grading a pad flat means owning a second source of ground, and
+  §5 says there is exactly one. It is a **skin** now: a radial mesh whose
+  every vertex sits 3 cm over `heightAt`, which is the same trick the mire's
+  own standing pools use eighty lines away. No platform, no step, no hop.
+- **Concrete is hard ground, and hard ground is decided in `plan.js`.** Left
+  out of `hardAt`, the meadow grew straight up through the pad — the grass
+  field takes its cue from that function and from nowhere else. `padAt` is in
+  there now with the town's paving and the road. It is deliberately *not* in
+  `reliefMask`, which is what the town and the road use to grade the terrain
+  flat under themselves: the mire stays a mire under the concrete.
+
+**Above the pad the fog is off.** The world's fog runs 11 m to 40 m — it is a
+*ground haze*, sized to hide the horizon of a small planet from something
+26 cm tall. Left on, everything above about 12 m of this would be solid fog
+colour and the rocket would be a stump. Steel standing 123 m up is above the
+haze, which is also what it looks like in life: distant hills fade, a rocket
+in clear air does not. The apron and the tanks keep their fog, because they
+are down in it with everything else.
+
+**Nothing above the mount casts a shadow.** The shadow camera is ±17 m around
+*him* (§3), and an object poking out of an orthographic shadow frustum does
+not produce a long shadow — it produces a solid black wall across the whole
+map, because everything past the frustum is clamped to its edge. The mount and
+the tanks are inside it and do all the work that can honestly be done.
+
+The whole site is thirteen draw calls: each part is one baked geometry per
+material, and the materials are the shared cached ones, so it adds no shader
+programs at all.
+
+### Residents on the compass, and a scale that is not the burrow's
+
+The four in the wood are red dots on the compass ring — solid until you have
+met them, then a hollow ring with a tick through it. Meeting somebody crosses
+them off rather than deleting them, because a met resident that vanished would
+take "go back and see her again" with it, and going back is the entire point
+of having residents at all.
+
+**Their distance scale is not the burrow's, and that was a real bug.** The
+burrow's dot walks in from the rim against half a lap, because the burrow can
+genuinely be half a lap away. Measured the same way, four animals who all live
+inside one wood landed within eight pixels of the middle and piled into a
+single unreadable smudge on top of him. `FOLK_FAR` is 20 m: at the rim they
+read as "that way, and a long way", and inside it they separate.
+
+Who has been met lives in `game.state.met`, in the save, **not** in
+`characters.js` — the same reasoning as `visited`. The save is one object
+written from one place, and a second thing keeping its own key in
+localStorage is how two saves come to disagree about which run you are on.
+
 ## 5. Things that will bite the next change
 
 - **A pitched roof is `s * +angle`, not `s * -angle`.** Rotating about +x by a

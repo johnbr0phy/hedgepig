@@ -56,6 +56,7 @@ export function createGame({ world, hog, hud, climate, audio = null }) {
     rings: [],                 // where the thistle rings were planted, ever
     flags: {},                 // the journal of firsts
     visited: [],               // place kinds he has stood in, ever
+    met: [],                   // residents he has been up to and spoken with, ever
   };
 
   /* ------------------------------ persistence ------------------------------ *
@@ -72,7 +73,7 @@ export function createGame({ world, hog, hud, climate, audio = null }) {
       store.setItem('hedgepig.save', JSON.stringify({
         leg: state.leg, hearts: state.hearts, walked: hog.walked, found: state.found,
         x: hog.x, z: hog.z, hd: hog.hd,
-        rings: state.rings, flags: state.flags, visited: state.visited,
+        rings: state.rings, flags: state.flags, visited: state.visited, met: state.met,
       }));
     } catch { /* a full or refused store is not worth a crash */ }
   }
@@ -93,6 +94,7 @@ export function createGame({ world, hog, hud, climate, audio = null }) {
         state.rings = Array.isArray(s.rings) ? s.rings : [];
         state.flags = s.flags && typeof s.flags === 'object' ? s.flags : {};
         state.visited = Array.isArray(s.visited) ? s.visited : [];
+        state.met = Array.isArray(s.met) ? s.met : [];
       }
     } catch { /* an unreadable save is a fresh start, not an error */ }
   }
@@ -106,6 +108,23 @@ export function createGame({ world, hog, hud, climate, audio = null }) {
       state.flags[flag] = true;
       save();
     }
+  }
+
+  /**
+   * Tick a resident off.  Returns whether this was the first time, so the
+   * caller can make something of it and say nothing on the other four
+   * hundred visits.
+   *
+   * Kept here rather than in `characters.js` for the reason `visited` is
+   * here: the save is one object written from one place, and a second thing
+   * writing its own key to localStorage is how two saves come to disagree
+   * about which run you are on.
+   */
+  function meet(key) {
+    if (state.met.includes(key)) return false;
+    state.met.push(key);
+    save();
+    return true;
   }
 
   const _q = new THREE.Quaternion();
@@ -871,5 +890,5 @@ export function createGame({ world, hog, hud, climate, audio = null }) {
     readouts(dt);
   }
 
-  return { state, call, sowAt, update, placeBurrow, burrowObj, sown, note };
+  return { state, call, sowAt, update, placeBurrow, burrowObj, sown, note, meet };
 }

@@ -71,6 +71,9 @@ const { createVoiceGate, VOICE } = await import('./src/core/audio.js');
 const { rngKit: rngSeedKit } = await import('./src/core/util.js');
 const rngSeq = (seed) => { const r = rngSeedKit(seed); return () => r.next(); };
 const { createCritters } = await import('./src/world/critters.js');
+const { createCharacters, WOOD_CHARACTERS } = await import('./src/world/characters.js');
+const { createDialogue } = await import('./src/core/dialogue.js');
+const { STACK } = await import('./src/world/places/starbase.js');
 
 /* ------------------------------- reporting ------------------------------- */
 let checks = 0;
@@ -1668,6 +1671,275 @@ function sCritters() {
   ok(c.bflies.filter((b) => b.obj.visible).length === 0, 'while the butterflies have gone to bed');
 }
 
+/* ------------------------------ the residents ----------------------------- *
+ *
+ * The four in the wood are the first thing in this world that is *pinned* on
+ * purpose — a butterfly re-homes near him, a badger does not, because a
+ * badger is a place you go back to.  That makes "can he actually get to
+ * them, and can they actually be spoken to" the whole risk, and it is
+ * exactly the pair of things that came apart for the butterflies: built,
+ * reachable, and never once met.
+ */
+function sCharacters() {
+  const w = makeWorld();
+  const scene = new THREE.Scene();
+  const cast = createCharacters(scene);
+  const hogLike = { x: 0, z: 0, under: false, afloat: null, carry: 0, hearts: 3 };
+  const st = { night: 0, wet: 0, snow: 0, snowFall: 0, w: [0, 1, 0, 0], hearts: 3, found: 0 };
+  const run = (n, dt = 1 / 60) => { for (let i = 0; i < n; i++) cast.update(dt, hogLike, st); };
+  /* Stand him `d` metres off `c`'s own address, in the same east/north frame
+   * on the wood's centre that placed it — `offsetFrom` wants a place centre,
+   * not a flat pair, and going through the frame the cast was built in is
+   * the only way to be sure the two agree. */
+  const stand = (c, d, a = 0) => {
+    const p = plan.offsetFrom(plan.CENTRE[plan.WOOD], c.at.u + Math.cos(a) * d, c.at.v + Math.sin(a) * d);
+    hogLike.x = p.x; hogLike.z = p.z;
+  };
+
+  ok(cast.all.length === 4 && WOOD_CHARACTERS.length === 4,
+    'four of them, and the cast is the data', `${cast.all.length} built`);
+
+  /* **Reachable, not merely placed.**  Every one of them is inside a wood
+   * full of trunks, stumps, bracken and three fallen trees, all of which
+   * carry blockers; a character in the middle of a blocker is a character
+   * you can see and never meet.  So: is there anywhere within talking
+   * distance that he can actually stand? */
+  for (const c of cast.all) {
+    let spots = 0;
+    for (let i = 0; i < 24; i++) {
+      const a = (i / 24) * Math.PI * 2;
+      const p = plan.offsetFrom(plan.CENTRE[plan.WOOD],
+        c.at.u + Math.cos(a) * c.talk * 0.8, c.at.v + Math.sin(a) * c.talk * 0.8);
+      if (w.hog.canStand(p.x, p.z)) spots++;
+    }
+    ok(spots >= 3, `he can get within talking distance of ${c.name}`, `${spots} of 24 bearings`);
+  }
+
+  /* **The robin's reach is not the interactables' reach.**  It keeps 1.15 m
+   * off him by design, so on the 0.8 m every other thing in this world uses,
+   * the one character that comes to you is the one you could never speak to. */
+  const robin = cast.all.find((c) => c.key === 'robin');
+  const badger = cast.all.find((c) => c.key === 'badger');
+  stand(robin, 1.3);
+  run(1);                                   // one tick, so the cull can see him
+  const d0 = plan.distance(hogLike.x, hogLike.z, robin.x, robin.z);
+  ok(d0 > 0.9 && cast.nearest(hogLike.x, hogLike.z) === robin,
+    'the robin can be spoken to from where the robin stands', `${f(d0)} m`);
+  ok(cast.nearest(hogLike.x, hogLike.z, 0.8) === null,
+    'and it could not on the reach an interactable uses');
+
+  /* It comes to him, and stops short: a robin that walks into you is a
+   * pigeon.  It hops, so it arrives in steps and settles inside a band
+   * rather than on a number. */
+  stand(robin, 4.5);
+  run(60 * 20);
+  const off = plan.distance(hogLike.x, hogLike.z, robin.x, robin.z);
+  ok(off > 0.7 && off < 1.7, 'it comes to him and keeps a bird\'s length off', `${f(off)} m`);
+  ok(plan.distance(robin.x, robin.z, robin.home.x, robin.home.z) > 0.3,
+    'which means it left its own spot to do it');
+
+  /* And it does not follow him off the edge of the wood.  `LEASH` is 8 m;
+   * past that the goal reverts to home, and the cull sends it back outright. */
+  const meadow = plan.CENTRE[plan.MEADOW];
+  hogLike.x = meadow.x; hogLike.z = meadow.z;
+  run(60 * 3);
+  ok(!robin.obj.visible && plan.distance(robin.x, robin.z, robin.home.x, robin.home.z) < 0.01,
+    'walk away and it is back on its own perch, and not drawn');
+  ok(cast.all.every((c) => !c.obj.visible), 'and none of them is drawn from the far side of the planet');
+  ok(cast.nearest(hogLike.x, hogLike.z) === null,
+    'nor can anything he cannot see say a word to him');
+
+  /* The toad is the opposite animal and the assertion is the opposite one:
+   * nothing about her may move but her throat. */
+  const toad = cast.all.find((c) => c.key === 'toad');
+  const was = { x: toad.x, z: toad.z };
+  stand(toad, 0.6);
+  run(60 * 30);
+  ok(plan.distance(toad.x, toad.z, was.x, was.z) < 1e-9, 'the toad has not moved a millimetre');
+
+  /* The badger's eyes: the near one opens first and the far one lags a full
+   * second behind it, which is the single detail he exists for. */
+  stand(badger, 8);
+  run(60 * 4);
+  const dozing = badger.parts.eyes[0].scale.y;
+  stand(badger, 1.0);
+  run(30);
+  const opening = badger.parts.eyes[0].scale.y - badger.parts.eyes[1].scale.y;
+  run(60 * 3);
+  ok(badger.parts.eyes[0].scale.y > dozing + 0.3, 'the badger wakes up when he comes over',
+    `${f(dozing)} → ${f(badger.parts.eyes[0].scale.y)}`);
+  ok(opening > 0.1, 'and the other eye takes its time about it', `${f(opening)} apart`);
+
+  let bad = 0, seated = 0;
+  scene.traverse((o) => {
+    if (!o.matrix) return;
+    seated++;
+    if (o.matrix.elements.some((v) => !Number.isFinite(v))) bad++;
+  });
+  ok(bad === 0, 'a minute of residents leaves no non-finite matrix', `${seated} objects checked`);
+
+  /* ------------------------------- the voice ------------------------------ *
+   *
+   * The rules the interactables' lines were built on, asserted on a
+   * character who has forty of them: never the same line twice running, and
+   * never two conditional lines in a row — a character who answers a rainy
+   * night with a second remark about the weather is a weather report. */
+  const summer = { night: 0, wet: 0, snow: 0, w: [0, 1, 0, 0], hearts: 3, found: 0 };
+  const said = [];
+  for (let i = 0; i < 24; i++) said.push(badger.say(summer, hogLike));
+  ok(said.every((l) => l && l.length > 4), 'the badger always has something to say');
+  ok(said.every((l, i) => i === 0 || l !== said[i - 1]), 'and never the same thing twice running');
+  ok(new Set(said).size >= 12, 'and works through what he has', `${new Set(said).size} of 24 distinct`);
+
+  const night = { night: 1, wet: 0.8, snow: 0, w: [0, 1, 0, 0], hearts: 1, found: 0 };
+  const wet = [];
+  for (let i = 0; i < 12; i++) wet.push(badger.say(night, hogLike));
+  ok(wet.some((l) => l.includes('after dark')) && wet.some((l) => l.includes('worms come up')),
+    'a wet night gets the lines a wet night is for');
+  const only = new Set(WOOD_CHARACTERS.find((c) => c.key === 'badger').lines
+    .filter((l) => l.only).map((l) => l.line));
+  ok(wet.every((l, i) => i === 0 || !(only.has(l) && only.has(wet[i - 1]))),
+    'but two of them never land back to back');
+  ok(wet.filter((l) => only.has(l)).length >= 3,
+    'and the conditional ones do get through', `${wet.filter((l) => only.has(l)).length} of 12`);
+
+  /* Every predicate reads defensively, because `say` is called from inside
+   * `frame()` and this project has already lost a whole game to one
+   * exception in a per-frame path. */
+  let threw = null;
+  try {
+    for (const c of cast.all) { c.say(undefined, undefined); c.say({}, {}); }
+  } catch (e) { threw = e; }
+  ok(!threw, 'and a state with nothing in it does not throw', threw ? String(threw.message) : '');
+
+  /* ---------------------------- ticking them off --------------------------- *
+   *
+   * The list of who he has met lives in the game's save and not in
+   * `characters.js`, for the reason `visited` does: the save is one object
+   * written from one place, and a second thing keeping its own key in
+   * localStorage is how two saves come to disagree about which run you are
+   * on.  `meet` returns whether it was news, so the toast fires once and the
+   * other four hundred visits are silent.
+   */
+  const g = w.game;
+  g.state.met.length = 0;
+  ok(g.meet('badger') === true, 'meeting the badger is news, the first time');
+  ok(g.meet('badger') === false, 'and never news again');
+  ok(g.state.met.length === 1, 'and he goes on the list exactly once');
+  for (const c of cast.all) g.meet(c.key);
+  ok(g.state.met.length === 4 && cast.all.every((c) => g.state.met.includes(c.key)),
+    'all four fit on it', g.state.met.join(', '));
+
+  /* ------------------------------ the panel ------------------------------- */
+  const say = createDialogue();
+  ok(say.isOpen() === false, 'the panel starts shut');
+  say.open('the badger', ['you again. good.', 'sit down.']);
+  ok(say.isOpen(), 'and opens when somebody speaks');
+  ok(say.advance() === true, 'space finishes the line that is arriving');
+  ok(say.advance() === true, 'and then moves on to the next one');
+  /* Which is arriving in its turn, so it takes two presses to leave it: the
+   * first completes the line, the second is the one that means "done". */
+  say.advance();
+  ok(say.isOpen(), 'the second line has to finish arriving too');
+  say.advance();
+  ok(say.isOpen() === false, 'and past the last one it shuts');
+  ok(say.advance() === false, 'after which space is the hop again');
+
+  /* Left alone it types itself on and waits — it never closes itself, so a
+   * line cannot vanish while it is being read. */
+  say.open('the toad', 'do not hurry.');
+  for (let i = 0; i < 60 * 6; i++) say.update(1 / 60);
+  ok(say.isOpen(), 'a line left alone stays up');
+  say.close();
+  ok(!say.isOpen(), 'and closes when he walks off');
+  say.open('nobody', '   ');
+  ok(!say.isOpen(), 'and an empty line opens nothing at all');
+}
+
+/* ------------------------------- the launch pad --------------------------- *
+ *
+ * A 123 m rocket on a 47.75 m planet is the one object in this world whose
+ * *size* is the point, so every check here is against a real-world figure or
+ * against the planet — never against the module's own constants, which would
+ * only prove that the file agrees with itself.
+ */
+function sStarbase() {
+  const w = makeWorld();
+  const pad = w.world.out.pad;
+  ok(!!pad && !!pad.stack, 'the pad is built and the world knows where it is');
+
+  /* **Actual size, and the assertion says so in metres.**  Public figures:
+   * a 71 m booster, a 1.8 m hot-stage ring and a ~52 m ship. */
+  ok(Math.abs(STACK - 124.9) < 0.5, 'the stack is a real Starship tall',
+    `${f(STACK, 1)} m — booster 71, ring 1.8, ship 52.1`);
+  ok(STACK > plan.R * 2, 'which is taller than the planet is wide',
+    `${f(STACK, 0)} m against a ${f(plan.R * 2, 0)} m planet`);
+
+  /* **It is not bent.**  `bakeToPlanet` wraps flat geometry round the sphere,
+   * which would curl a 123 m cylinder past its own base and out the far
+   * side.  Measuring the highest vertex from the planet's centre catches
+   * that, and catches a scale slip at the same time: a bent rocket and a
+   * rocket built a tenth of its size both fail this one number. */
+  w.scene.updateMatrixWorld(true);
+  /* Measured on the geometry's own tip, not on a bounding box: an
+   * axis-aligned box round a rocket standing on the side of a sphere has
+   * corners that are nowhere near any part of it, and the first version of
+   * this check failed by 47 m for that reason alone. */
+  const tip = new THREE.Vector3(0, 20 + STACK, 0).applyMatrix4(pad.stack.matrixWorld);
+  const far = tip.distanceTo(planet.CENTER);
+  const want = plan.R + pad.base + 20 + STACK;      // planet + ground + mount + stack
+  ok(Math.abs(far - want) < 2, 'and it stands off the planet at its full height',
+    `tip ${f(far, 1)} m from the centre, wanted ${f(want, 1)}`);
+
+  /* The apron is ground, so it may not become a second source of it: every
+   * vertex of the concrete sits within a hand's breadth of `heightAt`. */
+  const av = pad.apron.geometry.attributes.position;
+  let worst = 0;
+  const _ap = new THREE.Vector3();
+  const _fl = { x: 0, z: 0 };
+  for (let i = 0; i < av.count; i += 5) {
+    _ap.fromBufferAttribute(av, i).sub(planet.CENTER);
+    const h = _ap.length() - plan.R;
+    plan.flatOf(_ap.normalize(), _fl);        // direction back to flat metres
+    worst = Math.max(worst, Math.abs(h - terrain.heightAt(_fl.x, _fl.z)));
+  }
+  ok(worst < 0.45, 'the concrete follows the bog rather than levelling it',
+    `worst vertex ${f(worst)} m off it — and the kerb is deliberately 0.32 down`);
+
+  /* Hard ground, and only where the concrete is.  Get this wrong and the
+   * meadow grows up through a launch pad — which is exactly what the first
+   * version of this did, because `hardAt` had never heard of it. */
+  ok(plan.hardAt(pad.at.x, pad.at.z) > 0.99, 'the concrete is hard ground');
+  const rim = plan.offsetFrom(plan.CENTRE[plan.MIRE], 3, -11 + pad.apronR + 4);
+  ok(plan.hardAt(rim.x, rim.z) < 0.01, 'and four metres past the kerb it is a bog again');
+
+  /* He can get to it, and he cannot get into it.  Both matter: a pad he
+   * cannot walk onto is scenery, and legs he can walk through are paint. */
+  w.put(pad.at.x, pad.at.z);
+  let onDeck = 0;
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * Math.PI * 2;
+    const p = plan.offsetFrom(plan.CENTRE[plan.MIRE],
+      3 + Math.cos(a) * 11.5, -11 + Math.sin(a) * 11.5);
+    if (terrain.walkableAt(p.x, p.z) && !w.world.blockedAt(p.x, p.z)) onDeck++;
+  }
+  ok(onDeck >= 12, 'he can stand on the apron nearly all the way round',
+    `${onDeck} of 16 bearings`);
+  ok(w.world.blockedAt(pad.at.x, pad.at.z), 'and not in among the mount\'s legs');
+
+  /* Nothing of the mire is left under the concrete — the reeds and the
+   * tussocks the place had already scattered there are taken away again. */
+  let inside = 0;
+  w.world.root.traverse((o) => {
+    if (!o.isMesh || o === pad.apron) return;
+    if (o.userData.planetRigid) return;             // the site's own structures
+    const p = o.position;
+    if (p.x === 0 && p.z === 0) return;             // unseated holders and baked merges
+    if (plan.distance(p.x, p.z, pad.at.x, pad.at.z) < pad.apronR - 1) inside++;
+  });
+  ok(inside === 0, 'and nothing of the mire is left growing through it', `${inside} found`);
+}
+
 function sNan() {
   /* v1's harness flagged any non-finite coordinate reaching the canvas, and
    * it is still the cheapest bug-per-line in either build.  The equivalent
@@ -1709,7 +1981,7 @@ const SCENARIOS = {
   plan: sPlan, terrain: sTerrain, planet: sPlanet, clock: sClock,
   open: sOpen, gait: sGait, roll: sRoll, face: sFace, walk: sWalk, idle: sIdle, back: sBack, water: sWater, boat: sBoat,
   road: sRoad, roadmiss: sRoadmiss, abandon: sAbandon,
-  burrow: sBurrow, grass: sGrass, solid: sSolid, persist: sPersist, palette: sPalette, weather: sWeather, sky: sSky, slow: sSlow, merge: sMerge, drive: sDrive, jump: sJump, voice: sVoice, critters: sCritters, nan: sNan,
+  burrow: sBurrow, grass: sGrass, solid: sSolid, persist: sPersist, palette: sPalette, weather: sWeather, sky: sSky, slow: sSlow, merge: sMerge, drive: sDrive, jump: sJump, voice: sVoice, critters: sCritters, characters: sCharacters, starbase: sStarbase, nan: sNan,
 };
 
 const arg = process.argv[2] || 'all';
