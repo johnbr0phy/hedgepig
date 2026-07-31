@@ -174,9 +174,29 @@ function windPatch(mat, u) {
         }
       `
     );
+
+    /* **A blade says it is a blade, in the alpha channel.**
+     *
+     * The ink pass works off a second difference of depth, and a second
+     * difference cannot tell a three-pixel blade from a hedgehog: both are
+     * real silhouettes and both are far over any threshold you can set.
+     * Raising `uSens` from 0.0125 to 0.28 barely touched the meadow and
+     * would have taken the fence posts with it long before it took the
+     * grass.  Size is the discriminator an animator uses — draw the shapes,
+     * suggest the grass — and size is exactly what a screen-space filter
+     * cannot see.
+     *
+     * So the grass writes 0 into the alpha of the colour target, which is
+     * otherwise unused (these are opaque, blending is off, the value lands
+     * verbatim), and the ink reads it as a mask.  Four fewer texture reads
+     * than any of the multi-radius tricks, and it is actually correct. */
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <dithering_fragment>',
+      '#include <dithering_fragment>\n\tgl_FragColor.a = 0.0;'
+    );
   };
   const hex = mat.userData.shadowTint ? mat.userData.shadowTint.value.getHexString() : '0';
-  mat.customProgramCacheKey = () => 'grassWindPush_' + hex;
+  mat.customProgramCacheKey = () => 'grassWindPush2_' + hex;
   return mat;
 }
 

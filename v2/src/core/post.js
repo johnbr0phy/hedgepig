@@ -20,10 +20,23 @@ import { PAL } from './palette.js';
  * the reason is grass.  A meadow puts tens of thousands of tiny silhouettes
  * in every frame, and at the reference's 0.0042 every single blade came
  * back inked: the field read as a scribble and the hedgepig disappeared
- * into it.  At 0.0125 a blade is below the threshold and a hedgehog, a
- * fence post and a barn are all comfortably above it — which is the right
- * division anyway, since an animator inking a meadow draws the shapes and
- * suggests the grass.
+ * into it.  0.0125 was supposed to put a blade below the threshold and leave
+ * a hedgehog, a fence post and a barn above it.
+ *
+ * **It never did, and once the meadow trebled in density it was not close.**
+ * A blade is a real silhouette against ground several metres behind it, so
+ * its second difference is enormous — every bit as large as the hedgehog's.
+ * Sweeping `uSens` from 0.0125 to 0.28 barely thinned the field and would
+ * have taken the fence posts long before it took the grass, because
+ * magnitude is not what separates them.  **Size is**, and size is precisely
+ * what a screen-space depth filter cannot see: an animator inking a meadow
+ * draws the shapes and suggests the grass, and no threshold reproduces that
+ * decision.
+ *
+ * So the grass declares itself instead — `grass.js` writes 0 into the alpha
+ * of the colour target, which nothing else uses — and `uGrassInk` says how
+ * much line a blade is allowed.  The meadow went from a scribble to a
+ * painted field in one line of shader.
  *
  * The distances are the other place this departs from its source.  On a planet
  * of radius 47 m the horizon from a low camera is about 11 m away, so ink
@@ -49,6 +62,10 @@ const INK_SHADER = {
     uFadeEnd: { value: 26.0 },
     uStrength: { value: 1.0 },
     uSkyDepth: { value: 260.0 },
+    /* How much ink a blade of grass is allowed.  See `grass.js`: the meadow
+     * marks itself in the alpha channel because no depth threshold can tell
+     * a blade from a hedgehog. */
+    uGrassInk: { value: 0.20 },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -65,7 +82,7 @@ const INK_SHADER = {
     uniform float uNear, uFar;
     uniform vec3 uInk;
     uniform float uThickness, uSens, uConcave, uConcaveAmount;
-    uniform float uFadeStart, uFadeEnd, uStrength, uSkyDepth;
+    uniform float uFadeStart, uFadeEnd, uStrength, uSkyDepth, uGrassInk;
     varying vec2 vUv;
 
     float linearDepth( vec2 uv ) {
@@ -102,6 +119,10 @@ const INK_SHADER = {
       // let the far field dissolve into haze instead of getting busy
       edge *= 1.0 - smoothstep( uFadeStart, uFadeEnd, dc );
       edge *= uStrength;
+
+      // the meadow suggests itself; it does not get drawn blade by blade
+      float notGrass = texture2D( tDiffuse, vUv ).a;
+      edge *= mix( uGrassInk, 1.0, notGrass );
 
       // ink keeps a whisper of the underlying hue so it never looks pasted on
       vec3 line = mix( uInk, col * 0.42, 0.22 );
