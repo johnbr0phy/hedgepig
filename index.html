@@ -128,7 +128,23 @@ const TAU = Math.PI * 2;
 const clamp = (v,a,b) => v<a?a:v>b?b:v;
 const lerp  = (a,b,t) => a + (b-a)*t;
 const mod   = (a,n) => ((a % n) + n) % n;
-const hsl   = (h,s,l,a) => "hsla("+h.toFixed(1)+","+clamp(s,0,100).toFixed(1)+"%,"+clamp(l,0,100).toFixed(1)+"%,"+(a===undefined?1:a)+")";
+/* Memoised: the game builds thousands of these a second and the strings
+ * were the main per-frame allocation.  The key quantises at the same 0.1
+ * resolution `toFixed(1)` already displayed, so the cached string is the
+ * one the old code would have produced. */
+const hslCache = new Map();
+const hsl = (h,s,l,a) => {
+  const a100 = a === undefined ? 100 : Math.round(a*100);
+  const key = (((Math.round(h*10)+7200)*2048 + Math.round(clamp(s,0,100)*10))*2048
+    + Math.round(clamp(l,0,100)*10))*256 + (a100 & 255);
+  let str = hslCache.get(key);
+  if (str === undefined){
+    str = "hsla("+h.toFixed(1)+","+clamp(s,0,100).toFixed(1)+"%,"+clamp(l,0,100).toFixed(1)+"%,"+(a===undefined?1:a)+")";
+    if (hslCache.size > 24000) hslCache.clear();
+    hslCache.set(key, str);
+  }
+  return str;
+};
 
 function hash2(a,b){
   let h = (Math.imul(a,374761393) + Math.imul(b,668265263)) | 0;
@@ -459,7 +475,7 @@ const SP_GRAIN = sprite(128, (x,s) => {
 let grainPat = null;
 
 /* ───────────────────  distant grass plate (pre-baked)  ───────────── */
-let TILE = null, TW = 0, TH = 1024;
+let TILE = null, TILEV = null, TW = 0, TH = 1024;
 
 function bakeTile(){
   TW = Math.min(1280, Math.ceil((W + 96)/64)*64);
@@ -497,6 +513,14 @@ function bakeTile(){
   ox.globalAlpha = .5;
   ox.drawImage(raw, 0, 0);
   TILE = out;
+  /* And the same tile stacked to the screen's own height, so `drawTile`
+   * blits one tall strip per column instead of two or three tile-height
+   * rows — the same pixels, a third of the drawImage calls. */
+  const rows = Math.ceil(H/TH) + 2;
+  TILEV = document.createElement("canvas");
+  TILEV.width = TW; TILEV.height = rows * TH;
+  const vx = TILEV.getContext("2d");
+  for (let r2 = 0; r2 < rows; r2++) vx.drawImage(out, 0, r2*TH);
 }
 
 function drawTile(camY, alpha){
@@ -504,12 +528,25 @@ function drawTile(camY, alpha){
   const strips = 34, sw = Math.ceil(W/strips) + 2;
   const oy = mod(camY, TH);
   ctx.globalAlpha = alpha;
+  /* One tall blit per strip off the pre-stacked tile — the same pixels the
+   * per-row loop produced, at a third of the drawImage calls.  The stack is
+   * rebuilt lazily if the window has grown past it. */
+  if (TILEV && TILEV.height < H + TH){
+    const rows = Math.ceil(H/TH) + 2;
+    TILEV.height = rows * TH;
+    const vx = TILEV.getContext("2d");
+    for (let r2 = 0; r2 < rows; r2++) vx.drawImage(TILE, 0, r2*TH);
+  }
   for (let i=0;i<strips;i++){
     const dx = i*sw;
     const sway = windAt(dx + sw*.5, camY, 0) * 34;   // same field as the live grass
     const sxp = clamp(dx + 46 + sway, 0, TW - sw);
-    for (let y = -oy; y < H; y += TH){
-      ctx.drawImage(TILE, sxp, 0, sw, TH, dx, y, sw, TH);
+    if (TILEV){
+      ctx.drawImage(TILEV, sxp, oy, sw, H, dx, 0, sw, H);
+    } else {
+      for (let y = -oy; y < H; y += TH){
+        ctx.drawImage(TILE, sxp, 0, sw, TH, dx, y, sw, TH);
+      }
     }
   }
   ctx.globalAlpha = 1;
