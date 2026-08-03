@@ -1187,6 +1187,62 @@ then drives it for free off the same `lit` ramp that warms the bulb above it —
 no per-frame pass, no visibility bookkeeping, and it cannot come on at a
 different hour from the lamp it belongs to.
 
+### A gesture translated from a keyboard, onto a finger that also sows
+
+"It was unplayable on a phone" above got the stick right and got the roll
+wrong, and the reason is worth more than the fix: **the touch layer was
+written as a translation of the keys rather than as its own interface.** Every
+verb was mapped across one at a time, and anything with no key to map from was
+simply not there.
+
+Three things came out of that, and all three were the same mistake.
+
+**The roll was on double-tap-and-hold, which cannot work on glass.** That *is*
+the keys' gesture, and on the keys it is unambiguous, because <kbd>W</kbd> is
+not also the sow button. On a phone the same finger in the same place does
+both. So the arming tap was indistinguishable from a sow, every tap armed a
+roll, and whether he set off as a hedgehog or as a ball came down to how
+quickly you started walking after planting a flower — under `DOUBLE_MS`, he
+tucked. Half the taps in this game are followed by a walk. Nothing in the code
+looked wrong; both halves were doing exactly what they said.
+
+It is a **distance** now, not a timing: out past the ring and he rolls, back
+inside and he unfurls. That is worth stating as a rule, because it is not
+about hedgehogs — *on a touch screen, a gesture separated from another gesture
+only by time is a coin flip, and one separated by distance is a decision.* And
+a distance can be **drawn**, which a timing cannot: the dashed ring under the
+thumb is the whole of the documentation for the feature.
+
+The two thresholds are deliberately different — out at 84 px, back at 58. A
+single boundary sitting under a thumb that is never quite still flickers him
+in and out of a ball several times a second, and a roll that flickers is worse
+than no roll.
+
+**Four verbs had no way in at all.** The whole planet, the sound, photo mode
+and the journal were on <kbd>P</kbd> <kbd>M</kbd> <kbd>C</kbd> <kbd>J</kbd>,
+which on a phone is nowhere — and the planet view is one of the best things
+here. They were unreachable because the only way to reach them was four
+`if (e.code === ...)` lines buried in a keyboard handler, so there was nothing
+for a button to call. They are functions in `main.js` now and the menu calls
+the same ones the keys do. **A verb reachable two ways must be one piece of
+code**, or the second way quietly stops matching the first.
+
+**And nothing said any of it.** `#keys` is hidden below 820 px — correctly, it
+is a lie there — and nothing replaced it, so a phone got one button marked
+"hop" and no hint that half the glass was a stick. There is a card on the
+first touch now, and `⋯ · how to play` brings it back.
+
+Two smaller things the phone found on the way:
+
+- **Photo mode had no exit on a touch screen.** `body.photo` hides the panels
+  *and* the thumb controls, and the only way back was <kbd>C</kbd>. One pill
+  survives the class now, at a third opacity.
+- **A phone on its side was not a small screen.** The layout query asked
+  `max-width: 820px`, and a landscape phone is 844 px wide — so it took the
+  desktop layout on a screen with 390 px of height, with "climb aboard" at
+  11.4 rem from the bottom, which is nearly half way up it. Height is the
+  scarce dimension in landscape and it now gets a test of its own.
+
 ## 5. Things that will bite the next change
 
 - **A pitched roof is `s * +angle`, not `s * -angle`.** Rotating about +x by a

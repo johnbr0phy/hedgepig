@@ -134,11 +134,25 @@ const mission = createMission({
  * the whole world is built on — so left running they would all have followed
  * him there and gone on being a robin in a butterscotch sky. */
 /* Thumbs.  Built lazily on the first real touch, so a laptop with a
- * touchscreen gets the buttons only once somebody uses their hands. */
+ * touchscreen gets the buttons only once somebody uses their hands.
+ *
+ * **The menu is declared here and drawn there.**  Seeing the whole planet,
+ * the sound and photo mode are *this* file's verbs — they reach into the
+ * camera, the audio and the body class — and `touch.js` has no business
+ * knowing what any of them do.  It knows there are some pills and what they
+ * are called.  Each one is the same function the key calls, so the two ways
+ * in cannot drift apart, which is exactly how the keyboard legend came to be
+ * describing a game nobody with a phone was playing. */
 const touch = createTouch({
   canvas, chase,
   onHop: () => { if (!mission.active) hog.jump(); },
   onAct: () => tryBoard(),
+  menu: [
+    { label: 'the whole planet', run: () => togglePlanet() },
+    { label: 'sound', run: () => toggleSound() },
+    { label: 'photo', run: () => togglePhoto() },
+    { label: 'the journal', run: () => openJournal() },
+  ],
 });
 
 mission.leaveBehind(
@@ -328,6 +342,56 @@ function setPlanetView(on) {
   sky.setOrbit(on);
 }
 
+/* ------------------------------- the verbs -------------------------------- *
+ *
+ * Four things that were only ever on a key, and are now also on the thumb
+ * menu.  They are functions rather than four lines inside the `keydown`
+ * handler for one reason: **a verb reachable two ways must be one piece of
+ * code**, or the second way slowly stops matching the first.  The whole
+ * reason a phone could not see the planet is that the only way to was a
+ * `if (e.code === 'KeyP')` buried in a keyboard handler.
+ */
+function togglePlanet() {
+  setPlanetView(!planetView);
+  /* The keyboard is told which key brings it back.  A thumb is not, because
+   * there is no key, and the menu it came from is still where it was. */
+  hud.flash(planetView
+    ? (touch.touching ? 'the whole of it' : 'the whole of it · P to come back down')
+    : 'back in the grass');
+}
+
+function toggleSound() {
+  const m = audio.toggleMute();
+  hud.flash(m === 'on' ? 'sound on' : m === 'quiet' ? 'just the weather' : 'sound off');
+}
+
+function togglePhoto() {
+  const on = document.body.classList.toggle('photo');
+  if (!on) hud.flash('back to the panels');
+}
+
+const JOURNAL_LABELS = {
+  thistle: 'found a golden thistle',
+  berries: 'ate three autumn berries at once',
+  hoglet: 'a hoglet found him',
+  hoglet2: 'and then another one',
+  boat: 'rode the boat across the lake',
+  culvert: 'went under the road',
+  rainbow: 'stood beneath a rainbow',
+  storm: 'weathered a storm',
+  winter: 'stood out in deep snow',
+  owl: 'heard the owl in the wood',
+  slept: 'slept a whole night in a burrow',
+  everywhere: 'stood in every place there is',
+  everyone: 'met everyone who lives in the wood',
+};
+
+function openJournal() {
+  hud.toggleJournal(
+    Object.keys(game.state.flags).map((k) => JOURNAL_LABELS[k]).filter(Boolean),
+  );
+}
+
 /* --------------------------------- input --------------------------------- */
 window.addEventListener('keyup', (e) => {
   const d = DRIVE_KEYS[e.code];
@@ -369,39 +433,13 @@ window.addEventListener('keydown', (e) => {
    * -into-it trigger: everything else in this world happens by being near it,
    * and leaving the planet is the one thing that should take a decision. */
   if (e.code === 'KeyE') tryBoard();
-  if (e.code === 'KeyP') {
-    setPlanetView(!planetView);
-    hud.flash(planetView ? 'the whole of it · P to come back down' : 'back in the grass');
-  }
+  if (e.code === 'KeyP') togglePlanet();
   // two quiet toggles, for seeing what the ink and the grade actually do
   if (e.code === 'KeyO') pipeline.enabled.ink = !pipeline.enabled.ink;
   if (e.code === 'KeyG') pipeline.enabled.grade = !pipeline.enabled.grade;
-  if (e.code === 'KeyM') {
-    const m = audio.toggleMute();
-    hud.flash(m === 'on' ? 'sound on' : m === 'quiet' ? 'just the weather' : 'sound off');
-  }
-  if (e.code === 'KeyC') {
-    const on = document.body.classList.toggle('photo');
-    if (!on) hud.flash('back to the panels');
-  }
-  if (e.code === 'KeyJ') {
-    const LABELS = {
-      thistle: 'found a golden thistle',
-      berries: 'ate three autumn berries at once',
-      hoglet: 'a hoglet found him',
-      hoglet2: 'and then another one',
-      boat: 'rode the boat across the lake',
-      culvert: 'went under the road',
-      rainbow: 'stood beneath a rainbow',
-      storm: 'weathered a storm',
-      winter: 'stood out in deep snow',
-      owl: 'heard the owl in the wood',
-      slept: 'slept a whole night in a burrow',
-      everywhere: 'stood in every place there is',
-      everyone: 'met everyone who lives in the wood',
-    };
-    hud.toggleJournal(Object.keys(game.state.flags).map((k) => LABELS[k]).filter(Boolean));
-  }
+  if (e.code === 'KeyM') toggleSound();
+  if (e.code === 'KeyC') togglePhoto();
+  if (e.code === 'KeyJ') openJournal();
   if (e.code === 'KeyN') {
     /* `N` names whichever hoglet is out there — the first until the second
      * arrives, and then the second, because the one you just met is the one
@@ -969,7 +1007,7 @@ frame();
  * exists: a hidden tab has no rAF, so nothing that only ever runs inside
  * `frame()` can be exercised from a console — and the keys and the
  * conversation are exactly that. */
-window.__hedgepig = { scene, camera, renderer, pipeline, world, hog, chase, climate, weather, game, sky, sun, fill, hemi, audio, critters, characters, dialogue, hud, puffs, prints, hoglet, mission, driveHog, meetResidents, THREE };
+window.__hedgepig = { scene, camera, renderer, pipeline, world, hog, chase, climate, weather, game, sky, sun, fill, hemi, audio, critters, characters, dialogue, hud, touch, puffs, prints, hoglet, mission, driveHog, meetResidents, THREE };
 
 if (import.meta.env?.DEV) {
   /** Dev capture: render one frame at a fixed size and post it to the server. */

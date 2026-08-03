@@ -36,3 +36,9 @@ v1 (the root):
 
 v2 walks him on the keys instead: **WASD** to move, **double-tap a direction**
 to roll, and the click is left for sowing.
+
+On a phone v2 is thumbs: the left half of the glass is a stick that appears
+wherever you put your thumb down, and **pushing it out past its ring rolls
+him**; the right half looks and pinches; a tap anywhere still calls him and
+sows. The ⋯ button under the compass holds the four things that were only ever
+on keys — the whole planet, the sound, photo mode and the journal.

@@ -161,17 +161,29 @@ last run did *not* touch.
 
 ### Mobile
 
-1. **Nothing has been tried on a real phone.** The touch layer was built and
-   asserted against synthetic pointer events in a resized desktop Chrome,
-   which proves the geometry and proves nothing about frame rate, thermal
-   throttling, or what iOS Safari does with `env(safe-area-inset-*)` and a
-   full-screen canvas. `pixelBudget` caps resolution at 4.6 M px and has
-   never been measured on hardware that needed it.
-2. **The forty-two second flight cannot be skipped on a phone either.** It is
-   the one place a touch player is stuck, and there is no button for it.
-3. **You cannot look and walk at once.** One thumb drives, the other looks;
-   there is no way to do both with one hand, which is fine for a hedgehog and
-   would not be for anything with a hazard that chases.
+1. **Nothing has been tried on a real phone.** Still true, and now the top of
+   this list twice over. The touch layer has only ever been asserted against
+   synthetic pointer events in a headless Chromium — most recently at **4 fps
+   under swiftshader**, which proves geometry and proves nothing about frame
+   rate, thermal throttling, or what iOS Safari does with
+   `env(safe-area-inset-*)` and a full-screen canvas. `pixelBudget` caps
+   resolution at 4.6 M px and has never been measured on hardware that needed
+   it. The 2026-08-03 run replaced the last *timed* gesture in the touch layer
+   with a distance partly because 4 fps cannot test a timing at all.
+2. **The forty-two second flight cannot be skipped on any input.** Not a
+   controls gap — there is no skip on the keyboard either — but it is still
+   the one place a phone player is stuck, and a phone is where a
+   forty-two-second cutscene is least welcome. Wants a decision about whether
+   it is skippable at all, not a button bolted on.
+3. **You cannot look and walk at once with one hand.** One thumb drives, the
+   other looks. Fine for a hedgehog, and it would not be for anything with a
+   hazard that chases.
+4. **The `⋯` menu will not survive another item.** Five pills is the most that
+   column can hold above the bottom of a landscape phone; a sixth wants a
+   different shape, not a smaller font.
+
+~~The roll gesture, the four keyboard-only verbs, and nothing on screen
+telling a phone player anything~~ — done 2026-08-03, see the run log.
 
 ### Debt and harness
 
@@ -486,3 +498,39 @@ Newest last. One line each: date, workstream, what landed, what the sweep found.
   one lamp post and nothing else — and that is now a content gap rather than
   a road running through it. The mire, hen run and farmyard still read as one
   brown wash at ground level.
+- **2026-08-03 — the thumbs again (interactive session).** 275/275, build
+  green. Reported plainly: *"the controls on mobile are really hard to use."*
+  The stick from 2026-07-31 was sound; everything around it was **a
+  translation of the keyboard rather than an interface**, and that produced
+  three faults with one cause.
+  **The roll could not work.** It was double-tap-and-hold, which is the keys'
+  gesture, and on the keys it is unambiguous because <kbd>W</kbd> is not also
+  the sow button — on glass the same finger in the same place does both. So
+  every tap armed a roll, and a walk begun within `DOUBLE_MS` of planting a
+  flower set him off as a ball. It is a **distance** now: out past a dashed
+  ring at 84 px he tucks, back inside 58 he unfurls. Two thresholds, because
+  one boundary under a thumb that is never still flickers him in and out of a
+  ball. And a distance can be *drawn*, which a timing cannot — the ring is
+  the whole of the documentation.
+  **Four verbs had no way in at all**: the whole planet, the sound, photo
+  mode and the journal, all on keys, all unreachable, because the only code
+  that reached them was four `if (e.code === ...)` lines inside a keyboard
+  handler. They are named functions in `main.js` now, and the `⋯` menu under
+  the compass calls the same ones the keys do.
+  **And nothing said any of it** — `#keys` is hidden below 820 px and nothing
+  replaced it, so a phone got one button marked "hop". A card on the first
+  touch, and `how to play` to bring it back.
+  Two more the phone turned up: **photo mode had no exit on a touch screen**
+  (`body.photo` hides the thumb controls and only <kbd>C</kbd> came back —
+  one pill survives it now), and **a phone on its side was not a small
+  screen**, because a landscape phone is 844 px wide and the layout query
+  asked `max-width: 820px`. Height gets its own test now, and the two thumb
+  buttons sit side by side instead of stacked 11 rem up a 390 px screen.
+  **Sweep found / still open:** still nothing has run on a real device — this
+  was headless Chromium at 4 fps under swiftshader, which is fine for
+  geometry and useless for timing, and it is exactly why every *timed*
+  gesture here should be viewed with suspicion. The forty-two second flight
+  still cannot be skipped, on any input; that is a pacing decision rather
+  than a controls one, and it is still the one place a phone player is stuck.
+  One-handed play is still impossible by construction: one thumb drives and
+  the other looks.

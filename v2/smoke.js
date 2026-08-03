@@ -75,7 +75,7 @@ const { createCharacters, WOOD_CHARACTERS } = await import('./src/world/characte
 const { createDialogue } = await import('./src/core/dialogue.js');
 const { createHud } = await import('./src/core/hud.js');
 const { createMission } = await import('./src/game/mission.js');
-const { createTouch } = await import('./src/core/touch.js');
+const { createTouch, TOUCH_CSS } = await import('./src/core/touch.js');
 const { STACK } = await import('./src/world/places/starbase.js');
 
 /* ------------------------------- reporting ------------------------------- */
@@ -2301,30 +2301,51 @@ function sTouch() {
   a.send('pointerup', finger(340, 0));
   ok(a.t.drive() === null, 'lifting off stops him');
 
-  /* ---------------------------- double tap rolls --------------------------- *
-   * The same gesture the keys use: two taps, the second one held.  The first
-   * has already set him walking, so the second is an upgrade rather than a
-   * fresh start, which is why it feels immediate. */
+  /* --------------------- pushing past the ring rolls him -------------------- *
+   *
+   * This used to be double-tap-and-hold, which is the keys' gesture, and on
+   * the keys it is unambiguous — W is not also the sow button.  Here the same
+   * finger in the same place does both, so **every tap armed a roll**, and
+   * the roll then depended on how fast you started walking afterwards.  It is
+   * a distance now: out past the ring and he tucks, back inside and he
+   * unfurls.  Nothing is timed and nothing is guessed.
+   *
+   * The two thresholds are deliberately different.  A single boundary sitting
+   * under a thumb that is never quite still flickers him in and out of a ball
+   * several times a second, and a roll that flickers is worse than no roll.
+   */
   const b = make();
   b.send('pointerdown', finger(300, 400));
-  b.send('pointermove', finger(300, 340));
-  ok(b.t.drive().roll === false, 'one tap and a push is a walk');
-  b.send('pointerup', finger(300, 340));
-  b.send('pointerdown', finger(300, 400));
-  b.send('pointermove', finger(300, 340));
-  ok(b.t.drive().roll === true, 'two taps and a push is a roll');
-  b.send('pointerup', finger(300, 340));
+  b.send('pointermove', finger(300, 400 - 70));       // past the walk ring, inside the run one
+  let r = b.t.drive();
+  ok(r.roll === false && r.throttle > 0.99,
+    'a full push is a walk, not yet a roll', `throttle ${f(r.throttle)}`);
+  b.send('pointermove', finger(300, 400 - 90));       // out past the dashed ring
+  ok(b.t.drive().roll === true, 'and pushing past the ring rolls him');
+  b.send('pointermove', finger(300, 400 - 70));       // back into the gap between them
+  ok(b.t.drive().roll === true, 'a thumb wobbling on the line stays rolling');
+  b.send('pointermove', finger(300, 400 - 50));       // inside the walk ring
+  ok(b.t.drive().roll === false, 'and coming back inside unfurls him');
+  b.send('pointerup', finger(300, 400 - 50));
 
-  /* And a slow second tap is not a double.  Without a window on it, every
-   * separate walk after the first would come out as a roll. */
+  /* **A sow-tap followed by an ordinary walk is an ordinary walk.**  This is
+   * the bug the old gesture could not not have: tap to put a flower down,
+   * start walking within a third of a second, and he set off as a ball.  Half
+   * the taps in this game are followed by a walk. */
   const c = make();
   c.send('pointerdown', finger(300, 400));
-  c.send('pointerup', finger(300, 400));
-  const t0 = Date.now();
-  while (Date.now() - t0 < 420) { /* longer than the double-tap window */ }
+  c.send('pointerup', finger(300, 400));              // a sow, right now
   c.send('pointerdown', finger(300, 400));
-  c.send('pointermove', finger(300, 340));
-  ok(c.t.drive().roll === false, 'but two taps a moment apart are two walks');
+  c.send('pointermove', finger(300, 400 - 60));       // and straight into a walk
+  ok(c.t.drive().roll === false, 'a walk begun the instant after a sow is still a walk');
+
+  /* The stick follows the thumb past `STICK_MAX`, and the roll has to survive
+   * being carried: the whole point of the follow is that a long walk does not
+   * change what the stick is asking for. */
+  const e = make();
+  e.send('pointerdown', finger(300, 400));
+  e.send('pointermove', finger(300, 400 - 400));
+  ok(e.t.drive().roll === true, 'and a thumb dragged right off the stick keeps rolling');
 
   /* **A tap on the stick's side still sows.**  The stick claimed the whole
    * left half of the screen and took the tap that puts a flower down with
@@ -2342,6 +2363,39 @@ function sTouch() {
 
   /* The buttons are the other half of what was keyboard-only. */
   ok(a.acted.length === 0, 'nothing fires on its own');
+
+  /* ------------------------- the stylesheet is whole ------------------------ *
+   *
+   * `touch.js` keeps its whole stylesheet in one template literal, and a stray
+   * back-quote in a comment inside it ends the string mid-rule.  An odd number
+   * of them is a syntax error and this import would fail, which is loud.  **An
+   * even number closes and reopens the string**, and every rule after it is
+   * silently dropped — which has now happened twice in this project, once in
+   * `sky.js`'s shader and once here, and neither looked like anything but "the
+   * controls are wrong on a phone".
+   *
+   * Node builds no DOM, so this cannot be rendered.  It can be read: every id
+   * the module creates must still be styled, and the braces must balance.
+   */
+  const NEEDED = ['#hg-stick', '#hg-walk', '#hg-nub', '#hg-hop', '#hg-act',
+    '#hg-more', '#hg-menu', '#hg-tray', '#hg-help', '#hg-done', 'body.touch #keys'];
+  const missing = NEEDED.filter((sel) => !TOUCH_CSS.includes(sel));
+  ok(missing.length === 0, 'every control the module builds is still styled',
+    missing.length ? `missing ${missing.join(' ')}` : `${NEEDED.length} selectors`);
+
+  let depth = 0, floor = 0;
+  for (const ch of TOUCH_CSS) {
+    if (ch === '{') depth++;
+    else if (ch === '}') { depth--; floor = Math.min(floor, depth); }
+  }
+  ok(depth === 0 && floor === 0, 'and the stylesheet is not truncated mid-rule',
+    `braces close at ${depth}`);
+
+  /* The tray's pills each declare `pointer-events: auto`, which a parent set
+   * to `none` does not override — so the closed tray has to be hidden by
+   * `visibility`, or there are five invisible buttons in the corner. */
+  ok(/#hg-tray\s*\{[^}]*visibility:\s*hidden/.test(TOUCH_CSS),
+    'and a closed menu tray is hidden, not merely transparent');
 }
 
 function sNan() {

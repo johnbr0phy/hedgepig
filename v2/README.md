@@ -23,14 +23,35 @@ thing about v1 worth refusing to give up.
 
 ## Controls
 
-| | |
+| keys | |
 |---|---|
-| click / tap | call him there — and sow whatever the place and the season give you |
-| drag | move the camera; it never turns him |
-| scroll / pinch | close in on him |
-| <kbd>space</kbd> | he stops where he is |
-| <kbd>P</kbd> | see the whole planet from outside |
+| <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> | walk him, relative to the camera |
+| double-tap a direction | and he rolls, twice as fast, for as long as you hold it |
+| click | call him there — and sow whatever the place and the season give you |
+| drag · scroll | move the camera, and close in; it never turns him |
+| <kbd>space</kbd> | he hops — or takes the next line, if somebody is talking |
+| <kbd>esc</kbd> | he stops where he is |
+| <kbd>E</kbd> | climb aboard, at the ship |
+| <kbd>P</kbd> · <kbd>M</kbd> · <kbd>C</kbd> · <kbd>J</kbd> | the whole planet · sound · photo · the journal |
 | <kbd>O</kbd> / <kbd>G</kbd> | ink pass and colour grade off, for seeing what they do |
+
+**On a phone it is thumbs**, and the two halves of the glass do different
+things — the split is decided when your finger lands and never revisited, so a
+walk that drags across the middle stays a walk.
+
+| thumbs | |
+|---|---|
+| left half | a stick, wherever you put your thumb down: drag to walk him |
+| — push past its ring | and he rolls. Coming back inside unfurls him |
+| right half | drag to look, pinch to close in |
+| tap, either half | call him there, and sow |
+| hop | the button, bottom right |
+| ⋯ | the whole planet · sound · photo · the journal · how to play |
+
+The roll is a **distance** on the glass and a double-tap on the keys, and that
+difference is deliberate: on a keyboard <kbd>W</kbd> is not also the sow
+button, and on a phone the same finger in the same place is. See the head of
+`src/core/touch.js` for what that cost.
 
 ## The shape of it
 

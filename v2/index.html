@@ -105,8 +105,16 @@
 
          This is in here rather than with the touch controls because it is a
          consequence of how wide the SCREEN is, not of what is pointing at it:
-         a narrow desktop window has the same problem and no thumbs. */
-      @media (max-width: 820px) {
+         a narrow desktop window has the same problem and no thumbs.
+
+         **A phone on its side is a small screen too**, and it was missing all
+         of this.  Turn one sideways and it is 844 x 390 — wider than the
+         820 px the query asked for, so the desktop layout came back on a
+         screen with barely a third of the height to put it in: the compass at
+         its full size, the panels at their full size, and a keyboard legend
+         that only the `body.touch` rule was hiding.  Height is the scarce
+         dimension in landscape, so it gets a test of its own. */
+      @media (max-width: 820px), (max-height: 520px) {
         #keys { display: none; }
         .panel { font-size: 0.76rem; padding: 0.34rem 0.56rem; border-radius: 0.75rem; }
         #hearts {
@@ -135,6 +143,18 @@
         #prompt { bottom: 20rem !important; }
         #start h1 { font-size: 1.5rem; }
         #start p { font-size: 0.82rem; padding: 0 1.2rem; }
+      }
+
+      /* Sideways, there is no room to stack anything.  The two thumb buttons
+         go side by side instead of one above the other (see `touch.js`), and
+         the two messages have to clear them along the bottom rather than by
+         sitting above them — at 390 px tall, "above the buttons" is the sky. */
+      @media (max-height: 520px) {
+        #clock { top: calc(2.6rem + env(safe-area-inset-top)); }
+        #compass canvas { width: 46px; height: 46px; }
+        #toast { bottom: 0.6rem; max-width: 54vw; }
+        #prompt { bottom: 4.6rem !important; }
+        #start p:nth-of-type(2) { display: none; }
       }
 
       /* The title card doubles as the click that starts the audio context and
